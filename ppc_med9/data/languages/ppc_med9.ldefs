@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<language_definitions>
+  <language processor="PowerPC"
+            endian="big"
+            size="32"
+            variant="med9"
+            version="1.0"
+            slafile="ppc_32_be.sla"
+            processorspec="ppc_med9.pspec"
+            manualindexfile="../manuals/PowerPC.idx"
+            id="PowerPC:BE:32:med9">
+    <description>PowerPC 32-bit big endian MED9 ECU</description>
+    <compiler name="default" spec="ppc_32_be.cspec" id="default"/>
+  </language>
+</language_definitions>

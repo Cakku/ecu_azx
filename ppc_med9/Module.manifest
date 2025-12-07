@@ -1,0 +1,7 @@
+Manifest-Version: 1.0
+Extension-Name: ppc_med9_extension
+Module-Name: ppc_med9
+Module-Type: PROCESSOR
+Description: Processor extension for MED9 PPC ECU using custom memory map
+Version: 1.0
+Author: YourName
