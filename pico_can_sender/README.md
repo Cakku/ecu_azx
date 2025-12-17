@@ -74,22 +74,19 @@ The easiest way is to use the official **Raspberry Pi Pico VS Code Extension** o
 4.  The output `.uf2` file will be generated in `build/`.
 
 ### Option B: Command Line (Build for Pico 2)
-1.  Open "Pico - Developer Command Prompt" (installed by the installer) or your standard terminal if paths are set.
-2.  Navigate to the `build` folder:
-    ```bash
-    mkdir build
-    cd build
-    ```
-3.  Configure CMake specifically for **Pico 2** (`rp2350`):
-    ```bash
-    cmake -DPICO_BOARD=pico2 -DPICO_PLATFORM=rp2350-arm-s ..
-    ```
-    *(Note: `-DPICO_BOARD=pico2` is usually sufficient for standard Pico 2)*
-4.  Compile:
-    ```bash
-    ninja
-    # or 'make' if using MinGW Makefiles
-    ```
+
+    # Config
+    # If the build folder was created with a bad cache, you MUST remove it first:
+    Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
+
+    # Configure (using explicit paths to avoid variable expansion issues)
+    & "C:\Users\Cakku\.pico-sdk\cmake\v3.31.5\bin\cmake.exe" `
+        -DPICO_SDK_PATH="C:/Users/Cakku/.pico-sdk/sdk/2.2.0" `
+        -DCMAKE_MAKE_PROGRAM="C:\Users\Cakku\.pico-sdk\ninja\v1.12.1\ninja.exe" `
+        -G "Ninja" -S . -B build
+
+    # Build
+    & "C:\Users\Cakku\.pico-sdk\cmake\v3.31.5\bin\cmake.exe" --build build
 
 ---
 
