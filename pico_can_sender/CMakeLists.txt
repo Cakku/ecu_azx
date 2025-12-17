@@ -33,7 +33,7 @@ include(FetchContent)
 FetchContent_Declare(
     pico_mcp2515
     GIT_REPOSITORY https://github.com/adamczykpiotr/pico-mcp2515.git
-    GIT_TAG        master
+    GIT_TAG        main
 )
 FetchContent_MakeAvailable(pico_mcp2515)
 
@@ -43,7 +43,7 @@ FetchContent_MakeAvailable(pico_mcp2515)
 FetchContent_Declare(
     pico_ssd1306
     GIT_REPOSITORY https://github.com/daschr/pico-ssd1306.git
-    GIT_TAG        master
+    GIT_TAG        main
 )
 FetchContent_MakeAvailable(pico_ssd1306)
 
