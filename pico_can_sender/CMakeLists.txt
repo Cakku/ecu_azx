@@ -30,22 +30,16 @@ include(FetchContent)
 # -------------------------------------------------------------
 # Library: pico-mcp2515 (CAN)
 # -------------------------------------------------------------
-FetchContent_Declare(
-    pico_mcp2515
-    GIT_REPOSITORY https://github.com/adamczykpiotr/pico-mcp2515.git
-    GIT_TAG        main
+add_library(pico_mcp2515
+    lib/pico-mcp2515/include/mcp2515/mcp2515.cpp
 )
-FetchContent_MakeAvailable(pico_mcp2515)
+target_include_directories(pico_mcp2515 PUBLIC lib/pico-mcp2515/include)
+target_link_libraries(pico_mcp2515 pico_stdlib hardware_spi)
 
 # -------------------------------------------------------------
-# Library: pico-ssd1306 (OLED)
+# Library: Harbys/pico-ssd1306 (OLED)
 # -------------------------------------------------------------
-FetchContent_Declare(
-    pico_ssd1306
-    GIT_REPOSITORY https://github.com/daschr/pico-ssd1306.git
-    GIT_TAG        main
-)
-FetchContent_MakeAvailable(pico_ssd1306)
+add_subdirectory(lib/harbys-ssd1306)
 
 # -------------------------------------------------------------
 # Executable

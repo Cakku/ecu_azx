@@ -1,5 +1,5 @@
 #include "can_hw.h"
-#include "mcp2515.h" // Verify this path during build
+#include "mcp2515/mcp2515.h" // Vendor lib path
 #include "pico/stdlib.h"
 
 // Pin definitions

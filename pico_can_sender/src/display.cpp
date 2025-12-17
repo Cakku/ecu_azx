@@ -1,11 +1,13 @@
 #include "display.h"
 #include "hardware/i2c.h"
 #include "pico/stdlib.h"
+#include <cstdio>
 
-
-// Include likely path for default ssd1306 library
-// If this fails, we will adjust.
+// Harbys library includes
+#include "shapeRenderer/ShapeRenderer.h"
 #include "ssd1306.h"
+#include "textRenderer/TextRenderer.h"
+
 
 // I2C Pin definitions
 #define DISP_I2C_PORT i2c0
@@ -16,8 +18,6 @@
 #define DISP_HEIGHT 64
 
 // Create the display object
-// Note: Depending on the specific library header, the namespace might be
-// different. daschr/pico-ssd1306 uses `pico_ssd1306` namespace typically.
 pico_ssd1306::SSD1306 display(DISP_I2C_PORT, DISP_ADDR,
                               pico_ssd1306::Size::W128xH64);
 
@@ -30,41 +30,50 @@ void display_init(void) {
   gpio_pull_up(DISP_SCL_PIN);
 
   // Display Init
-  display.setOrientation(0); // landscape
-                             // display.invertDisplay(); // Optional
+  display.setOrientation(false); // 0 = false (not flipped)
+  display.turnOn();
 }
 
 void display_update(uint8_t pot_val, bool can_status) {
   display.clear();
 
   // Header
-  display.drawText(0, 0, "CAN Sender");
+  pico_ssd1306::drawText(&display, font_8x8, "CAN Sender", 0, 0);
 
   // Status
   if (can_status) {
-    display.drawText(80, 0, "OK");
+    pico_ssd1306::drawText(&display, font_8x8, "OK", 80, 0);
   } else {
-    display.drawText(80, 0, "ERR");
+    pico_ssd1306::drawText(&display, font_8x8, "ERR", 80, 0);
   }
 
   // CAN ID Info
-  display.drawText(0, 16, "ID: 0x123");
+  pico_ssd1306::drawText(&display, font_8x8, "ID: 0x123", 0, 16);
 
   // Value Text
   char buf[16];
   sprintf(buf, "Val: %d%%", pot_val);
-  display.drawText(0, 32, buf);
+  pico_ssd1306::drawText(&display, font_8x8, buf, 0, 32);
 
   // Gauge Bar
-  // Draw frame
-  display.drawRect(0, 48, 128, 10); // x, y, w, h
+  // Original: x=0, y=48, w=128, h=10
+  // Harbys: x0, y0, x1, y1
+  // x1 = x0 + w - 1 = 0 + 128 - 1 = 127
+  // y1 = y0 + h - 1 = 48 + 10 - 1 = 57
+  pico_ssd1306::drawRect(&display, 0, 48, 127, 57);
 
   // Draw Fill
   if (pot_val > 100)
     pot_val = 100;
+
   uint8_t fill_w = (pot_val * 128) / 100;
   if (fill_w > 0) {
-    display.fillRect(0, 48, fill_w, 10);
+    // fill_w is width. x1 = 0 + fill_w - 1
+    // Clip x1 to 127
+    uint8_t x1 = fill_w - 1;
+    if (x1 > 127)
+      x1 = 127;
+    pico_ssd1306::fillRect(&display, 0, 48, x1, 57);
   }
 
   display.sendBuffer();
