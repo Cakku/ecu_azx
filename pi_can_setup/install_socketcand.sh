@@ -5,7 +5,7 @@ echo "Updating apt..."
 sudo apt-get update
 
 echo "Installing dependencies..."
-sudo apt-get install -y git cmake gcc make autoconf libconfig-dev
+sudo apt-get install -y git cmake gcc make autoconf libconfig-dev can-utils
 
 echo "Cloning socketcand..."
 if [ -d "socketcand" ]; then

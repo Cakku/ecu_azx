@@ -99,4 +99,25 @@ We have provided two scripts to automate the software setup.
 6.  **Port**: `29536` (Default for socketcand).
 7.  Click **Create New Connection**.
 
+
 You should now see raw CAN frames appearing in SavvyCAN!
+
+## 6. Reverse Engineering Workflow
+
+This setup now includes tools to help you identify CAN IDs directly on the Pi.
+
+### check_traffic.sh
+Quickly verifies that the CAN interface is receiving data.
+```bash
+./check_traffic.sh
+```
+
+### find_active_ids.py
+Scans the bus for a set duration (default 60s) and lists every unique CAN ID found. This is crucial for **finding an unused ID** for your new sensor.
+
+1.  Start the car (engine running or ignition on).
+2.  Run the scanner:
+    ```bash
+    python3 find_active_ids.py
+    ```
+3.  Look for "gaps" in the sorted list of IDs. These gaps are potential candidates for your new Ethanol Sensor broadcast ID.
