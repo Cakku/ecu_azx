@@ -21,7 +21,7 @@ print("Searching for CAN Configuration sequences...")
 # Heuristic: Scan for instructions loading 0x30C0, 0x30C8, 0x30D0
 # (Common MPC555/565 CAN bases, usually mapped there in Bosch ECUs)
 
-patterns = [0x30C0, 0x30C8, 0x30D0, 0xC0C0, 0xC0C8]
+patterns = [0x30C0, 0x30C8, 0x30D0, 0xC0C0, 0xC0C8, 0xC000]
 
 for i in range(0, len(data), 4):
     word = struct.unpack('>I', data[i:i+4])[0]
@@ -31,15 +31,11 @@ for i in range(0, len(data), 4):
         rA = (word >> 16) & 0x1F
         if rA == 0: # treat as 'lis'
             imm = word & 0xFFFF
-            if imm in patterns:
+            # Just print any lis that looks like IO base
+            if (imm & 0xFF00) == 0x3000 or (imm & 0xFF00) == 0xC000:
                 rD = (word >> 21) & 0x1F
-                print(f"Found CAN Base Load at {hex(i)}: lis r{rD}, {hex(imm)}")
+                print(f"Found Potential IO Base at {hex(i)}: lis r{rD}, {hex(imm)}")
                 
-                # Disassemble next few instructions to see usage
-                try:
-                    code_chunk = data[i:i+40] # 10 instructions
-                    print("Context:")
-                    for inst in cs.disasm(code_chunk, i):
-                        print(f"  {hex(inst.address)}: {inst.mnemonic} {inst.op_str}")
-                except:
-                    pass
+                if imm in patterns:
+                    print("  -> HIGHEST PROBABILITY CAN BASE")
+

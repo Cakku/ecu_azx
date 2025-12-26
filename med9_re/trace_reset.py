@@ -33,8 +33,12 @@ def disassemble_at(addr, count=20):
                 pass
     return None
 
-# The vector table at 0x100
-# 0x100: ba 0x49c (Absolute Branch)
-print("Analyzing Startup Code at 0x49c...")
-disassemble_at(0x49c, 100)
+# Analyze the function we are testing
+print("Analyzing Function at 0x49440...")
+disassemble_at(0x49440, 200)
+print("Analyzing Function at 0x494d8...")
+disassemble_at(0x494d8, 50)
+
+
+
 
