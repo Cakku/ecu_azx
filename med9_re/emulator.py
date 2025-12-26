@@ -83,10 +83,16 @@ def setup_emulator():
     return uc
 
 def hook_block(uc, address, size, user_data):
-    print(f">>> Tracing basic block at 0x{address:x}, block size = 0x{size:x}")
-    if address == 0xDEADBEEF:
-        print("Success! Function returned.")
+    # Retrieve existing counter from user_data (needs to be mutable)
+    # But user_data passed to hook_add is fixed.
+    # We can use a global or attach to uc object?
+    # Simple global for script
+    global block_count
+    block_count += 1
+    if block_count > 100000:
         uc.emu_stop()
+        return
+    print(f">>> Block: 0x{address:x}")
 
 def hook_mem_access(uc, access, address, size, value, user_data):
     pc = uc.reg_read(UC_PPC_REG_PC)
@@ -101,6 +107,8 @@ def hook_mem_access(uc, access, address, size, value, user_data):
 
 def run_function(uc, start_addr, end_addr=None):
     print(f"Starting emulation at 0x{start_addr:x}")
+    global block_count
+    block_count = 0
     try:
         # Hook for IO
         uc.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE, hook_mem_access, begin=0xC0000000, end=0xC0010000)
@@ -108,15 +116,36 @@ def run_function(uc, start_addr, end_addr=None):
         # Hook for CAN ID Table
         uc.hook_add(UC_HOOK_MEM_READ, hook_mem_access, begin=0x2BE00, end=0x2C200)
         
+        # Hook for data block
+        uc.hook_add(UC_HOOK_MEM_READ, hook_mem_access, begin=0x2bc00, end=0x2c000)
+
         # Hook for tracing
-        # uc.hook_add(UC_HOOK_BLOCK, hook_block)
+        uc.hook_add(UC_HOOK_BLOCK, hook_block)
         
+        # PATCHES
+        # 1. Bypass Startup Check at 0x128: Force Branch to 0x138
+        # 0x128: bne 0x138 (40820010). Replace with b 0x138 (48000010).
+        uc.mem_write(0x128, b'\x48\x00\x00\x10')
+        
+        # 2. Bypass HW Loop at 0x1170c: Replace bne 0x116fc with NOP
+        # 0x1170c: bne 0x116fc. Replace with nop (60000000).
+        uc.mem_write(0x1170c, b'\x60\x00\x00\x00')
+
+        # 3. Bypass HW Loop at 0x117b0: Replace bne 0x117a0 with NOP
+        # 0x117b0: bne 0x117a0. Replace with nop (60000000).
+        uc.mem_write(0x117b0, b'\x60\x00\x00\x00')
+
         # Run until error or end_addr
-        uc.emu_start(start_addr, end_addr if end_addr else start_addr + 0x1000)
+        uc.emu_start(start_addr, end_addr if end_addr else start_addr + 0x100000)
     except UcError as e:
         print(f"Unicorn Error: {e}")
         pc = uc.reg_read(UC_PPC_REG_PC)
         print(f"PC at crash: {hex(pc)}")
+        try:
+            val = uc.mem_read(pc, 4)
+            print(f"Instruction at crash: {val.hex()}")
+        except:
+            print("Could not read instruction at PC")
         
         # Dump registers
         print("Register Dump:")

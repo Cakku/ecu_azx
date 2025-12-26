@@ -1,7 +1,7 @@
 import struct
 
 BINARY_PATH = "passat_azx_flash.bin"
-TARGET_ADDR = 0x2BE00 # Start of CAN Table
+TARGET_ADDR = 0x2bc00 
 
 with open(BINARY_PATH, 'rb') as f:
     data = f.read()
@@ -43,23 +43,26 @@ for i in range(0, len(data), 4):
             if i + j*4 >= len(data): break
             next_word = struct.unpack('>I', data[i+j*4:i+j*4+4])[0]
             
-            # Check addi (14)
-            if (next_word >> 26) == 14:
+            # Check common memory access/arithmetic with SIMM
+            # addi(14), lwz(32), stw(36), lbz(34), stb(38), lhz(40), sth(44)
+            # ori(24) handled separately
+            op = next_word >> 26
+            if op in [14, 32, 36, 34, 38, 40, 44]:
                 rA = (next_word >> 16) & 0x1F
                 if rA == rD:
                     imm = next_word & 0xFFFF
-                    # logic for addi (signed)
+                    # logic for signed immediate
                     simm = imm if imm < 0x8000 else imm - 0x10000
                     calc_addr = (0x20000) + simm
                     if calc_addr == TARGET_ADDR:
-                        print(f"Found Split Load (Base 0x2 + addi) at 0x{i:x}: lis r{rD}, 2 ... addi r{(next_word>>21)&0x1F}, r{rA}, {hex(imm)}")
+                        op_names = {14:'addi', 32:'lwz', 36:'stw', 34:'lbz', 38:'stb', 40:'lhz', 44:'sth'}
+                        print(f"Found Split Reference (Base 0x2 + {op_names.get(op)}) at 0x{i:x}: lis r{rD}, 2 ... {op_names.get(op)} r{(next_word>>21)&0x1F}, {hex(imm)}(r{rA})")
 
             # Check ori (24) -> Unsigned add
-            if (next_word >> 26) == 24:
+            if op == 24:
                 rA = (next_word >> 16) & 0x1F
                 if rA == rD: # rS in ORI is rA field
                     imm = next_word & 0xFFFF
-                    # ori is just bitwise OR, but if base is 0xXXXX0000, it's same as add
                     calc_addr = (0x20000) | imm
                     if calc_addr == TARGET_ADDR:
                         print(f"Found Split Load (Base 0x2 + ori) at 0x{i:x}: lis r{rD}, 2 ... ori r{(next_word>>21)&0x1F}, r{rA}, {hex(imm)}")
@@ -70,11 +73,13 @@ for i in range(0, len(data), 4):
         for j in range(1, 40):
             if i + j*4 >= len(data): break
             next_word = struct.unpack('>I', data[i+j*4:i+j*4+4])[0]
-            if (next_word >> 26) == 14:
+            op = next_word >> 26
+            if op in [14, 32, 36, 34, 38, 40, 44]:
                 rA = (next_word >> 16) & 0x1F
                 if rA == rD:
                     imm = next_word & 0xFFFF
                     simm = imm if imm < 0x8000 else imm - 0x10000
                     calc_addr = (0x30000) + simm
                     if calc_addr == TARGET_ADDR:
-                         print(f"Found Split Load (Base 0x3) at 0x{i:x}: lis r{rD}, 3 ... addi r{(next_word>>21)&0x1F}, r{rA}, {hex(imm)}")
+                         op_names = {14:'addi', 32:'lwz', 36:'stw', 34:'lbz', 38:'stb', 40:'lhz', 44:'sth'}
+                         print(f"Found Split Reference (Base 0x3 + {op_names.get(op)}) at 0x{i:x}: lis r{rD}, 3 ... {op_names.get(op)} r{(next_word>>21)&0x1F}, {hex(imm)}(r{rA})")
