@@ -33,9 +33,11 @@ def disassemble_at(addr, count=20):
                 pass
     return None
 
-# Analyze the crash site
-print("Analyzing Crash Site at 0x11110...")
-disassemble_at(0x11110, 50)
+# Analyze backwards to find function start
+print("Analyzing Function Prologue around 0x49400...")
+disassemble_at(0x49400, 50)
+
+
 
 
 

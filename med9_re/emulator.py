@@ -53,9 +53,9 @@ def setup_emulator():
     uc.mem_map(EXT_RAM_BASE, EXT_RAM_SIZE)
     print(f"Mapping External RAM at {hex(EXT_RAM_BASE)}")
 
-    # Map Dummy Flash (0x500000 - 0x700000) for calibration data access
-    # Avoid overlap with RAM which ends at 0x408000
-    uc.mem_map(0x500000, 0x200000)
+    # Map Dummy Flash/RAM (0x500000 - 0x7F0000)
+    # Covers calibration data and potential secondary RAM/peripherals at 0x70xxxx
+    uc.mem_map(0x500000, 0x2F0000)
 
     # Load ROM
     load_binary(uc, BINARY_PATH)
@@ -69,9 +69,24 @@ def setup_emulator():
     uc.reg_write(UC_PPC_REG_1, 0x7FEFFC)
     uc.reg_write(UC_PPC_REG_13, 0x7FFFF0)
     uc.reg_write(UC_PPC_REG_2, 0x17FF0)
-    uc.reg_write(UC_PPC_REG_9, 1) # Force "True" for potential checks
+    
+    # R9 is loaded from 0x1ca6(r13) at 0x4943c
+    # 0x7FFFF0 + 0x1ca6 = 0x801C96
+    # We want it to be 1 to pass the check
+    uc.mem_write(0x7FFFF0 + 0x1CA6, b'\x01')
+    
+    # Setup Stack Return Address to detect success
+    # The function loads LR from 0x14(r1)
+    ret_addr = 0xDEADBEEF
+    uc.mem_write(0x7FEFFC + 0x14, struct.pack('>I', ret_addr))
 
     return uc
+
+def hook_block(uc, address, size, user_data):
+    print(f">>> Tracing basic block at 0x{address:x}, block size = 0x{size:x}")
+    if address == 0xDEADBEEF:
+        print("Success! Function returned.")
+        uc.emu_stop()
 
 def hook_mem_access(uc, access, address, size, value, user_data):
     if access == UC_MEM_WRITE:
@@ -85,6 +100,9 @@ def run_function(uc, start_addr, end_addr=None):
         # Hook for IO
         uc.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE, hook_mem_access, begin=0xC0000000, end=0xC0010000)
         
+        # Hook for tracing
+        uc.hook_add(UC_HOOK_BLOCK, hook_block)
+        
         # Run until error or end_addr
         uc.emu_start(start_addr, end_addr if end_addr else start_addr + 0x1000)
     except UcError as e:
@@ -95,7 +113,11 @@ def run_function(uc, start_addr, end_addr=None):
         # Dump registers
         print("Register Dump:")
         for i in range(32):
-            reg_val = uc.reg_read(getattr(unicorn.ppc_const, f"UC_PPC_REG_{i}"))
+            # We imported * from unicorn.ppc_const, but generating names dynamically is tricky if not usinggetattr on the module
+            # We can use the integer values directly since UC_PPC_REG_0 is encoded sequentially usually, or just import module
+            import unicorn.ppc_const as ppc
+            reg_id = getattr(ppc, f"UC_PPC_REG_{i}")
+            reg_val = uc.reg_read(reg_id)
             print(f"r{i}: {hex(reg_val)}", end="  ")
             if (i+1) % 4 == 0: print("")
         print("")
@@ -106,8 +128,8 @@ if __name__ == "__main__":
     uc = setup_emulator()
     
     # Test run around a potential CAN access found by find_can_init.py
-    # 0x49440: lis r31, 0xc000
-    target_addr = 0x49440
+    # 0x4943c: lbz r9, 0x1ca6(r13) - Load Enable Flag
+    target_addr = 0x4943c
     print(f"Testing execution from {hex(target_addr)}...")
     run_function(uc, target_addr, target_addr + 0x100)
 
