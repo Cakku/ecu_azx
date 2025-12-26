@@ -33,11 +33,10 @@ def disassemble_at(addr, count=20):
                 pass
     return None
 
-# Analyze the function we are testing
-print("Analyzing Function at 0x49440...")
-disassemble_at(0x49440, 200)
-print("Analyzing Function at 0x494d8...")
-disassemble_at(0x494d8, 50)
+# Analyze the crash site
+print("Analyzing Crash Site at 0x11110...")
+disassemble_at(0x11110, 50)
+
 
 
 

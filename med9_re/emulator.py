@@ -13,18 +13,22 @@ except ImportError:
 # Percipherals: 0xC00000+
 
 # Load the binary
-BINARY_PATH = "../passat_azx_ori.bin"
+BINARY_PATH = "passat_azx_flash.bin"
 FLASH_BASE = 0x00000000
 RAM_BASE   = 0x003F8000
-RAM_SIZE   = 0x00010000 # 64KB - generous allocation for emulation
+RAM_SIZE   = 0x00010000 # 64KB
 
 def load_binary(uc, path):
     with open(path, 'rb') as f:
         data = f.read()
-    # Align to 4k page if necessary (Unicorn requirement usually)
-    # Map memory for ROM: 0x0 to 0x3F8000 (Start of RAM)
-    # This covers the 2.5MB binary
-    uc.mem_map(FLASH_BASE, 0x3F8000) 
+    # Linear mapping of 2MB Flash
+    # Note: RAM at 0x3F8000 effectively "overlays" the flash in real hardware
+    # For Unicorn, we map Flash fully, but we must handle the overlap if we map RAM at the same place.
+    # MED9.1: Flash 0-0x200000. RAM 0x3F8000 is internal MPC5xx RAM, not unrelated.
+    # Actually, 0x000000-0x1FFFFF is external flash. 
+    # 0x3F8000 is internal RAM. They do not overlap physically.
+    
+    uc.mem_map(FLASH_BASE, 2 * 1024 * 1024) 
     uc.mem_write(FLASH_BASE, data)
     print(f"Loaded binary to {hex(FLASH_BASE)}, size: {len(data)}")
 
@@ -49,8 +53,9 @@ def setup_emulator():
     uc.mem_map(EXT_RAM_BASE, EXT_RAM_SIZE)
     print(f"Mapping External RAM at {hex(EXT_RAM_BASE)}")
 
-    # Map Dummy Flash (0x400000 - 0x600000) for calibration data access
-    uc.mem_map(0x400000, 0x200000)
+    # Map Dummy Flash (0x500000 - 0x700000) for calibration data access
+    # Avoid overlap with RAM which ends at 0x408000
+    uc.mem_map(0x500000, 0x200000)
 
     # Load ROM
     load_binary(uc, BINARY_PATH)
@@ -86,6 +91,16 @@ def run_function(uc, start_addr, end_addr=None):
         print(f"Unicorn Error: {e}")
         pc = uc.reg_read(UC_PPC_REG_PC)
         print(f"PC at crash: {hex(pc)}")
+        
+        # Dump registers
+        print("Register Dump:")
+        for i in range(32):
+            reg_val = uc.reg_read(getattr(unicorn.ppc_const, f"UC_PPC_REG_{i}"))
+            print(f"r{i}: {hex(reg_val)}", end="  ")
+            if (i+1) % 4 == 0: print("")
+        print("")
+        r10 = uc.reg_read(UC_PPC_REG_10)
+        print(f"Target Check (r10+0x4002): {hex(r10 + 0x4002)}")
 
 if __name__ == "__main__":
     uc = setup_emulator()
