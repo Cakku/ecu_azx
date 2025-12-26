@@ -34,10 +34,7 @@ def disassemble_at(addr, count=20):
     return None
 
 # The vector table at 0x100
-# 0x100: b 0x59e (from xxd output analysis previously: 48 00 04 9e)
-print("Analyzing Reset Vector at 0x100...")
-next_addr = disassemble_at(0x100, 1)
+# 0x100: ba 0x49c (Absolute Branch)
+print("Analyzing Startup Code at 0x49c...")
+disassemble_at(0x49c, 100)
 
-if next_addr:
-    print(f"Following branch to {hex(next_addr)}...")
-    disassemble_at(next_addr, 50)
