@@ -2,6 +2,24 @@
 
 This guide allows you to turn a Raspberry Pi Zero W (or any Pi) into a wireless CAN Bus interface compatible with **SavvyCAN**.
 
+## 0. Initial Setup (Prerequisites)
+
+**The Raspberry Pi Zero W does NOT have internal storage.** You MUST install an Operating System on the microSD card.
+
+1.  **Download [Raspberry Pi Imager](https://www.raspberrypi.com/software/)** on your computer.
+2.  Insert your microSD card into your computer.
+3.  Open Raspberry Pi Imager:
+    *   **Device**: Choose "Raspberry Pi Zero".
+    *   **OS**: Choose **Raspberry Pi OS (other)** -> **Raspberry Pi OS Lite (32-bit)**.
+        *   *Note: The "Lite" version is best as it has no desktop GUI, which makes it faster and more reliable for this headless application.*
+    *   **Storage**: Select your SD card.
+4.  **Important - Enable SSH & WiFi**:
+    *   Don't click "Next" yet! Press **Ctrl+Shift+X** (or click the gear icon/Next settings) to open customization.
+    *   **Enable SSH**: Select "Use password authentication". Set a username (e.g., `pi`) and password.
+    *   **Configure Wireless LAN**: Enter your WiFi SSID and Password.
+5.  Write the OS to the card.
+6.  Insert the card into the Pi Zero W and power it on. It will connect to your WiFi automatically.
+
 ## 1. Hardware Connection (Wiring)
 
 Connect the MCP2515 CAN Bus module to the Raspberry Pi Zero W's GPIO header.
