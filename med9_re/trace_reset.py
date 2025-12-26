@@ -33,9 +33,10 @@ def disassemble_at(addr, count=20):
                 pass
     return None
 
-# Analyze backwards to find function start
-print("Analyzing Function Prologue around 0x49400...")
-disassemble_at(0x49400, 50)
+# Analyze the suspected CAN ID table
+print("Analyzing Data at 0x2be00...")
+disassemble_at(0x2be00, 100)
+
 
 
 

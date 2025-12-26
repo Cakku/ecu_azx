@@ -89,10 +89,15 @@ def hook_block(uc, address, size, user_data):
         uc.emu_stop()
 
 def hook_mem_access(uc, access, address, size, value, user_data):
+    pc = uc.reg_read(UC_PPC_REG_PC)
     if access == UC_MEM_WRITE:
-        print(f">>> Write IO: @0x{address:x}, value=0x{value:x}, size={size}")
+        print(f">>> Write IO: @0x{address:x}, value=0x{value:x}, size={size} (PC={hex(pc)})")
     else:
-        print(f">>> Read IO: @0x{address:x}, size={size}")
+        # Filter read log if it's too noisy, but for Table it's fine
+        if address >= 0x2BE00 and address < 0x2C200:
+             print(f">>> Read CAN Table: @0x{address:x}, size={size} (PC={hex(pc)})")
+        else:
+             print(f">>> Read IO: @0x{address:x}, size={size} (PC={hex(pc)})")
 
 def run_function(uc, start_addr, end_addr=None):
     print(f"Starting emulation at 0x{start_addr:x}")
@@ -100,8 +105,11 @@ def run_function(uc, start_addr, end_addr=None):
         # Hook for IO
         uc.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE, hook_mem_access, begin=0xC0000000, end=0xC0010000)
         
+        # Hook for CAN ID Table
+        uc.hook_add(UC_HOOK_MEM_READ, hook_mem_access, begin=0x2BE00, end=0x2C200)
+        
         # Hook for tracing
-        uc.hook_add(UC_HOOK_BLOCK, hook_block)
+        # uc.hook_add(UC_HOOK_BLOCK, hook_block)
         
         # Run until error or end_addr
         uc.emu_start(start_addr, end_addr if end_addr else start_addr + 0x1000)
@@ -113,8 +121,6 @@ def run_function(uc, start_addr, end_addr=None):
         # Dump registers
         print("Register Dump:")
         for i in range(32):
-            # We imported * from unicorn.ppc_const, but generating names dynamically is tricky if not usinggetattr on the module
-            # We can use the integer values directly since UC_PPC_REG_0 is encoded sequentially usually, or just import module
             import unicorn.ppc_const as ppc
             reg_id = getattr(ppc, f"UC_PPC_REG_{i}")
             reg_val = uc.reg_read(reg_id)
@@ -127,9 +133,9 @@ def run_function(uc, start_addr, end_addr=None):
 if __name__ == "__main__":
     uc = setup_emulator()
     
-    # Test run around a potential CAN access found by find_can_init.py
-    # 0x4943c: lbz r9, 0x1ca6(r13) - Load Enable Flag
-    target_addr = 0x4943c
-    print(f"Testing execution from {hex(target_addr)}...")
-    run_function(uc, target_addr, target_addr + 0x100)
+    # Trace startup to find table read
+    target_addr = 0x100 # Reset Vector
+    print(f"Tracing startup from {hex(target_addr)} to find CAN Table Access...")
+    # Run for a sufficient amount of instructions/time
+    run_function(uc, target_addr, target_addr + 0x50000)
 
