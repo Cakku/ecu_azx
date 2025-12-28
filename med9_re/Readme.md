@@ -2,13 +2,11 @@
 
 ## Goal Description
 Modify the MED9.1 ECU binary to read a new CAN ID (containing Ethanol content) and adjust fueling variables (global fueling modifier/injection time) based on this data. We will achieve this by reverse engineering the binary to find the CAN handling logic and fueling maps, and possibly a global fueling modifier variable, then patching in a new function compiled from C.
-We will use existing MED9Toolchain for patching the binary, when we have developed the new function.
 
 ## Proposed Workflow
 1. Reverse Engineering (Static Analysis)
 We will use Ghidra with the provided ppc_med9 extension to analyze 
 passat_azx_ori.bin
-
 
 Goal: Identify:
 - CAN message reception handler (Interrupt or Polling).
@@ -27,5 +25,29 @@ Components:
 - passat_azx_flash.bin: ECU flash binary.
 - passat_azx_flash.c: ECU flash decompiled C code.
 - ghidra_analysis.json: Ghidra analysis results. Automatically generated memory regions are likely not accurate, mainly used for function identification.
-- Med9Toolchain: Patching toolchain for patching the binary. Also includes several address signatures for finding the addresses of the functions we need to patch.
-- Med9-Patches: Med9toolchain patches for unknown acu binary.
+- Med9Toolchain: Patching toolchain for patching the binary. Also includes example patches.
+- Med9-Patches: Med9toolchain patches for unknown MED9 ecu binary.
+
+### Code Modification (Patching)
+- Development: Write the new logic in C.
+void NEW_Fuel_Adjustment(void) {
+    // Read E% from new CAN ID variable
+    // Calculate modifier
+    // Apply to global fueling variable
+}
+- Compilation: Use a PowerPC GCC cross-compiler (powerpc-eabi-gcc).
+- Injection:
+    - Compile the C code to specific address (the free space found in step 1).
+    - Patch the original binary to jump (
+    bl
+    ) to our new function at the appropriate time (the "Hook").
+
+### Verification Plan
+#### Automated Tests (Emulation)
+Script: verify_fueling.py (using Unicorn)
+Scenario:
+Load patched binary.
+Set "E%" variable to 0%. Run fueling function. Record Pulse Width (PW).
+Set "E%" variable to 50%. Run fueling function. Record PW.
+Assert PW has increased by expected %.
+Feed data from your pico_can_sender (via USB serial or checking its code logic) into the emulator inputs to verify end-to-end logic.
