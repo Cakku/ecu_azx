@@ -1,0 +1,16 @@
+{
+  "name": "Disable ROM CRC Check",
+  "comment": "Sets rom*data values to predefined constants ",
+  "diffs": [
+    {
+      "addr": "0x00420004",
+      "value_old": "0x38600000",
+      "value_new": "0x38600055"
+    },
+    {
+      "addr": "0x0042000c",
+      "value_old": "0x388000ff",
+      "value_new": "0x388000AA"
+    }
+  ]
+}
