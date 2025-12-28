@@ -49,13 +49,17 @@ def setup_emulator():
 
     # Map External RAM (Stack is here)
     EXT_RAM_BASE = 0x7F0000
-    EXT_RAM_SIZE = 0x20000 # 128KB
+    EXT_RAM_SIZE = 0x10000 # 64KB - Ends at 0x800000
     uc.mem_map(EXT_RAM_BASE, EXT_RAM_SIZE)
     print(f"Mapping External RAM at {hex(EXT_RAM_BASE)}")
 
     # Map Dummy Flash/RAM (0x500000 - 0x7F0000)
     # Covers calibration data and potential secondary RAM/peripherals at 0x70xxxx
     uc.mem_map(0x500000, 0x2F0000)
+
+    # Extra Region for 0x900000 access
+    uc.mem_map(0x800000, 0x200000, UC_PROT_ALL)
+    print("Mapping Extra Region at 0x800000")
 
     # Load ROM
     load_binary(uc, BINARY_PATH)
