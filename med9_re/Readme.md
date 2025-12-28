@@ -27,3 +27,5 @@ Components:
 - passat_azx_flash.bin: ECU flash binary.
 - passat_azx_flash.c: ECU flash decompiled C code.
 - ghidra_analysis.json: Ghidra analysis results. Automatically generated memory regions are likely not accurate, mainly used for function identification.
+- Med9Toolchain: Patching toolchain for patching the binary. Also includes several address signatures for finding the addresses of the functions we need to patch.
+- Med9-Patches: Med9toolchain patches for unknown acu binary.
