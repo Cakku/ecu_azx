@@ -1,7 +1,8 @@
 # MED9.1 Ethanol Sensor Integration Plan
 
 ## Goal Description
-Modify the MED9.1 ECU binary to read a new CAN ID (containing Ethanol content) and adjust fueling variables (injection time/lambda target) based on this data. We will achieve this by reverse engineering the binary to find the CAN handling logic and fueling maps, then patching in a new function compiled from C.
+Modify the MED9.1 ECU binary to read a new CAN ID (containing Ethanol content) and adjust fueling variables (global fueling modifier/injection time) based on this data. We will achieve this by reverse engineering the binary to find the CAN handling logic and fueling maps, and possibly a global fueling modifier variable, then patching in a new function compiled from C.
+We will use existing MED9Toolchain for patching the binary, when we have developed the new function.
 
 ## Proposed Workflow
 1. Reverse Engineering (Static Analysis)
