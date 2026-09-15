@@ -3014,19 +3014,19 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x40C288,0x208288,int_flash,func,FUN_0040c288,0x34,ghidra passat_azx_ori.bin 2026-09-15 @40C288,hypothesis,ghidra,
 0x40C2BC,0x2082BC,int_flash,func,FUN_0040c2bc,0x30,ghidra passat_azx_ori.bin 2026-09-15 @40C2BC,hypothesis,ghidra,
 0x40C2EC,0x2082EC,int_flash,func,FUN_0040c2ec,0x48,ghidra passat_azx_ori.bin 2026-09-15 @40C2EC,hypothesis,ghidra,
-0x40C334,0x208334,int_flash,func,FUN_0040c334,0x80,ghidra passat_azx_ori.bin 2026-09-15 @40C334,hypothesis,ghidra,
-0x40C3B4,0x2083B4,int_flash,func,FUN_0040c3b4,0x90,ghidra passat_azx_ori.bin 2026-09-15 @40C3B4,hypothesis,ghidra,
-0x40C444,0x208444,int_flash,func,FUN_0040c444,0x8C,ghidra passat_azx_ori.bin 2026-09-15 @40C444,hypothesis,ghidra,
-0x40C4D0,0x2084D0,int_flash,func,FUN_0040c4d0,0x8C,ghidra passat_azx_ori.bin 2026-09-15 @40C4D0,hypothesis,ghidra,
-0x40C55C,0x20855C,int_flash,func,FUN_0040c55c,0x1C,ghidra passat_azx_ori.bin 2026-09-15 @40C55C,hypothesis,ghidra,
-0x40C578,0x208578,int_flash,func,FUN_0040c578,0x9C,ghidra passat_azx_ori.bin 2026-09-15 @40C578,hypothesis,ghidra,
-0x40C614,0x208614,int_flash,func,FUN_0040c614,0xC4,ghidra passat_azx_ori.bin 2026-09-15 @40C614,hypothesis,ghidra,
-0x40C6D8,0x2086D8,int_flash,func,FUN_0040c6d8,0xB4,ghidra passat_azx_ori.bin 2026-09-15 @40C6D8,hypothesis,ghidra,
-0x40C78C,0x20878C,int_flash,func,FUN_0040c78c,0xB4,ghidra passat_azx_ori.bin 2026-09-15 @40C78C,hypothesis,ghidra,
-0x40C840,0x208840,int_flash,func,FUN_0040c840,0xB0,ghidra passat_azx_ori.bin 2026-09-15 @40C840,hypothesis,ghidra,
-0x40C8F0,0x2088F0,int_flash,func,FUN_0040c8f0,0xDC,ghidra passat_azx_ori.bin 2026-09-15 @40C8F0,hypothesis,ghidra,
-0x40C9CC,0x2089CC,int_flash,func,FUN_0040c9cc,0xC8,ghidra passat_azx_ori.bin 2026-09-15 @40C9CC,hypothesis,ghidra,
-0x40CA94,0x208A94,int_flash,func,FUN_0040ca94,0xC8,ghidra passat_azx_ori.bin 2026-09-15 @40CA94,hypothesis,ghidra,
+0x40C334,0x208334,int_flash,func,interp_2d_u8,0x80,ghidra passat_azx_ori.bin 2026-09-15 @40C334,static,ghidra,"interp_2d_u8 -- value-array interpolator: (val, nx, key_y, key_x), val[iy*nx+ix] (values u8)"
+0x40C3B4,0x2083B4,int_flash,func,interp_2d_s8,0x90,ghidra passat_azx_ori.bin 2026-09-15 @40C3B4,static,ghidra,"interp_2d_s8 -- value-array interpolator: (val, nx, key_y, key_x), val[iy*nx+ix] (values s8)"
+0x40C444,0x208444,int_flash,func,interp_2d_u16,0x8C,ghidra passat_azx_ori.bin 2026-09-15 @40C444,static,ghidra,"interp_2d_u16 -- value-array interpolator: (val, nx, key_y, key_x), val[iy*nx+ix] (values u16)"
+0x40C4D0,0x2084D0,int_flash,func,interp_2d_s16,0x8C,ghidra passat_azx_ori.bin 2026-09-15 @40C4D0,static,ghidra,"interp_2d_s16 -- value-array interpolator: (val, nx, key_y, key_x), val[iy*nx+ix] (values s16)"
+0x40C55C,0x20855C,int_flash,func,interp_2d_u8_noint,0x1C,ghidra passat_azx_ori.bin 2026-09-15 @40C55C,static,ghidra,"interp_2d_u8_noint -- value-array interpolator: (val, nx, key_y, key_x), val[iy*nx+ix] (values u8, no interpolation, returns the breakpoint value)"
+0x40C578,0x208578,int_flash,func,axis_search_u8,0x9C,ghidra passat_azx_ori.bin 2026-09-15 @40C578,static,ghidra,"axis_search_u8 -- axis search, self-describing { n; axis[n] }: returns (index<<16)|frac (axis u8)"
+0x40C614,0x208614,int_flash,func,axis_search_s8,0xC4,ghidra passat_azx_ori.bin 2026-09-15 @40C614,static,ghidra,"axis_search_s8 -- axis search, self-describing { n; axis[n] }: returns (index<<16)|frac (axis s8)"
+0x40C6D8,0x2086D8,int_flash,func,axis_search_u16,0xB4,ghidra passat_azx_ori.bin 2026-09-15 @40C6D8,static,ghidra,"axis_search_u16 -- axis search, self-describing { n; axis[n] }: returns (index<<16)|frac (axis u16)"
+0x40C78C,0x20878C,int_flash,func,axis_search_s16,0xB4,ghidra passat_azx_ori.bin 2026-09-15 @40C78C,static,ghidra,"axis_search_s16 -- axis search, self-describing { n; axis[n] }: returns (index<<16)|frac (axis s16)"
+0x40C840,0x208840,int_flash,func,axis_search_u8_hint,0xB0,ghidra passat_azx_ori.bin 2026-09-15 @40C840,static,ghidra,axis_search_u8_hint -- axis search with previous-index hint: returns (index<<16)|frac (axis u8)
+0x40C8F0,0x2088F0,int_flash,func,axis_search_s8_hint,0xDC,ghidra passat_azx_ori.bin 2026-09-15 @40C8F0,static,ghidra,axis_search_s8_hint -- axis search with previous-index hint: returns (index<<16)|frac (axis s8)
+0x40C9CC,0x2089CC,int_flash,func,axis_search_u16_hint,0xC8,ghidra passat_azx_ori.bin 2026-09-15 @40C9CC,static,ghidra,axis_search_u16_hint -- axis search with previous-index hint: returns (index<<16)|frac (axis u16)
+0x40CA94,0x208A94,int_flash,func,axis_search_s16_hint,0xC8,ghidra passat_azx_ori.bin 2026-09-15 @40CA94,static,ghidra,axis_search_s16_hint -- axis search with previous-index hint: returns (index<<16)|frac (axis s16)
 0x40CB5C,0x208B5C,int_flash,func,FUN_0040cb5c,0x34,ghidra passat_azx_ori.bin 2026-09-15 @40CB5C,hypothesis,ghidra,
 0x40CB90,0x208B90,int_flash,func,FUN_0040cb90,0x34,ghidra passat_azx_ori.bin 2026-09-15 @40CB90,hypothesis,ghidra,
 0x40CBF8,0x208BF8,int_flash,func,FUN_0040cbf8,0x78,ghidra passat_azx_ori.bin 2026-09-15 @40CBF8,hypothesis,ghidra,
@@ -3037,38 +3037,38 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x40CE80,0x208E80,int_flash,func,FUN_0040ce80,0x70,ghidra passat_azx_ori.bin 2026-09-15 @40CE80,hypothesis,ghidra,
 0x40CEF0,0x208EF0,int_flash,func,FUN_0040cef0,0x68,ghidra passat_azx_ori.bin 2026-09-15 @40CEF0,hypothesis,ghidra,
 0x40D094,0x209094,int_flash,func,FUN_0040d094,0xF8,ghidra passat_azx_ori.bin 2026-09-15 @40D094,hypothesis,ghidra,
-0x40D18C,0x20918C,int_flash,func,FUN_0040d18c,0x16C,ghidra passat_azx_ori.bin 2026-09-15 @40D18C,hypothesis,ghidra,
-0x40D2F8,0x2092F8,int_flash,func,FUN_0040d2f8,0x1AC,ghidra passat_azx_ori.bin 2026-09-15 @40D2F8,hypothesis,ghidra,
-0x40D4A4,0x2094A4,int_flash,func,FUN_0040d4a4,0x1AC,ghidra passat_azx_ori.bin 2026-09-15 @40D4A4,hypothesis,ghidra,
-0x40D650,0x209650,int_flash,func,FUN_0040d650,0x1AC,ghidra passat_azx_ori.bin 2026-09-15 @40D650,hypothesis,ghidra,
-0x40D7FC,0x2097FC,int_flash,func,FUN_0040d7fc,0x168,ghidra passat_azx_ori.bin 2026-09-15 @40D7FC,hypothesis,ghidra,
-0x40D964,0x209964,int_flash,func,FUN_0040d964,0x18C,ghidra passat_azx_ori.bin 2026-09-15 @40D964,hypothesis,ghidra,
-0x40DAF0,0x209AF0,int_flash,func,FUN_0040daf0,0x18C,ghidra passat_azx_ori.bin 2026-09-15 @40DAF0,hypothesis,ghidra,
-0x40DC7C,0x209C7C,int_flash,func,FUN_0040dc7c,0x168,ghidra passat_azx_ori.bin 2026-09-15 @40DC7C,hypothesis,ghidra,
-0x40DDE4,0x209DE4,int_flash,func,FUN_0040dde4,0x180,ghidra passat_azx_ori.bin 2026-09-15 @40DDE4,hypothesis,ghidra,
-0x40DF64,0x209F64,int_flash,func,FUN_0040df64,0x1A4,ghidra passat_azx_ori.bin 2026-09-15 @40DF64,hypothesis,ghidra,
-0x40E108,0x20A108,int_flash,func,FUN_0040e108,0x180,ghidra passat_azx_ori.bin 2026-09-15 @40E108,hypothesis,ghidra,
-0x40E288,0x20A288,int_flash,func,FUN_0040e288,0x180,ghidra passat_azx_ori.bin 2026-09-15 @40E288,hypothesis,ghidra,
-0x40E408,0x20A408,int_flash,func,FUN_0040e408,0x180,ghidra passat_azx_ori.bin 2026-09-15 @40E408,hypothesis,ghidra,
-0x40E588,0x20A588,int_flash,func,FUN_0040e588,0x1A4,ghidra passat_azx_ori.bin 2026-09-15 @40E588,hypothesis,ghidra,
-0x40E72C,0x20A72C,int_flash,func,FUN_0040e72c,0x180,ghidra passat_azx_ori.bin 2026-09-15 @40E72C,hypothesis,ghidra,
-0x40E8AC,0x20A8AC,int_flash,func,FUN_0040e8ac,0x198,ghidra passat_azx_ori.bin 2026-09-15 @40E8AC,hypothesis,ghidra,
-0x40EA44,0x20AA44,int_flash,func,FUN_0040ea44,0x18C,ghidra passat_azx_ori.bin 2026-09-15 @40EA44,hypothesis,ghidra,
-0x40EBD0,0x20ABD0,int_flash,func,FUN_0040ebd0,0x18C,ghidra passat_azx_ori.bin 2026-09-15 @40EBD0,hypothesis,ghidra,
+0x40D18C,0x20918C,int_flash,func,lookup_2d_u8,0x16C,ghidra passat_azx_ori.bin 2026-09-15 @40D18C,static,ghidra,"lookup_2d_u8 -- 2-D map lookup, self-describing: { ny; nx; yaxis[ny]; xaxis[nx]; val[ny*nx] } (axis u8, values u8)"
+0x40D2F8,0x2092F8,int_flash,func,lookup_2d_u16,0x1AC,ghidra passat_azx_ori.bin 2026-09-15 @40D2F8,static,ghidra,"lookup_2d_u16 -- 2-D map lookup, self-describing: { ny; nx; yaxis[ny]; xaxis[nx]; val[ny*nx] } (axis u16, values u16)"
+0x40D4A4,0x2094A4,int_flash,func,lookup_2d_s16,0x1AC,ghidra passat_azx_ori.bin 2026-09-15 @40D4A4,static,ghidra,"lookup_2d_s16 -- 2-D map lookup, self-describing: { ny; nx; yaxis[ny]; xaxis[nx]; val[ny*nx] } (axis s16, values s16)"
+0x40D650,0x209650,int_flash,func,lookup_2d_u16_s16,0x1AC,ghidra passat_azx_ori.bin 2026-09-15 @40D650,static,ghidra,"lookup_2d_u16_s16 -- 2-D map lookup, self-describing: { ny; nx; yaxis[ny]; xaxis[nx]; val[ny*nx] } (axis u16, values s16)"
+0x40D7FC,0x2097FC,int_flash,func,lookup_2d_u8_noint,0x168,ghidra passat_azx_ori.bin 2026-09-15 @40D7FC,static,ghidra,"lookup_2d_u8_noint -- 2-D map lookup, self-describing: { ny; nx; yaxis[ny]; xaxis[nx]; val[ny*nx] } (axis u8, values u8, no interpolation, returns the breakpoint value)"
+0x40D964,0x209964,int_flash,func,lookup_2d_g_u8_s8_s8,0x18C,ghidra passat_azx_ori.bin 2026-09-15 @40D964,static,ghidra,"lookup_2d_g_u8_s8_s8 -- 2-D map lookup, shared axes: (ny, yaxis, nx, xaxis, val, vy, vx) (row axis u8, column axis s8, values s8)"
+0x40DAF0,0x209AF0,int_flash,func,lookup_2d_g_u8_s8_s16,0x18C,ghidra passat_azx_ori.bin 2026-09-15 @40DAF0,static,ghidra,"lookup_2d_g_u8_s8_s16 -- 2-D map lookup, shared axes: (ny, yaxis, nx, xaxis, val, vy, vx) (row axis u8, column axis s8, values s16)"
+0x40DC7C,0x209C7C,int_flash,func,lookup_2d_g_u8_u8_s8,0x168,ghidra passat_azx_ori.bin 2026-09-15 @40DC7C,static,ghidra,"lookup_2d_g_u8_u8_s8 -- 2-D map lookup, shared axes: (ny, yaxis, nx, xaxis, val, vy, vx) (row axis u8, column axis u8, values s8)"
+0x40DDE4,0x209DE4,int_flash,func,lookup_2d_g_u8_u16_u8,0x180,ghidra passat_azx_ori.bin 2026-09-15 @40DDE4,static,ghidra,"lookup_2d_g_u8_u16_u8 -- 2-D map lookup, shared axes: (ny, yaxis, nx, xaxis, val, vy, vx) (row axis u8, column axis u16, values u8)"
+0x40DF64,0x209F64,int_flash,func,lookup_2d_g_s8_u16_u8,0x1A4,ghidra passat_azx_ori.bin 2026-09-15 @40DF64,static,ghidra,"lookup_2d_g_s8_u16_u8 -- 2-D map lookup, shared axes: (ny, yaxis, nx, xaxis, val, vy, vx) (row axis s8, column axis u16, values u8)"
+0x40E108,0x20A108,int_flash,func,lookup_2d_g_u16_u8_u8,0x180,ghidra passat_azx_ori.bin 2026-09-15 @40E108,static,ghidra,"lookup_2d_g_u16_u8_u8 -- 2-D map lookup, shared axes: (ny, yaxis, nx, xaxis, val, vy, vx) (row axis u16, column axis u8, values u8)"
+0x40E288,0x20A288,int_flash,func,lookup_2d_g_s16_u8_s16,0x180,ghidra passat_azx_ori.bin 2026-09-15 @40E288,static,ghidra,"lookup_2d_g_s16_u8_s16 -- 2-D map lookup, shared axes: (ny, yaxis, nx, xaxis, val, vy, vx) (row axis s16, column axis u8, values s16)"
+0x40E408,0x20A408,int_flash,func,lookup_2d_g_s16_u8_u16,0x180,ghidra passat_azx_ori.bin 2026-09-15 @40E408,static,ghidra,"lookup_2d_g_s16_u8_u16 -- 2-D map lookup, shared axes: (ny, yaxis, nx, xaxis, val, vy, vx) (row axis s16, column axis u8, values u16)"
+0x40E588,0x20A588,int_flash,func,lookup_2d_g_u16_s8_s8,0x1A4,ghidra passat_azx_ori.bin 2026-09-15 @40E588,static,ghidra,"lookup_2d_g_u16_s8_s8 -- 2-D map lookup, shared axes: (ny, yaxis, nx, xaxis, val, vy, vx) (row axis u16, column axis s8, values s8)"
+0x40E72C,0x20A72C,int_flash,func,lookup_2d_g_u8_u16_u16,0x180,ghidra passat_azx_ori.bin 2026-09-15 @40E72C,static,ghidra,"lookup_2d_g_u8_u16_u16 -- 2-D map lookup, shared axes: (ny, yaxis, nx, xaxis, val, vy, vx) (row axis u8, column axis u16, values u16)"
+0x40E8AC,0x20A8AC,int_flash,func,lookup_2d_g_s16_u16_u16,0x198,ghidra passat_azx_ori.bin 2026-09-15 @40E8AC,static,ghidra,"lookup_2d_g_s16_u16_u16 -- 2-D map lookup, shared axes: (ny, yaxis, nx, xaxis, val, vy, vx) (row axis s16, column axis u16, values u16)"
+0x40EA44,0x20AA44,int_flash,func,lookup_2d_g_s8_u8_u8,0x18C,ghidra passat_azx_ori.bin 2026-09-15 @40EA44,static,ghidra,"lookup_2d_g_s8_u8_u8 -- 2-D map lookup, shared axes: (ny, yaxis, nx, xaxis, val, vy, vx) (row axis s8, column axis u8, values u8)"
+0x40EBD0,0x20ABD0,int_flash,func,lookup_2d_g_s8_u8_s16,0x18C,ghidra passat_azx_ori.bin 2026-09-15 @40EBD0,static,ghidra,"lookup_2d_g_s8_u8_s16 -- 2-D map lookup, shared axes: (ny, yaxis, nx, xaxis, val, vy, vx) (row axis s8, column axis u8, values s16)"
 0x40ED5C,0x20AD5C,int_flash,func,FUN_0040ed5c,0x88,ghidra passat_azx_ori.bin 2026-09-15 @40ED5C,hypothesis,ghidra,
-0x40EDE4,0x20ADE4,int_flash,func,FUN_0040ede4,0xCC,ghidra passat_azx_ori.bin 2026-09-15 @40EDE4,hypothesis,ghidra,
-0x40EEB0,0x20AEB0,int_flash,func,FUN_0040eeb0,0xFC,ghidra passat_azx_ori.bin 2026-09-15 @40EEB0,hypothesis,ghidra,
-0x40EFAC,0x20AFAC,int_flash,func,FUN_0040efac,0xEC,ghidra passat_azx_ori.bin 2026-09-15 @40EFAC,hypothesis,ghidra,
-0x40F098,0x20B098,int_flash,func,FUN_0040f098,0xEC,ghidra passat_azx_ori.bin 2026-09-15 @40F098,hypothesis,ghidra,
-0x40F184,0x20B184,int_flash,func,FUN_0040f184,0xA8,ghidra passat_azx_ori.bin 2026-09-15 @40F184,hypothesis,ghidra,
-0x40F22C,0x20B22C,int_flash,func,FUN_0040f22c,0xC8,ghidra passat_azx_ori.bin 2026-09-15 @40F22C,hypothesis,ghidra,
-0x40F454,0x20B454,int_flash,func,FUN_0040f454,0xC8,ghidra passat_azx_ori.bin 2026-09-15 @40F454,hypothesis,ghidra,
-0x40F51C,0x20B51C,int_flash,func,FUN_0040f51c,0xE4,ghidra passat_azx_ori.bin 2026-09-15 @40F51C,hypothesis,ghidra,
-0x40F600,0x20B600,int_flash,func,FUN_0040f600,0xC4,ghidra passat_azx_ori.bin 2026-09-15 @40F600,hypothesis,ghidra,
-0x40F6C4,0x20B6C4,int_flash,func,FUN_0040f6c4,0xDC,ghidra passat_azx_ori.bin 2026-09-15 @40F6C4,hypothesis,ghidra,
-0x40F7A0,0x20B7A0,int_flash,func,FUN_0040f7a0,0xDC,ghidra passat_azx_ori.bin 2026-09-15 @40F7A0,hypothesis,ghidra,
-0x40F87C,0x20B87C,int_flash,func,FUN_0040f87c,0xE0,ghidra passat_azx_ori.bin 2026-09-15 @40F87C,hypothesis,ghidra,
-0x40F95C,0x20B95C,int_flash,func,FUN_0040f95c,0xD8,ghidra passat_azx_ori.bin 2026-09-15 @40F95C,hypothesis,ghidra,
+0x40EDE4,0x20ADE4,int_flash,func,lookup_1d_u8,0xCC,ghidra passat_azx_ori.bin 2026-09-15 @40EDE4,static,ghidra,"lookup_1d_u8 -- 1-D curve lookup, self-describing: { n; axis[n]; val[n] } (axis u8, values u8)"
+0x40EEB0,0x20AEB0,int_flash,func,lookup_1d_s8,0xFC,ghidra passat_azx_ori.bin 2026-09-15 @40EEB0,static,ghidra,"lookup_1d_s8 -- 1-D curve lookup, self-describing: { n; axis[n]; val[n] } (axis s8, values s8)"
+0x40EFAC,0x20AFAC,int_flash,func,lookup_1d_u16,0xEC,ghidra passat_azx_ori.bin 2026-09-15 @40EFAC,static,ghidra,"lookup_1d_u16 -- 1-D curve lookup, self-describing: { n; axis[n]; val[n] } (axis u16, values u16)"
+0x40F098,0x20B098,int_flash,func,lookup_1d_s16,0xEC,ghidra passat_azx_ori.bin 2026-09-15 @40F098,static,ghidra,"lookup_1d_s16 -- 1-D curve lookup, self-describing: { n; axis[n]; val[n] } (axis s16, values s16)"
+0x40F184,0x20B184,int_flash,func,lookup_1d_u8_noint,0xA8,ghidra passat_azx_ori.bin 2026-09-15 @40F184,static,ghidra,"lookup_1d_u8_noint -- 1-D curve lookup, self-describing: { n; axis[n]; val[n] } (axis u8, values u8, no interpolation, returns the breakpoint value)"
+0x40F22C,0x20B22C,int_flash,func,lookup_1d_u16_noint,0xC8,ghidra passat_azx_ori.bin 2026-09-15 @40F22C,static,ghidra,"lookup_1d_u16_noint -- 1-D curve lookup, self-describing: { n; axis[n]; val[n] } (axis u16, values u16, no interpolation, returns the breakpoint value)"
+0x40F454,0x20B454,int_flash,func,lookup_1d_g_u8_s8,0xC8,ghidra passat_azx_ori.bin 2026-09-15 @40F454,static,ghidra,"lookup_1d_g_u8_s8 -- 1-D curve lookup, shared axis: (n, axis, val, x) (axis u8, values s8)"
+0x40F51C,0x20B51C,int_flash,func,lookup_1d_g_s8_u8,0xE4,ghidra passat_azx_ori.bin 2026-09-15 @40F51C,static,ghidra,"lookup_1d_g_s8_u8 -- 1-D curve lookup, shared axis: (n, axis, val, x) (axis s8, values u8)"
+0x40F600,0x20B600,int_flash,func,lookup_1d_g_u8_u16,0xC4,ghidra passat_azx_ori.bin 2026-09-15 @40F600,static,ghidra,"lookup_1d_g_u8_u16 -- 1-D curve lookup, shared axis: (n, axis, val, x) (axis u8, values u16)"
+0x40F6C4,0x20B6C4,int_flash,func,lookup_1d_g_s16_u16,0xDC,ghidra passat_azx_ori.bin 2026-09-15 @40F6C4,static,ghidra,"lookup_1d_g_s16_u16 -- 1-D curve lookup, shared axis: (n, axis, val, x) (axis s16, values u16)"
+0x40F7A0,0x20B7A0,int_flash,func,lookup_1d_g_u16_s16,0xDC,ghidra passat_azx_ori.bin 2026-09-15 @40F7A0,static,ghidra,"lookup_1d_g_u16_s16 -- 1-D curve lookup, shared axis: (n, axis, val, x) (axis u16, values s16)"
+0x40F87C,0x20B87C,int_flash,func,lookup_1d_g_u16_s8,0xE0,ghidra passat_azx_ori.bin 2026-09-15 @40F87C,static,ghidra,"lookup_1d_g_u16_s8 -- 1-D curve lookup, shared axis: (n, axis, val, x) (axis u16, values s8)"
+0x40F95C,0x20B95C,int_flash,func,lookup_1d_g_u16_u8,0xD8,ghidra passat_azx_ori.bin 2026-09-15 @40F95C,static,ghidra,"lookup_1d_g_u16_u8 -- 1-D curve lookup, shared axis: (n, axis, val, x) (axis u16, values u8)"
 0x40FC20,0x20BC20,int_flash,func,FUN_0040fc20,0x1C,ghidra passat_azx_ori.bin 2026-09-15 @40FC20,hypothesis,ghidra,
 0x40FC3C,0x20BC3C,int_flash,func,FUN_0040fc3c,0x50,ghidra passat_azx_ori.bin 2026-09-15 @40FC3C,hypothesis,ghidra,
 0x40FCB8,0x20BCB8,int_flash,func,FUN_0040fcb8,0x34,ghidra passat_azx_ori.bin 2026-09-15 @40FCB8,hypothesis,ghidra,

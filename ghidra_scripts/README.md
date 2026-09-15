@@ -13,6 +13,7 @@ what reproduce it.
 | `decompile.py` | Read-only: dump decompiled C, disassembly, callers/callees or references for given addresses from the command line. |
 | `annotate.py` | Bulk-apply a `address,name,kind,comment` CSV of names and plate comments, so a headless session's findings can be exported by `export_symbols.py`. |
 | `med9_symbols.py` | Shared CSV/address helpers. Not a Ghidra script; imported by the two above. |
+| `enumerate_maps.py` | Walks the 44 Bosch interpolation helpers in the on-chip flash, resolves the constant arguments at every call site, and writes `re/calibration_draft.csv`, `re/findings/calibration_call_sites.csv` and `re/findings/calibration_coverage.md`. Names the helpers in the program so `export_symbols.py` carries them into `re/symbols.csv` (issue #19). |
 
 ## Prerequisites
 
@@ -74,6 +75,18 @@ creates a single block for the whole 2,605,056-byte file, which would put the
 on-chip flash at 0x200000. `med9_setup.py` deletes that block and recreates
 `EXT_FLASH` and `INT_FLASH` from the same `FileBytes`, so the tail lands at
 0x404000.
+
+## Calibration map draft (issue #19)
+
+```bash
+./.venv/bin/python ghidra_scripts/enumerate_maps.py \
+    --project-dir /tmp/ghidra_B5 --project-name med9 --repo .
+```
+
+About 25 s. `--label` additionally puts `cand_*` labels on the 1,066 detected
+tables; leave it off before an `export_symbols.py` run, or they all land in the
+shared `re/symbols.csv`. `--no-scalars` skips the direct-load scan.
+Background and the data layout: `re/findings/calibration_maps.md`.
 
 ## Symbol round trip (issue #9)
 

@@ -255,6 +255,7 @@ EEPROM (ST M95160-class, 2 KB, on the SPI bus) has its own block checksums
 | 0xA5658 | **TKMWL measuring-variable table**, 2200 x 4 B handler pointers (0xA5658-0xA78B7) | Indexed by the dispatcher at 0x45768 (`lis r12,0xA; addi r12,r12,0x5658; lwzx r31,r12,id*4; mtlr; blrl`), which 360trev/MED9inf finds by signature. 665 ids are implemented, 1535 point at the "not available" stub 0x38EC4. Each handler leaves a VAG (formula, A, B) triple in RAM 0x7FD06F-0x7FD071 through the helper at 0x38EB4. Reached only from the KWP SID 0x21 route (0x35F6C -> 0xA2CC4 -> 0x3583C -> 0x3574C -> 0x45768) and from 0x357E0, which the on-chip flash calls. `tools/measuring_vars.py`, `re/measuring_vars.csv`, `re/findings/measuring_vars.md`. |
 | 0x1C5518 / **0x5C5518** | **Measuring-block group table**, 4 fields x 255 groups of u16 variable ids | `entry(field, group) = 0x5C5518 + field*0x1FE + group*2`; `addi r29,r2,-0x4AD8` at 0x35760 and 0x357F8 with the application r2 = 0x5C9FF0. Full listing in `re/findings/measuring_groups.txt`. |
 | 0x12004-0x121D8 | memory controller init (BR/OR from clock-mode tables at file 0x10020-0x1009C) | |
+| 0x40C000-0x411FFF (file 0x208000-0x20DFFF) | **Bosch/ASCET runtime library** in the on-chip flash: 44 interpolation helpers (1-D curve, 2-D map, shared-axis "group" forms, axis search, value-array interpolators) plus saturating arithmetic, debounce counters, ramps and filters | Called 1,343 times from the external-flash application across the region boundary. Every calibration table in the dump is reached through one of them. Full list with argument conventions and data layout: `re/findings/calibration_maps.md`; inventory in `re/calibration_draft.csv` (2026-09-15, B5, issue #19). |
 | 0x11E44 | `boot_or_adjust`: OR value adjust | `rlwinm r3,r3,0,24,22` (0x5463062C) = `r3 &= 0xFFFFFEFF`, i.e. **clears bit 0x100 (bit 23)**, and only when RAM byte 0x7FE9E8 is exactly 1. Called from the nine sites in 0x11F08-0x121B4; the result is stored to OR0/OR1/OR2/OR3 (0x6FC104/0x10C/0x114/0x11C), so bit 0x100 is the OR-register burst-inhibit field (field name COMMUNITY, MPC5xx UM; bit position VERIFIED-STATIC). Emulated both ways, 2026-09-15 (VERIFIED-DYNAMIC, `emu/`, `tests/test_emu.py`). Note the table entry 0xFF800650 already has that bit clear, so it is returned unchanged. |
 
 ## 8. Corrections to `med9_re/old_work`
@@ -275,6 +276,38 @@ EEPROM (ST M95160-class, 2 KB, on the SPI bus) has its own block checksums
 - Function-size based guesses about "fueling functions" are unverified.
 
 ## 9. Corrections to this document
+
+### 2026-09-15 — agent B5, issue #19 (evidence: `re/findings/calibration_maps.md`)
+
+Additions, not corrections to a stated fact, but they change how section 2
+should be read.
+
+- Section 2 says the on-chip flash 0x404000-0x47FFFF "holds the KWP/flash
+  programming services and a second copy of the application start-up". It also
+  holds **the shared Bosch/ASCET runtime library at 0x40C000-0x411FFF**, and
+  that is where all 44 table-lookup helpers live. The application in external
+  flash calls them with ordinary `bl` (±32 MB reach). **VERIFIED-STATIC**,
+  Ghidra decompilation; 1,343 call sites, 1,306 of them with fully constant
+  arguments.
+- The calibration data layout is now known. Self-describing tables are
+  `{ n; axis[n]; val[n] }` and `{ ny; nx; yaxis[ny]; xaxis[nx]; val[ny*nx] }`
+  in u8/s8/u16/s16; group tables pass the axis and value arrays separately and
+  read `n` out of the shared axis block. **The value array is indexed
+  `val[iy*nx + ix]`, so the second axis argument is the X (stride 1) axis.**
+- Of the 7,055 references into 0x5C0000-0x5FFFFF (section 3), **2,196 form a
+  pointer** (`lis`+`addi`, i.e. a table argument) and the remaining ~4,850 are
+  direct `lbz`/`lhz`/`lha` loads of single calibration values. Counting
+  r2-relative loads as well, 8,870 loads reach 5,488 distinct scalar addresses.
+- 1,066 distinct tables, curves and axes detected: 151 + 83 two-dimensional
+  with resolved axes, 195 more value arrays from direct interpolator calls,
+  312 + 172 curves, 153 standalone breakpoint blocks. Coverage of
+  0x5C2000-0x5E2FFF is 49.0 % (63 % of the part below the zero-filled reserve
+  at 0x5DB0EE). Details: `re/findings/calibration_coverage.md`.
+- **Free space confirmed by reading the bytes: 0x5E2510-0x5FFFFF (file
+  0x1E2510-0x1FFFFF), 121,584 bytes, is all 0xFF, and the highest address any
+  detected table, axis or scalar load reaches is 0x5E2502** (the block marker
+  at 0x5E2500). The FFCAL001 block of `06_patch_pipeline.md` section 3 is
+  therefore free as planned. **VERIFIED-STATIC**.
 
 ### 2026-09-15 — agent A3, issue #10 (evidence: `re/findings/measuring_vars.md`) and agent A5, issues #21/#24 (evidence: `tests/test_emu.py`)
 
