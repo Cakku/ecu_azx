@@ -404,3 +404,19 @@ Not settled here, and deliberately not guessed. What did fall out:
 | Which ISR activates each raster task (nothing writes the TCB flag bytes with an r13-relative store; activation goes through the TCB pointer) | open |
 | What the seven ISR tasks (ids 1-7) are bound to | open — B6/B7 |
 | Are `0x6FC048`/`0x6FC04C` really SIMASK2/SIMASK3? | open — needs the manual |
+
+#### Added 2026-09-15 (integration, after brief B9) — the period of TCB 11 (0x45CAC4) is in doubt
+
+B9 (`re/findings/rail.md` §7 and its open-items table) found that the on-chip
+task entered at **0x45CAC4** (TCB 11, priority 0x08, 161 `bl`) contains the
+whole rail-pressure PI controller (`hdrpsol_main` 0x45822C, controller
+0x457BC8), the `%AWEA` angle maps and B6's `rkti_pre`. A rail-pressure
+controller cannot run at 1 Hz. The 1000 ms figure above was derived for
+`task_1000ms` (0x120FAC, TCB 24) from deadline timer 1's 1500 ms window and
+then extended to 0x45CAC4 only because both share priority 0x08; that
+extension is now the weakest link. Possibilities: the two priority-0x08 tasks
+have different periods, or 0x45CAC4 is activated from a source the static scan
+did not see (an alarm or an ISR chain). **Status: OPEN, HYPOTHESIS for 0x45CAC4
+withdrawn to "period unknown, <= 1500 ms".** Resolution needs one dynamic run
+(A5 harness or a bench log). Until then, treat every latency estimate that
+depends on this task's period (B6 options C/D, B9 §7) as unknown.
