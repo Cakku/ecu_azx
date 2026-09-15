@@ -241,3 +241,219 @@ Every ignition variable in §2-§5 is a **signed 8-bit** quantity, clamped to
 So **an ethanol offset of +1 ° of advance is +1.333 counts**; the natural
 calibration unit for a patch is 0.75 ° steps, and anything finer needs the
 offset accumulated in a wider intermediate.
+
+## 7. Correction to §4 — the two per-bank slots are 0x7FD30B / 0x7FD30C
+
+`FUN_0041d10c` walks its output pointer **downwards**
+(`puVar6 = &DAT_007fd30d; … puVar6 = puVar6 - 1; *puVar6 = …`), so with
+`i = 1` first it writes **0x7FD30C** (bank 1) and with `i = 0` **0x7FD30B**
+(bank 0). `DAT_007fd30d` keeps the last pre-knock accumulator and
+`DAT_007fd30a` is set to `DAT_007fd30b` (bank-0 copy for the torque model).
+`FUN_0041d464` reads `(&DAT_007fd30b)[i]` for `i = 0, 1`, which closes the
+loop. VERIFIED-STATIC.
+
+## 8. ZWMIN, ZWSEL/ZWOUT and the hardware output (VERIFIED-STATIC)
+
+| Step | Function | What it does |
+|---|---|---|
+| ZWMIN select | `FUN_0041d440` (0x41D440) | `zwmin = DAT_007fd32b` or `DAT_007fd32c` when `DAT_007fd306 & 0x40`; result in **0x7FD32A** |
+| ZWSEL / ZWOUT | `FUN_0041d464` (0x41D464, entered at 0x41D440) | per bank: picks between the bank angle `(&DAT_007fd30b)[i]`, `zwmin` (0x7FD32A) and `DAT_007fceed`; adds `DAT_007fd317` for the second bank; **clamps to -0x48 .. +0x4E** (= -54 ° .. +58.5 °); stores into `DAT_007fd32e[bank]` |
+| tester export | same function | `DAT_007fef85 = DAT_007fd32e[DAT_007fef81]`, and `DAT_007fef87` / `DAT_007fef88` per bank, with the inverted safety copies `DAT_007fd334` / `DAT_007fd335`. **0x7FEF87 is measuring-variable id 9 = VCDS group 003 field 4** |
+| driver | `FUN_0041cd9c` (0x41CD9C, called from `FUN_0041cc0c`) | `FUN_004741f0((short)(zw * 0xF >> 1), DAT_00802080, cyl)` and `DAT_007fadde[cyl] = zw` |
+
+The driver multiply is the **independent proof of the fixed-point format**:
+`zw * 15 / 2 = zw * 7.5`, i.e. it converts 0.75 °/LSB into the 0.1 °/LSB the
+TPU stage (`FUN_004741f0`, with `DAT_00802080` as the dwell) expects.
+**0.75 °CA per LSB is VERIFIED-STATIC**, not inferred from the VAG formula
+table.
+
+## 9. KFZWOP — the torque-model optimum ignition map (VERIFIED-STATIC)
+
+```c
+void FUN_00436b90(void)      /* 0x436B90, called from task_100ms_int (0x4328E4) */
+{
+  DAT_00802666 = lookup_2d_g_u8_u8_s8(
+        DAT_005ca3d4,  &DAT_005ca3d6,       /* ny = 16, nmot axis  */
+        DAT_005ca3d5,  &DAT_005ca3e6,       /* nx = 11, rl axis    */
+        &DAT_005ca3f1,                      /* value array         */
+        cand_mw_nmot, cand_mw_rl);
+}
+```
+
+| Object | Address | Shape |
+|---|---|---|
+| **KFZWOP** value array | **0x5CA3F1** (file 0x1DA3F1) | 16 rows (nmot) x 11 cols (rl), **s8**, 176 B |
+| `ny` / `nx` bytes | 0x5CA3D4 / 0x5CA3D5 | 16 / 11 |
+| nmot axis (`SNM16OPUW`) | 0x5CA3D6, 16 u8, 40 rpm/LSB | 560 720 1000 1240 1520 1760 2000 2520 3000 3520 4000 4520 5000 5520 6000 6520 rpm |
+| rl axis (`SRL11OPUW`) | 0x5CA3E6, 11 u8, 100/128 %/LSB | 10.2 15.6 21.1 31.3 41.4 52.3 62.5 72.7 83.6 93.8 103.9 % |
+
+Contents (s8, 0.75 °/LSB → 15 °..45 °BTDC), row = nmot, col = rl:
+
+```
+      10.2 15.6 21.1 31.3 41.4 52.3 62.5 72.7 83.6 93.8  104 %rl
+ 560    38   34   30   27   26   25   23   20   21   24   25
+ 720    40   36   32   30   28   28   24   21   22   24   26
+1000    44   40   36   33   31   30   27   24   24   25   27
+1240    48   45   40   36   32   31   29   27   26   27   28
+1520    55   50   46   39   34   33   31   30   29   30   30
+1760    58   53   48   41   36   34   33   32   32   32   32
+2000    58   53   48   41   36   35   34   34   34   34   34
+2520    60   54   48   41   37   36   36   36   37   37   36
+3000    60   55   50   43   39   37   37   38   39   39   38
+3520    60   56   51   43   41   40   40   40   41   41   40
+4000    60   56   51   45   42   42   42   42   42   42   42
+4520    59   55   51   47   44   43   42   42   43   43   43
+5000    59   55   52   48   45   43   42   42   43   44   44
+5520    59   55   52   48   46   44   43   43   43   44   44
+6000    57   53   50   48   46   44   43   43   43   44   44
+6520    55   52   50   47   45   44   44   43   43   44   44
+```
+
+The axis counts match the FR declaration `KFZWOP (SNM16OPUW, SRL11OPUW)`
+(FR p736, `mdbas-zwoptnwa0`) exactly, and the 11 load breakpoints are the
+`KFZW` 12-point load axis with the 25.8 % point dropped.
+
+`DAT_00802666` is consumed by `FUN_00423344` (0x423344), the **`zwopt`
+assembly**, which is call #6 of the ignition task and runs immediately before
+ZWGRU:
+
+```c
+void FUN_00423344(void)
+{
+  base = (DAT_007fd306 & 0x40) ? DAT_00802664 : DAT_00802663;
+  s = DAT_00800004._1_1_ + DAT_00800004._2_1_ + base + DAT_00800004._0_1_;
+  if (DAT_007fd306 & 0x40) s += DAT_00802623;   /* 16x11 s8 map 0x5C9EF2 */
+  if (DAT_007fd306 & 0x80) s += DAT_00802622;   /* 16x11 s8 map 0x5C9E25 */
+  s += DAT_00802666;                            /* KFZWOP */
+  clamp s8;
+  DAT_00802665 = (char)s;                       /* zwopt */
+}
+```
+
+and `zwopt` (0x802665) then feeds the torque model: `FUN_00423250` computes
+`DAT_0080262e = FUN_0043619c(zwopt, DAT_007fd30a)` — the ignition efficiency
+`etazwb` from the difference between `zwopt` and the bank-0 base angle
+(`DAT_007fd30a`, the copy `FUN_0041d10c` makes of 0x7FD30B). That is the FR's
+`MDBAS`/`MDZW` `etazwb` path.
+
+The two 16x11 s8 delta maps that ride on `KFZWOP` are **0x5C9E25** (axis block
+0x5C9E08: ny=16 @0x5C9E0A, nx=11 @0x5C9E1A) and **0x5C9EF2** (axis block
+0x5C9ED5: ny=16 @0x5C9ED7, nx=11 @0x5C9EE7), both read by `FUN_0043621c`
+(0x43621C). Both are **all zeros** in this dataset.
+
+**Per the brief and `docs/05_flexfuel_design.md` §3.4, KFZWOP is not to be
+shifted.** It is the torque-model reference; moving it desynchronises the
+requested and delivered torque. It is listed here only so a later agent can
+verify it stays untouched.
+
+## 10. Where the ignition runs — ERCOSEK task 41
+
+`FUN_004224bc` (0x4224BC) is **entry 6 of `tbl_os_task_control_blocks`**
+(TCB at 0x47870C: entry 0x4224BC, prio 0x0A, flag byte 0x7FE642, **task
+id 41**) — see `re/findings/scheduler.md` §4. It is a straight-line list of
+42 `bl`s, the ignition module chain, in FR order:
+
+| Call site | Target | Role |
+|---|---|---|
+| 0x4224DC | 0x423344 | `zwopt` assembly (§9) |
+| **0x4224E0** | **0x41D38C** | **`zwgru` — KFZW + deltas (§3)** |
+| 0x4224F4 | 0x41D108 (`FUN_0041d10c`) | per-bank angle + knock retard (§4) |
+| 0x422500 | 0x41D440 | ZWMIN select + ZWSEL/ZWOUT (§8) |
+| 0x422560 | 0x41D460 | ZWOUT re-entry |
+| 0x422568 | 0x41CC0C | ignition output scheduling -> `FUN_0041cd9c` |
+
+Its period is **not** established. B1 could not pin the activation of any
+raster task ("activation goes through the TCB pointer"), and nothing in the
+image forms the address 0x47870C or 0x7FE642, nor loads the literal 41 next
+to a call. Since the module set is the full ZWGRU/ZWMIN/ZWOUT chain and the
+output driver is called from the same task, the task is almost certainly
+**segment-synchronous** (once per ignition event) — HYPOTHESIS, to be settled
+by one dynamic run.
+
+## 11. Insertion point for an additive ethanol ignition offset
+
+**Use `zwgru_build` at 0x41D38C** (`FUN_0041d38c`). It is after the base map
+and every base delta, and before
+
+* the bank offsets and the **knock retard** (`FUN_0041d10c`, task call #12),
+* `zwmin` and the early/late selection and the -54 °..+58.5 ° clamp
+  (`FUN_0041d464`, task call #16),
+
+so knock control and every safety limit still act on top of the offset, which
+is exactly what `docs/05_flexfuel_design.md` §3.4 asks for.
+
+### 11.1 The exact site
+
+```
+0041d3f0  lbz   r12,-0x2cdd(r13)     ; DAT_007fd313
+0041d3f4  extsb r11,r11
+0041d3f8  lbz   r10,-0x2cb9(r13)     ; DAT_007fd337
+0041d3fc  add   r11,r3,r11
+0041d400  extsb r12,r12
+0041d404  add   r3,r11,r12
+0041d408  extsb r10,r10
+0041d40c  add   r3,r3,r10            <-- REPLACE THIS WORD
+0041d410  cmpwi r3,0x7f              ; s8 clamp
+0041d414  ble   0x0041d420
+0041d418  li    r3,0x7f
+0041d41c  b     0x0041d42c
+0041d420  cmpwi r3,-0x80
+0041d424  bge   0x0041d42c
+0041d428  li    r3,-0x80
+0041d42c  lwz   r0,0xc(r1)
+0041d430  stb   r3,-0x2cdb(r13)      ; zwgru = 0x7FD315
+```
+
+Replace the single instruction at **0x41D40C** with `bl ff_zw_offset` and put
+
+```asm
+ff_zw_offset:
+        add   r3,r3,r10              ; the displaced instruction
+        lbz   r12,<dzw_e>(r13)       ; s8 ethanol offset, 0.75 deg/LSB
+        extsb r12,r12
+        add   r3,r3,r12
+        blr
+```
+
+in free space. Why this site is safe:
+
+* **Live registers.** At 0x41D40C only `r3` (the accumulator), `r10` (the last
+  term) and `r1` are live; `r11`/`r12` are dead (both were consumed by
+  0x41D3FC / 0x41D404). The routine may use `r11`, `r12` and `r0` freely.
+* **LR.** The caller already saved LR to `0xC(r1)` at 0x41D394 and reloads it
+  at 0x41D42C, so a `bl` at 0x41D40C only clobbers a value that is no longer
+  needed. No stack frame is required in the patch.
+* **Saturation.** The clamp at 0x41D410 still bounds the sum to s8, so an
+  over-large offset cannot wrap.
+
+### 11.2 Format of the offset
+
+* **Type**: `signed char`, **0.75 °CA per LSB**, positive = advance.
+  +1 count = +0.75 °, +2 = +1.5 °, +8 = +6 ° (the top of the range
+  `docs/05_flexfuel_design.md` §3.4 proposes).
+* **Where it comes from**: `dzw_e = f_zw(E) * KFDZWE(nmot, rl)`. Both factors
+  are cheap to evaluate in the 100 ms flex-fuel task and to leave in one RAM
+  byte; the segment-synchronous patch above then only does a byte load and an
+  add. Keep the 100 ms producer clamped to a configurable maximum (e.g. 8
+  counts = 6 °) so a sensor fault cannot advance the engine.
+* **Reusing the existing 0.75 ° axes**: a new `KFDZWE` can share the KFZW
+  axis blocks at 0x5C7736 / 0x5C7758 and the already-computed axis indices
+  `DAT_007fd5ec` / `DAT_007fd5f0`, so the producer can be a single
+  `interp_2d_s8(&KFDZWE, 12, DAT_007fd5ec, DAT_007fd5f0)` — but only if it
+  runs in task 41, after `FUN_0041d334` has refreshed those indices.
+
+### 11.3 The alternative, and why it is second choice
+
+`DAT_005c753a` (§4) is an existing s8 calibration constant added to **every**
+bank's final angle in `FUN_0041d10c`, after the knock retard. Writing an
+ethanol offset there needs **no code patch at all** — only a RAM-backed
+redirect of that one byte. But:
+
+* it is a global constant the calibration already uses (its current value has
+  to be preserved and added to the offset), and
+* it is applied after the knock retard and after the substitute-value branch,
+  so a fault path that replaces the angle with `DAT_00802096` bypasses it
+  inconsistently.
+
+Use it only as a bench experiment to prove the chain end to end
+(bump it by +2 counts, watch group 003 field 4 move by 1.5 °).
