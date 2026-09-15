@@ -231,7 +231,7 @@ the independent check that the two bare value arrays really have 12 entries.
 | Candidate | Where | Verdict |
 |---|---|---|
 | **A. `rk` in RAM, 0x803038, between `gk_rk_out` and `rksplit`** | hook the `bl 0x41C3A0` at **0x42247C** in the segment task | **recommended** |
-| B. the `mullw r31,r4,r5` at 0x0AC39C inside `rk2ti` | the arithmetic point itself | works, but `rk2ti` is a shared leaf called seven times per segment and its registers are all live; a hook there has to be an in-place instruction rewrite, not a `bl` |
+| B. the `mullw r31,r4,r5` at 0x0AC39C inside `rk2ti` | the arithmetic point itself | works, but `rk2ti` is a shared leaf with seven call sites (at most three of them fire in any one segment) and its registers are all live; a hook there has to be an in-place instruction rewrite, not a `bl` |
 | C. `KRKATE`, the u16 scalar at 0x5D3DBC | a pure calibration change | perfect coverage, zero code — but it is a **constant**: it cannot follow E%, and `frt` is only recomputed in a slow raster (§6.4) |
 | D. `frt` in RAM, 0x8030D2/D4/D6/D8 | after `rkti_pre` | four cells instead of one, and the slow-raster latency of C |
 | E. `ti` (the FR's warning about `%UFRKTI`) | after `rk2ti` | not needed here, see §7 |
@@ -264,7 +264,7 @@ whose `ti` is actually used, and `rksplit` runs before `aes_ti_out` in the task
 ```
 00422478  4B FF 89 6D  bl 0x0041ADE4   ; gk (writes rk -> 0x803038)
 0042247C  4B FF 9F 25  bl 0x0041C3A0   ; rksplit          <-- replace this word
-00422480  4B FF A0 3D  bl 0x0041C4BC   ; aes_ti_out (7 x rk2ti)
+00422480  4B FF A0 3D  bl 0x0041C4BC   ; aes_ti_out (up to 3 x rk2ti, 7 call sites)
 00422484  4B FF 95 3D  bl 0x0041B9C0   ; awea (ti -> crank angle, window limits)
 ```
 
