@@ -7265,8 +7265,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0xA4" flags="0x30">
-    <title>cand_SST_5C88A9</title>
-    <description>axis at CPU 0x5C88A9 (file 0x1C88A9), 10x1 u8. enumerate_maps.py; axis_search_u8; 1 call site(s): 0x115C08; struct 0x5C88A8</description>
+    <title>axis_awea_nmot</title>
+    <description>axis at CPU 0x5C88A9 (file 0x1C88A9), 10x1 u8. enumerate_maps.py; axis_search_u8; 1 call site(s): 0x115C08; struct 0x5C88A8 | B9 #17 rail.md 9.2: row axis of KFWBHO1SW/KFWBHO1SWE/KFDWBHO1SK, {n=10} 19,25,38,50,63,75,88,100,125,155 = about 760..6200 min^-1 at 40 min^-1 per LSB (u8 nmot 0x7FCE95). axis_search_u8 at 0x115C08, key kept in 0x7FD804</description>
     <CATEGORYMEM index="0" category="0x1"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1C88A9" mmedelementsizebits="8" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -7470,8 +7470,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0xA9" flags="0x30">
-    <title>cand_SST_5C88DC</title>
-    <description>axis at CPU 0x5C88DC (file 0x1C88DC), 8x1 u8. enumerate_maps.py; axis_search_u8; 1 call site(s): 0x115C18; struct 0x5C88DB</description>
+    <title>axis_awea_rl</title>
+    <description>axis at CPU 0x5C88DC (file 0x1C88DC), 8x1 u8. enumerate_maps.py; axis_search_u8; 1 call site(s): 0x115C18; struct 0x5C88DB | B9 #17 rail.md 9.2: column axis of the same three maps, {n=8 @0x5C88DB} 13,27,40,53,67,80,93,107 over the u8 relative charge 0x7FEF74. axis_search_u8 at 0x115C18, key kept in 0x7FD83C</description>
     <CATEGORYMEM index="0" category="0x1"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1C88DC" mmedelementsizebits="8" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -27026,8 +27026,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x27A" flags="0x30">
-    <title>cand_KFD_5D3971</title>
-    <description>map_2d_data at CPU 0x5D3971 (file 0x1D3971), 8x10 s8. enumerate_maps.py; interp_2d_s8; 1 call site(s): 0x4549B0; row count inferred from the 80 bytes before the next detected object</description>
+    <title>KFDWBHO1SK</title>
+    <description>map_2d_data at CPU 0x5D3971 (file 0x1D3971), 8x10 s8. enumerate_maps.py; interp_2d_s8; 1 call site(s): 0x4549B0; row count inferred from the 80 bytes before the next detected object | B9 #17 rail.md 9.2: 8x10 s8 correction added to the start-of-injection angle as (map * u8@0x7FD28E) &gt;&gt; 3; -64..0 counts = -48..0 degCA. interp_2d_s8 at 0x4549B0</description>
     <CATEGORYMEM index="0" category="0x5"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <indexcount>8</indexcount>
@@ -27179,8 +27179,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x27D" flags="0x30">
-    <title>cand_KFD_5D3A33</title>
-    <description>map_2d_data at CPU 0x5D3A33 (file 0x1D3A33), 8x10 u8. enumerate_maps.py; interp_2d_u8; 1 call site(s): 0x454984; row count inferred from the 80 bytes before the next detected object</description>
+    <title>KFWBHO1SWE</title>
+    <description>map_2d_data at CPU 0x5D3A33 (file 0x1D3A33), 8x10 u8. enumerate_maps.py; interp_2d_u8; 1 call site(s): 0x454984; row count inferred from the 80 bytes before the next detected object | B9 #17 rail.md 9.2: the second start-of-injection map, same shape and axes, selected when 0x7FD419 &lt;= u8@0x5D3970 (=25). 80..240 counts = 270..390 degCA. interp_2d_u8 at 0x454984</description>
     <CATEGORYMEM index="0" category="0x5"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <indexcount>8</indexcount>
@@ -27236,8 +27236,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x27E" flags="0x30">
-    <title>cand_KFD_5D3A83</title>
-    <description>map_2d_data at CPU 0x5D3A83 (file 0x1D3A83), 8x10 u8. enumerate_maps.py; interp_2d_u8; 1 call site(s): 0x454968; row count taken from the identically shaped map at 0x5D3A33, which ends exactly here</description>
+    <title>KFWBHO1SW</title>
+    <description>map_2d_data at CPU 0x5D3A83 (file 0x1D3A83), 8x10 u8. enumerate_maps.py; interp_2d_u8; 1 call site(s): 0x454968; row count taken from the identically shaped map at 0x5D3A33, which ends exactly here | B9 #17 rail.md 9.2: 8 cols (rl axis 0x5C88DC) x 10 rows (nmot axis 0x5C88A9) u8 start-of-injection angle, 0.75 degCA per count plus the 0x2300 = 210.0 degCA base -&gt; 210..330 degCA. interp_2d_u8 at 0x454968; result 0x803078/0x80307E</description>
     <CATEGORYMEM index="0" category="0x5"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <indexcount>8</indexcount>
@@ -27499,8 +27499,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x283" flags="0x30">
-    <title>cand_KL_5D3BE2</title>
-    <description>curve_1d at CPU 0x5D3BE2 (file 0x1D3BE2), 6x1 u8. enumerate_maps.py; lookup_1d_u8; 1 call site(s): 0x059374; struct 0x5D3BDB</description>
+    <title>KLWBHO1SLT</title>
+    <description>curve_1d at CPU 0x5D3BE2 (file 0x1D3BE2), 6x1 u8. enumerate_maps.py; lookup_1d_u8; 1 call site(s): 0x059374; struct 0x5D3BDB | B9 #17 rail.md 9.1: 6 x u8 latest permitted start of injection over the u8 axis 0x5D3BDC; ALL SIX = 200 = 150 degCA above the 0x2300 base, i.e. 360.0 degCA. Result 0x7FD28F. lookup_1d_u8 at 0x059374 (init default 0xC8 at 0x131250)</description>
     <CATEGORYMEM index="0" category="0x4"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1D3BDC" mmedelementsizebits="8" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -27540,8 +27540,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x284" flags="0x30">
-    <title>cand_GKL_5D3BF6</title>
-    <description>curve_1d_shared at CPU 0x5D3BF6 (file 0x1D3BF6), 6x1 u8. enumerate_maps.py; lookup_1d_g_u16_u8; 1 call site(s): 0x4548E4</description>
+    <title>KLWBHO1SMX</title>
+    <description>curve_1d_shared at CPU 0x5D3BF6 (file 0x1D3BF6), 6x1 u8. enumerate_maps.py; lookup_1d_g_u16_u8; 1 call site(s): 0x4548E4 | B9 #17 rail.md 9.1: 6 x u8 required end-of-injection margin over the pressure-ratio axis 0x5D3BEA; ALL SIX = 67 = 50.25 degCA. Result 0x7FD290 - the threshold of the injection-window check. lookup_1d_g_u16_u8 at 0x4548E8</description>
     <CATEGORYMEM index="0" category="0x2"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1D3BEA" mmedelementsizebits="16" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -30840,8 +30840,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x2D3" flags="0x30">
-    <title>cand_GKL_5D4B44</title>
-    <description>curve_1d_shared at CPU 0x5D4B44 (file 0x1D4B44), 35x1 s16. enumerate_maps.py; lookup_1d_g_u16_s16; 1 call site(s): 0x4566CC</description>
+    <title>KLDWMSV</title>
+    <description>curve_1d_shared at CPU 0x5D4B44 (file 0x1D4B44), 35x1 s16. enumerate_maps.py; lookup_1d_g_u16_s16; 1 call site(s): 0x4566CC | B9 #17 rail.md 5.1: 35 x s16 volume -&gt; MSV closing angle over the u16 axis 0x5D4AFE. Result 0x803166, clamped to 0x5D49D2=0 .. 0x5D49D4=1100. lookup_1d_g_u16_s16 at 0x4566BC</description>
     <CATEGORYMEM index="0" category="0x2"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1D4AFE" mmedelementsizebits="16" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -32029,8 +32029,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x2F0" flags="0x30">
-    <title>cand_GKL_5D51D0</title>
-    <description>curve_1d_shared at CPU 0x5D51D0 (file 0x1D51D0), 7x1 u16. enumerate_maps.py; lookup_1d_g_s16_u16; 1 call site(s): 0x457C24</description>
+    <title>KLGPHDR</title>
+    <description>curve_1d_shared at CPU 0x5D51D0 (file 0x1D51D0), 7x1 u16. enumerate_maps.py; lookup_1d_g_s16_u16; 1 call site(s): 0x457C24 | B9 #17 rail.md 4.1: 7 x u16 P gain over prdiff (s16 axis 0x5D51C2 = -3018,-1000,-300,0,300,1000,3000 = -15..+15 bar); values 456,561,655,918,655,561,457 - highest on small errors. lookup_1d_g_s16_u16 at 0x457C28</description>
     <CATEGORYMEM index="0" category="0x2"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x01" mmedaddress="0x1D51C2" mmedelementsizebits="16" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -32070,8 +32070,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x2F1" flags="0x30">
-    <title>cand_GKL_5D51EE</title>
-    <description>curve_1d_shared at CPU 0x5D51EE (file 0x1D51EE), 7x1 u16. enumerate_maps.py; lookup_1d_g_s16_u16; 1 call site(s): 0x457D54</description>
+    <title>KLBIHDR</title>
+    <description>curve_1d_shared at CPU 0x5D51EE (file 0x1D51EE), 7x1 u16. enumerate_maps.py; lookup_1d_g_s16_u16; 1 call site(s): 0x457D54 | B9 #17 rail.md 4.1: 7 x u16 I gain over prdiff (s16 axis 0x5D51E0). lookup_1d_g_s16_u16 at 0x457D58</description>
     <CATEGORYMEM index="0" category="0x2"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x01" mmedaddress="0x1D51E0" mmedelementsizebits="16" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -32111,8 +32111,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x2F2" flags="0x30">
-    <title>cand_KFD_5D5224</title>
-    <description>map_2d_data at CPU 0x5D5224 (file 0x1D5224), 1x1 u16. enumerate_maps.py; interp_2d_u16; 1 call site(s): 0x4582C4</description>
+    <title>KFPRSOLKH</title>
+    <description>map_2d_data at CPU 0x5D5224 (file 0x1D5224), 1x1 u16. enumerate_maps.py; interp_2d_u16; 1 call site(s): 0x4582C4 | B9 #17 rail.md 3.2: selected by 0x7FB69A bit 7 (interp_2d_u16 at 0x4582C4). 7000..19000 = 35..95 bar. FR name is a guess</description>
     <CATEGORYMEM index="0" category="0x5"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <indexcount>1</indexcount>
@@ -32152,8 +32152,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x2F3" flags="0x30">
-    <title>cand_KFD_5D52A4</title>
-    <description>map_2d_data at CPU 0x5D52A4 (file 0x1D52A4), 1x1 u16. enumerate_maps.py; interp_2d_u16; 1 call site(s): 0x4583F0</description>
+    <title>KFPRSOLSCH</title>
+    <description>map_2d_data at CPU 0x5D52A4 (file 0x1D52A4), 1x1 u16. enumerate_maps.py; interp_2d_u16; 1 call site(s): 0x4583F0 | B9 #17 rail.md 3.2: same shape/axes as KFPRSOLHOM, selected by 0x7FB69A bit 1 (interp_2d_u16 at 0x4583F0). 10000..20000 = 50..100 bar. FR name is a guess</description>
     <CATEGORYMEM index="0" category="0x5"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <indexcount>1</indexcount>
@@ -32193,8 +32193,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x2F4" flags="0x30">
-    <title>cand_KFD_5D5324</title>
-    <description>map_2d_data at CPU 0x5D5324 (file 0x1D5324), 1x1 u16. enumerate_maps.py; interp_2d_u16; 2 call site(s): 0x458414 0x458454</description>
+    <title>KFPRSOLHOM</title>
+    <description>map_2d_data at CPU 0x5D5324 (file 0x1D5324), 1x1 u16. enumerate_maps.py; interp_2d_u16; 2 call site(s): 0x458414 0x458454 | B9 #17 rail.md 3.2: 8x8 u16 rail-pressure setpoint, homogeneous mode. rows = nmot axis 0x5D558C, cols = load axis 0x5D557A, 1 LSB = 0.005 bar (7000..19000 = 35..95 bar). interp_2d_u16 at 0x458414/0x458454</description>
     <CATEGORYMEM index="0" category="0x5"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <indexcount>1</indexcount>
@@ -32234,8 +32234,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x2F5" flags="0x30">
-    <title>cand_KFD_5D53A4</title>
-    <description>map_2d_data at CPU 0x5D53A4 (file 0x1D53A4), 1x1 u16. enumerate_maps.py; interp_2d_u16; 1 call site(s): 0x4582FC</description>
+    <title>KFPRSOLHMM</title>
+    <description>map_2d_data at CPU 0x5D53A4 (file 0x1D53A4), 1x1 u16. enumerate_maps.py; interp_2d_u16; 1 call site(s): 0x4582FC | B9 #17 rail.md 3.2: selected by 0x7FB69A bit 4 or bit 2 or 0x80156F bit 0 (interp_2d_u16 at 0x4582FC). 12000..19000 = 60..95 bar. FR name is a guess</description>
     <CATEGORYMEM index="0" category="0x5"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <indexcount>1</indexcount>
@@ -32275,8 +32275,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x2F6" flags="0x30">
-    <title>cand_KFD_5D5424</title>
-    <description>map_2d_data at CPU 0x5D5424 (file 0x1D5424), 1x1 u16. enumerate_maps.py; interp_2d_u16; 1 call site(s): 0x458318</description>
+    <title>KFPRSOLOFF</title>
+    <description>map_2d_data at CPU 0x5D5424 (file 0x1D5424), 1x1 u16. enumerate_maps.py; interp_2d_u16; 1 call site(s): 0x458318 | B9 #17 rail.md 3.2: additive setpoint offset, same axes, 0..5000 = 0..+25 bar. Summed into KFPRSOLHOM/KFPRSOLHKS when CWPRSOL(0x5D521E) &amp; 0x20, which IS set (0x2E); weighted by the curve 0x5D5559. interp_2d_u16 at 0x458318</description>
     <CATEGORYMEM index="0" category="0x5"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <indexcount>1</indexcount>
@@ -32316,8 +32316,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x2F7" flags="0x30">
-    <title>cand_KFD_5D54A4</title>
-    <description>map_2d_data at CPU 0x5D54A4 (file 0x1D54A4), 1x1 u16. enumerate_maps.py; interp_2d_u16; 2 call site(s): 0x45838C 0x4583CC</description>
+    <title>KFPRSOLHKS</title>
+    <description>map_2d_data at CPU 0x5D54A4 (file 0x1D54A4), 1x1 u16. enumerate_maps.py; interp_2d_u16; 2 call site(s): 0x45838C 0x4583CC | B9 #17 rail.md 3.2: selected by 0x7FB69A bit 3 (interp_2d_u16 at 0x45838C/0x4583CC). 12000..20000 = 60..100 bar. FR name is a guess</description>
     <CATEGORYMEM index="0" category="0x5"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <indexcount>1</indexcount>
@@ -32357,8 +32357,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x2F8" flags="0x30">
-    <title>cand_KL_5D5532</title>
-    <description>curve_1d at CPU 0x5D5532 (file 0x1D5532), 6x1 u16. enumerate_maps.py; lookup_1d_u16; 1 call site(s): 0x4584F4; struct 0x5D5524</description>
+    <title>KLVHDPFAK</title>
+    <description>curve_1d at CPU 0x5D5532 (file 0x1D5532), 6x1 u16. enumerate_maps.py; lookup_1d_u16; 1 call site(s): 0x4584F4; struct 0x5D5524 | B9 #17 rail.md 3.4: 6 x u16, all 1638 (= 0.09998 in Q14), over the rail-pressure axis 0x5D5526 (10000..22000 = 50..110 bar). Scales the spare pump volume. lookup_1d_u16 at 0x4584F4</description>
     <CATEGORYMEM index="0" category="0x4"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1D5526" mmedelementsizebits="16" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -32398,8 +32398,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x2F9" flags="0x30">
-    <title>cand_GKL_5D5546</title>
-    <description>curve_1d_shared at CPU 0x5D5546 (file 0x1D5546), 6x1 u16. enumerate_maps.py; lookup_1d_g_u8_u16; 1 call site(s): 0x458478</description>
+    <title>KLPRMAX</title>
+    <description>curve_1d_shared at CPU 0x5D5546 (file 0x1D5546), 6x1 u16. enumerate_maps.py; lookup_1d_g_u8_u16; 1 call site(s): 0x458478 | B9 #17 rail.md 3.3: setpoint ceiling, 6 x u16 all = 22000 = 110.0 bar over the u8 axis 0x5D553F (49..77, a temperature from 0x7FD3F7). lookup_1d_g_u8_u16 at 0x458478. THE constant that caps any flex-fuel rail raise</description>
     <CATEGORYMEM index="0" category="0x2"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1D553F" mmedelementsizebits="8" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -32439,8 +32439,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x2FA" flags="0x30">
-    <title>cand_GKL_5D5559</title>
-    <description>curve_1d_shared at CPU 0x5D5559 (file 0x1D5559), 6x1 s8. enumerate_maps.py; lookup_1d_g_u8_s8; 1 call site(s): 0x458338</description>
+    <title>KLPRSOLFAK</title>
+    <description>curve_1d_shared at CPU 0x5D5559 (file 0x1D5559), 6x1 s8. enumerate_maps.py; lookup_1d_g_u8_s8; 1 call site(s): 0x458338 | B9 #17 rail.md 3.2: 6 x s8 weight for KFPRSOLOFF over the u8 axis 0x5D5553 (97,124,151,171,184,197 = a temperature from 0x7FD3F7); values 127,127,64,0,0,0, applied as (fac*off)&gt;&gt;7. lookup_1d_g_u8_s8 at 0x458328</description>
     <CATEGORYMEM index="0" category="0x2"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1D5553" mmedelementsizebits="8" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -32480,8 +32480,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x2FB" flags="0x30">
-    <title>cand_KL_5D556A</title>
-    <description>curve_1d at CPU 0x5D556A (file 0x1D556A), 4x1 u16. enumerate_maps.py; lookup_1d_u16; 1 call site(s): 0x45869C; struct 0x5D5560</description>
+    <title>KLPRSOLFIL</title>
+    <description>curve_1d at CPU 0x5D556A (file 0x1D556A), 4x1 u16. enumerate_maps.py; lookup_1d_u16; 1 call site(s): 0x45869C; struct 0x5D5560 | B9 #17 rail.md 3.5: 4 x u16 PT1 coefficient over nmot (axis 0x5D5562 = 2720,4000,6000,8000 = 680..2000 min^-1). Only used when CWPRSOL bit 4 is set, which it is not in this dataset. lookup_1d_u16 at 0x45869C</description>
     <CATEGORYMEM index="0" category="0x4"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1D5562" mmedelementsizebits="16" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -32521,8 +32521,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x2FC" flags="0x30">
-    <title>cand_SST_5D557A</title>
-    <description>axis at CPU 0x5D557A (file 0x1D557A), 8x1 u16. enumerate_maps.py; axis_search_u16_hint; 1 call site(s): 0x458284; struct 0x5D5578</description>
+    <title>axis_prsol_load</title>
+    <description>axis at CPU 0x5D557A (file 0x1D557A), 8x1 u16. enumerate_maps.py; axis_search_u16_hint; 1 call site(s): 0x458284; struct 0x5D5578 | B9 #17 rail.md 3.1: column axis of every KFPRSOL* map, {n=8 @0x5D5578} 0,6554,13107,19661,26214,39322,52429,65535 = 0/10/20/30/40/60/80/100 % of the 16-bit full scale. Input 0x803508 (torque-structure charge request), axis_search_u16_hint at 0x458284</description>
     <CATEGORYMEM index="0" category="0x1"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1D557A" mmedelementsizebits="16" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -32562,8 +32562,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x2FD" flags="0x30">
-    <title>cand_SST_5D558C</title>
-    <description>axis at CPU 0x5D558C (file 0x1D558C), 8x1 u16. enumerate_maps.py; axis_search_u16_hint; 1 call site(s): 0x45829C; struct 0x5D558A</description>
+    <title>axis_prsol_nmot</title>
+    <description>axis at CPU 0x5D558C (file 0x1D558C), 8x1 u16. enumerate_maps.py; axis_search_u16_hint; 1 call site(s): 0x45829C; struct 0x5D558A | B9 #17 rail.md 3.1: row axis of every KFPRSOL* map, {n=8 @0x5D558A} 3000,5000,8000,10000,14000,18000,22800,24800 = 750..6200 min^-1 at 0.25 rpm/LSB. Input nmot_w 0x7FEE74, axis_search_u16_hint at 0x45829C</description>
     <CATEGORYMEM index="0" category="0x1"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1D558C" mmedelementsizebits="16" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -32685,8 +32685,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x300" flags="0x30">
-    <title>cand_GKF_5D5628</title>
-    <description>map_2d_shared at CPU 0x5D5628 (file 0x1D5628), 10x10 u16. enumerate_maps.py; lookup_2d_g_u8_u16_u16; 1 call site(s): 0x458A14</description>
+    <title>KFKAPAKR</title>
+    <description>map_2d_shared at CPU 0x5D5628 (file 0x1D5628), 10x10 u16. enumerate_maps.py; lookup_2d_g_u8_u16_u16; 1 call site(s): 0x458A14 | B9 #17 rail.md 4.4: 10x10 u16 fuel/rail compressibility map over (0x7FD2FA, rail pressure 0x803202), axes 0x5D560A / 0x5D5614. Result 0x8031FE = kaparail_w. lookup_2d_g_u8_u16_u16 at 0x458A10</description>
     <CATEGORYMEM index="0" category="0x6"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1D5614" mmedelementsizebits="16" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -32767,8 +32767,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x302" flags="0x30">
-    <title>cand_KFD_5D574A</title>
-    <description>map_2d_data at CPU 0x5D574A (file 0x1D574A), 6x8 u16. enumerate_maps.py; interp_2d_u16; 1 call site(s): 0x458C68; axes matched positionally to the axis searches in the same function</description>
+    <title>KFVSTVG</title>
+    <description>map_2d_data at CPU 0x5D574A (file 0x1D574A), 6x8 u16. enumerate_maps.py; interp_2d_u16; 1 call site(s): 0x458C68; axes matched positionally to the axis searches in the same function | B9 #17 rail.md 4.4: MSV feed-forward gain map, multiplies the volume demand 0x803200; interp_2d_u16 at 0x458C68. FR name is a guess</description>
     <CATEGORYMEM index="0" category="0x5"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1D58E2" mmedelementsizebits="16" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -32808,8 +32808,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x303" flags="0x30">
-    <title>cand_KFD_5D57AA</title>
-    <description>map_2d_data at CPU 0x5D57AA (file 0x1D57AA), 6x8 u16. enumerate_maps.py; interp_2d_u16; 1 call site(s): 0x458C90; axes matched positionally to the axis searches in the same function</description>
+    <title>KFVSTVO</title>
+    <description>map_2d_data at CPU 0x5D57AA (file 0x1D57AA), 6x8 u16. enumerate_maps.py; interp_2d_u16; 1 call site(s): 0x458C90; axes matched positionally to the axis searches in the same function | B9 #17 rail.md 4.4: MSV feed-forward offset map, added to the product; interp_2d_u16 at 0x458C90. FR name is a guess</description>
     <CATEGORYMEM index="0" category="0x5"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1D58E2" mmedelementsizebits="16" mmedmajorstridebits="0" mmedminorstridebits="0"/>

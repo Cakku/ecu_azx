@@ -318,6 +318,86 @@ capability, stock ~11 MPa; tuners run 12.5-13.5 on the 2.0T) and monitor
 rather than let the ECU cut the throttle unexpectedly. Log HPFP duty and
 setpoint-vs-actual before any WOT on E50+.
 
+#### Added 2026-09-15 (brief B9, issue #17) — both halves resolved, with two corrections
+
+Full derivation and evidence: `re/findings/rail.md`.
+
+**Correction 1 — the pressure scale. `1 LSB = 0.005 bar`, and the stock
+ceiling is 110 bar, not "~11 MPa capability".** `KLPRMAX` (the six u16 at
+**0x5D5546**, all **22000**) is the hard setpoint ceiling and equals exactly
+110.0 bar; the map the engine actually runs on, **`KFPRSOLHOM` at 0x5D5324**
+(8x8 u16, rows = nmot axis 0x5D558A, columns = load axis 0x5D5578), goes
+**35 bar at idle to 95 bar at high speed and load**. So there is
+**+15 bar of headroom inside the stock ceiling**, which is `sqrt(1.158)` =
+**7.6 % more injector flow** — useful for atomisation and duty, but nowhere
+near E85's +40 % fuel demand. The rail raise supports the fuel factor of §3.2;
+it cannot replace it. B6's 0.01 bar/LSB hypothesis is refuted (it would put
+the stock map at 190 bar).
+
+**Correction 2 — the ECU does *not* cut the throttle when the injection
+window is exceeded.** `awea_ti_to_angle` (0x41B9C0) compares
+`wbho1s (0x80307E) - dwi (0x803088)` against `0x7FD290 * 32`
+(**67 counts = 50.25 degCA**, a flat curve in this dataset) and, when the
+injection does not fit, **advances the start of injection** to
+`dwi + 50.25 degCA`, capped at 360.0 degCA. It sets **no flag**, raises **no
+DTC**, and removes **no fuel** — and it saturates silently at the cap. The one
+torque-domain path that exists (`0x803070` -> `0x80235A`, VCDS measuring id
+2051, -> `0x80360E` -> throttle) is armed **only** by the fuel-system fault
+bit `0x80201E & 0x20`, i.e. it is a limp-home limit for a broken rail-pressure
+sensor, not a window limiter. So the §3.6 requirement "limit torque rather
+than let the ECU cut the throttle" is about a behaviour that does not exist;
+if we want that limit, we have to add it. The clean place is the existing
+min-chain at **0x0C7CF8**, which already reduces `0x80235A` from `0x803070`
+and propagates to the throttle exactly like every stock protection limit.
+
+**Correction 2b — and even that clamp is disarmed on a healthy rail.**
+`0x7FEA48 = (prist > PRWBHMX 0x5D3CDC = 2600 = 13.0 bar)`, and it gates all
+three interventions: the `awea` angle clamp, the charge limit, and a **hard
+injection cut-off angle** that `esausg_output` (0x409834) otherwise programs
+into the injector TPU driver at `cylinder reference - 50.25 degCA`. Since
+`KFPRSOLHOM` never asks for less than 35 bar, **in normal running none of it
+is armed: the injection window is enforced by calibration only.** The flip
+side is the failure mode to design against — if a raised setpoint plus E85's
+higher volume demand ever lets `prist` fall below 13 bar, all three arm at
+once and the driver gets a simultaneous fuel cut and torque drop. **The
+acceptance signal for any rail raise is therefore `prist` staying above
+13 bar, and the early warning is `0x80316E` pinned at `VMSVMX` = 5000.**
+(`re/findings/rail.md` §14.)
+
+**What the numbers say about the window.** `ti` is **1 us per LSB** (proved in
+`rail.md` §8 from `k_nmot = (nmot_w * 34360) >> 16` and the 3/128 degCA angle
+LSB — this also closes the first open item of `re/findings/injection.md` §11).
+At the worst `KFWBHO1SW` cell the hard clamp sits at **7.8 ms of `ti` at
+6000 min^-1**, about **+73 %** over an assumed 4.5 ms stock WOT injection.
+**E85 (+40 %) therefore has roughly 20 % reserve against the hard clamp**;
+E100 plus a WOT enrichment does reach it. What degrades first is not the clamp
+but mixture preparation, because the start of injection is pushed towards and
+past intake-valve opening.
+
+**What to raise, and what will actually stop us.**
+
+* **Raise `KFPRSOLHOM` (0x5D5324)** towards 22000 in the high-load rows. For an
+  E-blend-dependent raise, the code-free hook is **`KFPRSOLOFF` (0x5D5424)**,
+  an additive 8x8 map (0..5000 = 0..+25 bar) that is **already summed into the
+  homogeneous path** (`CWPRSOL` 0x5D521E bit 5 is set) and weighted by the
+  6-point curve 0x5D5559; re-pointing that weight curve at E% costs one `lbz`.
+* **Going above 110 bar needs `KLPRMAX` (0x5D5546) raised too**, and should not
+  be attempted blind: the sensor curve (0x5D518A) saturates near 138 bar, and
+  the pump will not follow (below).
+* **The binding constraint is the pump, not the map.** The setpoint is
+  **rate-limited by the spare pump volume**: `0x8031F6 = (VHDPMX 0x5D559C =
+  25120 - vhdp_dem 0x803212) * 0.1` sets how fast `prsoll` may climb, and
+  `%AMSV` clamps the delivery request at **`VMSVMX` 0x5D4BC6 = 5000**
+  (`0x80316E`). **`0x80316E` pinned at 5000 means the pump is saturated and no
+  map change will help** — log it before and after any E-blend run.
+
+**Log list (replaces "HPFP duty and setpoint-vs-actual"):** `prist` 0x8031DA
+(VCDS id 500), `prsoll` 0x8031F4 (id 501), `prdiff` 0x8031CA (id 1691),
+`0x80316E` (MSV volume after the limit), `0x8031F6` (spare pump volume),
+`0x80235A` (id 2051, the charge limit that carries the window term), and —
+via the DDLI logger, since neither has a measuring id — **`dwi` 0x803088** and
+**`wbho1s` 0x80307E**, whose margin is `0x80307E - 0x803088 - 2144`.
+
 ### 3.7 Diagnostics
 Expose `E_filt`, `T_fuel`, `status/mode`, `F`, `f_zw` in a spare measuring
 block (VCDS-readable) or via the DDLI logger, and later as OBD PID 0x52 if the

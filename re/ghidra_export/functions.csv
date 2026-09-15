@@ -1963,6 +1963,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x0C78F4,0x0C78F4,ext_flash,func,FUN_000c78f4,0x60,ghidra passat_azx_ori.bin 2026-09-15 @0C78F4,hypothesis,ghidra,
 0x0C7958,0x0C7958,ext_flash,func,FUN_000c7958,0x1EC,ghidra passat_azx_ori.bin 2026-09-15 @0C7958,hypothesis,ghidra,
 0x0C7B44,0x0C7B44,ext_flash,func,FUN_000c7b44,0x1B4,ghidra passat_azx_ori.bin 2026-09-15 @0C7B44,hypothesis,ghidra,
+0x0C7CF8,0x0C7CF8,ext_flash,func,rl_limit_min_awea,0x54,ghidra passat_azx_ori.bin 2026-09-15 @0C7CF8,static,ghidra,"VERIFIED-STATIC (B9, issue #17). 0x80235A = min(0x80234C, 0x803070, 0x802358, 0x802360, 0x80235E): the arbitration that carries the injection-window charge limit into the torque structure. VCDS measuring id 2051 (format 0x21, the rl format). No bl reaches it; it is dispatched through the process-pointer table at file 0x0B1F0C. re/findings/rail.md section 10"
 0x0C7D4C,0x0C7D4C,ext_flash,func,FUN_000c7d4c,0x84,ghidra passat_azx_ori.bin 2026-09-15 @0C7D4C,hypothesis,ghidra,
 0x0C7DD0,0x0C7DD0,ext_flash,func,FUN_000c7dd0,0x168,ghidra passat_azx_ori.bin 2026-09-15 @0C7DD0,hypothesis,ghidra,
 0x0C7F38,0x0C7F38,ext_flash,func,FUN_000c7f38,0xB0,ghidra passat_azx_ori.bin 2026-09-15 @0C7F38,hypothesis,ghidra,
@@ -2142,7 +2143,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x0FBC18,0x0FBC18,ext_flash,func,FUN_000fbc18,0x48,ghidra passat_azx_ori.bin 2026-09-15 @0FBC18,hypothesis,ghidra,
 0x0FBC60,0x0FBC60,ext_flash,func,FUN_000fbc60,0x48,ghidra passat_azx_ori.bin 2026-09-15 @0FBC60,hypothesis,ghidra,
 0x0FBCA8,0x0FBCA8,ext_flash,func,FUN_000fbca8,0x1C8,ghidra passat_azx_ori.bin 2026-09-15 @0FBCA8,hypothesis,ghidra,
-0x0FBE74,0x0FBE74,ext_flash,func,FUN_000fbe74,0x3D8,ghidra passat_azx_ori.bin 2026-09-15 @0FBE74,hypothesis,ghidra,
+0x0FBE74,0x0FBE74,ext_flash,func,rl_limit_charge_protect,0x3D8,ghidra passat_azx_ori.bin 2026-09-15 @0FBE74,static,ghidra,"VERIFIED-STATIC (B9, issue #17). Produces the charge-protection limits 0x80234C and 0x80234E that rl_limit_min_awea mins against the injection-window limit. re/findings/rail.md section 10"
 0x0FC250,0x0FC250,ext_flash,func,FUN_000fc250,0x40C,ghidra passat_azx_ori.bin 2026-09-15 @0FC250,hypothesis,ghidra,
 0x0FC65C,0x0FC65C,ext_flash,func,FUN_000fc65c,0xF0,ghidra passat_azx_ori.bin 2026-09-15 @0FC65C,hypothesis,ghidra,
 0x0FC74C,0x0FC74C,ext_flash,func,FUN_000fc74c,0x424,ghidra passat_azx_ori.bin 2026-09-15 @0FC74C,hypothesis,ghidra,
@@ -2979,7 +2980,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x409580,0x205580,int_flash,func,FUN_00409580,0x288,ghidra passat_azx_ori.bin 2026-09-15 @409580,hypothesis,ghidra,
 0x409808,0x205808,int_flash,func,FUN_00409808,0x28,ghidra passat_azx_ori.bin 2026-09-15 @409808,hypothesis,ghidra,
 0x409830,0x205830,int_flash,func,FUN_00409830,0x4,ghidra passat_azx_ori.bin 2026-09-15 @409830,hypothesis,ghidra,
-0x409834,0x205834,int_flash,func,FUN_00409834,0x3E4,ghidra passat_azx_ori.bin 2026-09-15 @409834,hypothesis,ghidra,
+0x409834,0x205834,int_flash,func,esausg_output,0x3E4,ghidra passat_azx_ori.bin 2026-09-15 @409834,static,ghidra,"VERIFIED-STATIC (B9, issue #17). %ESAUSG: the injection output stage. Converts the per-cylinder start angles 0x80309C[6] / 0x8030A8[6] against the reference array tbl_cyl_ref_angle (0x409CA0) with a mod-0x7800 wrap, scales by 15/64 into the TPU unit of 0.1 degCA and calls the drivers through the function pointers 0x7FCDC8 / 0x7FCDCC. It also programs the HARD INJECTION CUT-OFF angle (reference - 0x7FD290*0x20 = 50.25 degCA) and passes b_wbh_invalid == 0 as the enable - so the cut-off is armed only while rail pressure is at or below PRWBHMX (13.0 bar). re/findings/rail.md section 14"
 0x409CAC,0x205CAC,int_flash,func,FUN_00409cac,0x68,ghidra passat_azx_ori.bin 2026-09-15 @409CAC,hypothesis,ghidra,
 0x409D14,0x205D14,int_flash,func,FUN_00409d14,0x2C4,ghidra passat_azx_ori.bin 2026-09-15 @409D14,hypothesis,ghidra,
 0x409FD8,0x205FD8,int_flash,func,FUN_00409fd8,0x110,ghidra passat_azx_ori.bin 2026-09-15 @409FD8,hypothesis,ghidra,
@@ -3014,7 +3015,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x40C1DC,0x2081DC,int_flash,func,FUN_0040c1dc,0x5C,ghidra passat_azx_ori.bin 2026-09-15 @40C1DC,hypothesis,ghidra,
 0x40C238,0x208238,int_flash,func,FUN_0040c238,0x50,ghidra passat_azx_ori.bin 2026-09-15 @40C238,hypothesis,ghidra,
 0x40C288,0x208288,int_flash,func,FUN_0040c288,0x34,ghidra passat_azx_ori.bin 2026-09-15 @40C288,hypothesis,ghidra,
-0x40C2BC,0x2082BC,int_flash,func,FUN_0040c2bc,0x30,ghidra passat_azx_ori.bin 2026-09-15 @40C2BC,hypothesis,ghidra,
+0x40C2BC,0x2082BC,int_flash,func,div32_sat_u16,0x30,ghidra passat_azx_ori.bin 2026-09-15 @40C2BC,static,ghidra,"VERIFIED-STATIC (B9, issue #17). min(((hi<<16)|lo)/div, 0xFFFF); 0xFFFF when div == 0. The callers split a 32-bit product across hi/lo, so it is a saturating 32/16 divide"
 0x40C2EC,0x2082EC,int_flash,func,FUN_0040c2ec,0x48,ghidra passat_azx_ori.bin 2026-09-15 @40C2EC,hypothesis,ghidra,
 0x40C334,0x208334,int_flash,func,interp_2d_u8,0x80,ghidra passat_azx_ori.bin 2026-09-15 @40C334,static,ghidra,"interp_2d_u8 -- value-array interpolator: (val, nx, key_y, key_x), val[iy*nx+ix] (values u8)"
 0x40C3B4,0x2083B4,int_flash,func,interp_2d_s8,0x90,ghidra passat_azx_ori.bin 2026-09-15 @40C3B4,static,ghidra,"interp_2d_s8 -- value-array interpolator: (val, nx, key_y, key_x), val[iy*nx+ix] (values s8)"
@@ -3083,10 +3084,10 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x40FFA8,0x20BFA8,int_flash,func,FUN_0040ffa8,0x48,ghidra passat_azx_ori.bin 2026-09-15 @40FFA8,hypothesis,ghidra,
 0x40FFF0,0x20BFF0,int_flash,func,FUN_0040fff0,0x18,ghidra passat_azx_ori.bin 2026-09-15 @40FFF0,hypothesis,ghidra,
 0x410054,0x20C054,int_flash,func,FUN_00410054,0xC,ghidra passat_azx_ori.bin 2026-09-15 @410054,hypothesis,ghidra,
-0x410060,0x20C060,int_flash,func,FUN_00410060,0x24,ghidra passat_azx_ori.bin 2026-09-15 @410060,hypothesis,ghidra,
+0x410060,0x20C060,int_flash,func,mul_shr15_sat,0x24,ghidra passat_azx_ori.bin 2026-09-15 @410060,static,ghidra,"VERIFIED-STATIC (B9, issue #17). min((a*b)>>15, 0xFFFF)"
 0x410084,0x20C084,int_flash,func,FUN_00410084,0x24,ghidra passat_azx_ori.bin 2026-09-15 @410084,hypothesis,ghidra,
 0x4100A8,0x20C0A8,int_flash,func,FUN_004100a8,0x30,ghidra passat_azx_ori.bin 2026-09-15 @4100A8,hypothesis,ghidra,
-0x4101A0,0x20C1A0,int_flash,func,FUN_004101a0,0x2C,ghidra passat_azx_ori.bin 2026-09-15 @4101A0,hypothesis,ghidra,
+0x4101A0,0x20C1A0,int_flash,func,mul_div_sat,0x2C,ghidra passat_azx_ori.bin 2026-09-15 @4101A0,static,ghidra,"VERIFIED-STATIC (B9, issue #17). min(a*b/c, 0xFFFF); returns 0xFFFF when c == 0. Used by the prsoll rate limiter (0x45852C) and %VSTMSV"
 0x41027C,0x20C27C,int_flash,func,FUN_0041027c,0xB0,ghidra passat_azx_ori.bin 2026-09-15 @41027C,hypothesis,ghidra,
 0x41032C,0x20C32C,int_flash,func,FUN_0041032c,0x20,ghidra passat_azx_ori.bin 2026-09-15 @41032C,hypothesis,ghidra,
 0x41034C,0x20C34C,int_flash,func,FUN_0041034c,0x28,ghidra passat_azx_ori.bin 2026-09-15 @41034C,hypothesis,ghidra,
@@ -3284,7 +3285,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x422390,0x21E390,int_flash,func,FUN_00422390,0x18,ghidra passat_azx_ori.bin 2026-09-15 @422390,hypothesis,ghidra,
 0x4223A8,0x21E3A8,int_flash,func,FUN_004223a8,0x8,ghidra passat_azx_ori.bin 2026-09-15 @4223A8,hypothesis,ghidra,
 0x4223B0,0x21E3B0,int_flash,func,task_segment_a,0x10C,ghidra passat_azx_ori.bin 2026-09-15 @4223B0,static,ghidra,"VERIFIED-STATIC. Engine- (segment-) synchronous ERCOSEK task, TCB entry 5, id 40, priority 0x0A (B1, re/findings/scheduler.md section 4). Flat list of 60 argument-less bl; the fuelling run is 0x422478 gk -> 0x42247C rksplit -> 0x422480 aes_ti_out -> 0x422484 awea. The bl at 0x42247C is B6's flex-fuel hook site. B6 #14, re/findings/injection.md section 6.2"
-0x4224BC,0x21E4BC,int_flash,func,task41_ignition,0xC8,ghidra passat_azx_ori.bin 2026-09-15 @4224BC,static,ghidra,"VERIFIED-STATIC (B7, issue #15). ERCOSEK task id 41, TCB entry 6 at 0x47870C (prio 0x0A, flag 0x7FE642) - see re/findings/scheduler.md section 4. 42 straight-line bl's: the whole ignition module chain, incl. zwopt_build (0x4224DC), zwgru_build (0x4224E0), zwbas_per_bank (0x4224F4), zwmin_select/zwout_select (0x422500, 0x422560) and the output scheduler 0x41CC0C (0x422568). Period not established; segment-synchronous is a HYPOTHESIS."
+0x4224BC,0x21E4BC,int_flash,func,task_segment_b,0xC8,ghidra passat_azx_ori.bin 2026-09-15 @4224BC,static,ghidra,"VERIFIED-STATIC. The second engine-synchronous ERCOSEK task, TCB entry 6, id 41, priority 0x0A; the only caller of aes_ti_out_start. B6 #14, re/findings/injection.md"
 0x422584,0x21E584,int_flash,func,FUN_00422584,0x130,ghidra passat_azx_ori.bin 2026-09-15 @422584,hypothesis,ghidra,
 0x4226B4,0x21E6B4,int_flash,func,FUN_004226b4,0xB0,ghidra passat_azx_ori.bin 2026-09-15 @4226B4,hypothesis,ghidra,
 0x422764,0x21E764,int_flash,func,FUN_00422764,0x1D4,ghidra passat_azx_ori.bin 2026-09-15 @422764,hypothesis,ghidra,
@@ -3670,7 +3671,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x454528,0x250528,int_flash,func,FUN_00454528,0xA0,ghidra passat_azx_ori.bin 2026-09-15 @454528,hypothesis,ghidra,
 0x4545C8,0x2505C8,int_flash,func,FUN_004545c8,0xEC,ghidra passat_azx_ori.bin 2026-09-15 @4545C8,hypothesis,ghidra,
 0x4546B4,0x2506B4,int_flash,func,FUN_004546b4,0x1C8,ghidra passat_azx_ori.bin 2026-09-15 @4546B4,hypothesis,ghidra,
-0x45487C,0x25087C,int_flash,func,FUN_0045487c,0x4,ghidra passat_azx_ori.bin 2026-09-15 @45487C,hypothesis,ghidra,
+0x45487C,0x25087C,int_flash,func,awea_angles,0x4,ghidra passat_azx_ori.bin 2026-09-15 @45487C,static,ghidra,"VERIFIED-STATIC (B9, issue #17). %AWEA, time-synchronous part: the start-of-injection angle wbho1s 0x803078 from KFWBHO1SW (0x5D3A83) / KFWBHO1SWE (0x5D3A33) plus KFDWBHO1SK (0x5D3971), all u8 at 0.75 degCA per count on the 0x2300 = 210.0 degCA base; the window margin 0x7FD290 (= 67 = 50.25 degCA) from KLWBHO1SMX (0x5D3BF6); and the window-derived relative-charge limit 0x803070, which is 0xFFFF unless the fuel fault bit 0x80201E & 0x20 is set. Called once from 0x45CCE8. re/findings/rail.md sections 9 and 10"
 0x454880,0x250880,int_flash,func,FUN_00454880,0x520,ghidra passat_azx_ori.bin 2026-09-15 @454880,hypothesis,ghidra,
 0x454DA0,0x250DA0,int_flash,func,FUN_00454da0,0xC4,ghidra passat_azx_ori.bin 2026-09-15 @454DA0,hypothesis,ghidra,
 0x454E64,0x250E64,int_flash,func,FUN_00454e64,0x3C,ghidra passat_azx_ori.bin 2026-09-15 @454E64,hypothesis,ghidra,
@@ -3687,7 +3688,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x455BD0,0x251BD0,int_flash,func,FUN_00455bd0,0x8C,ghidra passat_azx_ori.bin 2026-09-15 @455BD0,hypothesis,ghidra,
 0x455C5C,0x251C5C,int_flash,func,FUN_00455c5c,0x4,ghidra passat_azx_ori.bin 2026-09-15 @455C5C,hypothesis,ghidra,
 0x455C60,0x251C60,int_flash,func,FUN_00455c60,0x990,ghidra passat_azx_ori.bin 2026-09-15 @455C60,hypothesis,ghidra,
-0x4565F0,0x2525F0,int_flash,func,FUN_004565f0,0x4,ghidra passat_azx_ori.bin 2026-09-15 @4565F0,hypothesis,ghidra,
+0x4565F0,0x2525F0,int_flash,func,amsv_main,0x4,ghidra passat_azx_ori.bin 2026-09-15 @4565F0,static,ghidra,"VERIFIED-STATIC (B9, issue #17). %AMSV: MSV drive. v = feed-forward 0x80320A + HDR output 0x8031D2 (CWAMSV 0x5D49CC bit 0, set); scaled into 0x80316C and clamped by the PUMP VOLUME LIMIT VMSVMX (0x5D4BC6 = 5000) -> 0x80316E; the angle curve KLDWMSV (0x5D4B44) turns that into the MSV angles 0x803164 / 0x803168. Also sets the HDR anti-windup bit 0x7FD2D9 bit 1. Called once from 0x45CC18. re/findings/rail.md section 5"
 0x4565F4,0x2525F4,int_flash,func,FUN_004565f4,0x848,ghidra passat_azx_ori.bin 2026-09-15 @4565F4,hypothesis,ghidra,
 0x456E3C,0x252E3C,int_flash,func,FUN_00456e3c,0x4,ghidra passat_azx_ori.bin 2026-09-15 @456E3C,hypothesis,ghidra,
 0x456E40,0x252E40,int_flash,func,FUN_00456e40,0x688,ghidra passat_azx_ori.bin 2026-09-15 @456E40,hypothesis,ghidra,
@@ -3696,16 +3697,16 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x4576B4,0x2536B4,int_flash,func,FUN_004576b4,0x80,ghidra passat_azx_ori.bin 2026-09-15 @4576B4,hypothesis,ghidra,
 0x457734,0x253734,int_flash,func,FUN_00457734,0x9C,ghidra passat_azx_ori.bin 2026-09-15 @457734,hypothesis,ghidra,
 0x4577D0,0x2537D0,int_flash,func,FUN_004577d0,0x2B8,ghidra passat_azx_ori.bin 2026-09-15 @4577D0,hypothesis,ghidra,
-0x457A88,0x253A88,int_flash,func,FUN_00457a88,0x4,ghidra passat_azx_ori.bin 2026-09-15 @457A88,hypothesis,ghidra,
+0x457A88,0x253A88,int_flash,func,ggdskv_sensor,0x4,ghidra passat_azx_ori.bin 2026-09-15 @457A88,static,ghidra,"VERIFIED-STATIC (B9, issue #17). %GGDSKV: averages the rail-pressure ADC into 0x802030, converts it with the 3-point linear sensor curve 0x5D518A (ADC 1632 = 0 -> 16384 = 31120, i.e. a 0.5/4.5 V ratiometric sensor with roughly 138 bar full scale at 0.005 bar/LSB) and adds the offset adaptation 0x800EE8>>7 -> 0x80202E. Called from 0x45CC00 and 0x430E24. re/findings/rail.md section 2c and 6"
 0x457A8C,0x253A8C,int_flash,func,FUN_00457a8c,0x13C,ghidra passat_azx_ori.bin 2026-09-15 @457A8C,hypothesis,ghidra,
-0x457BC8,0x253BC8,int_flash,func,FUN_00457bc8,0x4,ghidra passat_azx_ori.bin 2026-09-15 @457BC8,hypothesis,ghidra,
+0x457BC8,0x253BC8,int_flash,func,hdr_pi_controller,0x4,ghidra passat_azx_ori.bin 2026-09-15 @457BC8,static,ghidra,"VERIFIED-STATIC (B9, issue #17). %HDR: prdiff = prsoll(0x8031F4) - prist(0x8031DA) -> 0x8031CA; P gain KLGPHDR (0x5D51C0), I gain KLBIHDR (0x5D51DE), both over prdiff and scaled by an nmot factor; integrator enabled only while every bit of 0x7FD2F4 is set. Output 0x8031CC, converted to a volume in 0x8031D2, which %AMSV adds to the feed-forward. Called once from 0x45CC0C. re/findings/rail.md section 4"
 0x457BCC,0x253BCC,int_flash,func,FUN_00457bcc,0x4D8,ghidra passat_azx_ori.bin 2026-09-15 @457BCC,hypothesis,ghidra,
-0x4580A4,0x2540A4,int_flash,func,FUN_004580a4,0x188,ghidra passat_azx_ori.bin 2026-09-15 @4580A4,hypothesis,ghidra,
-0x45822C,0x25422C,int_flash,func,FUN_0045822c,0x4,ghidra passat_azx_ori.bin 2026-09-15 @45822C,hypothesis,ghidra,
+0x4580A4,0x2540A4,int_flash,func,hdrpist_select,0x188,ghidra passat_azx_ori.bin 2026-09-15 @4580A4,static,ghidra,"VERIFIED-STATIC (B9, issue #17). %HDRPIST: cross-checks the fast rail-pressure path (0x8031DE = 0x803438/5 - 0x5D5216) against the averaged one (0x80202E) with the threshold 0x5D5218 = 400 (2.0 bar) and hysteresis 0x5D521A = 300; publishes prist_w 0x8031DA as the fast value, a PT1 of the averaged value, or the substitute 0x80201A when the fault bit 0x80201E & 0x10 is set. Called once from 0x45CC04. re/findings/rail.md section 6"
+0x45822C,0x25422C,int_flash,func,hdrpsol_main,0x4,ghidra passat_azx_ori.bin 2026-09-15 @45822C,static,ghidra,"VERIFIED-STATIC (B9, issue #17). %HDRPSOL: the rail-pressure setpoint. Picks one of the six KFPRSOL* 8x8 u16 maps (0x5D5224 KH / 0x5D52A4 SCH / 0x5D5324 HOM / 0x5D53A4 HMM / 0x5D54A4 HKS, offset 0x5D5424) on the shared axes 0x5D5578 (load 0x803508) and 0x5D558A (nmot), clamps to KLPRMAX (0x5D5546 = 22000 = 110.0 bar) and PRSOLMN (0x5D5572 = 7000 = 35.0 bar), then rate-limits with the spare pump volume before writing prsoll 0x8031F4. Called once from 0x45CC08. re/findings/rail.md section 3"
 0x458230,0x254230,int_flash,func,FUN_00458230,0x508,ghidra passat_azx_ori.bin 2026-09-15 @458230,hypothesis,ghidra,
 0x458738,0x254738,int_flash,func,FUN_00458738,0x4,ghidra passat_azx_ori.bin 2026-09-15 @458738,hypothesis,ghidra,
 0x45873C,0x25473C,int_flash,func,FUN_0045873c,0x278,ghidra passat_azx_ori.bin 2026-09-15 @45873C,hypothesis,ghidra,
-0x4589B4,0x2549B4,int_flash,func,FUN_004589b4,0x4,ghidra passat_azx_ori.bin 2026-09-15 @4589B4,hypothesis,ghidra,
+0x4589B4,0x2549B4,int_flash,func,vstmsv_main,0x4,ghidra passat_azx_ori.bin 2026-09-15 @4589B4,static,ghidra,"VERIFIED-STATIC (B9, issue #17). %VSTMSV: MSV feed-forward and the rail model. kaparail_w 0x8031FE from KFKAPAKR (0x5D5628) over (0x7FD2FA, pressure 0x803202); volume demand 0x803200 from the fuel mass 0x80303A; steady-state pump volume 0x803212 through KFVSTVG/KFVSTVO (0x5D574A / 0x5D57AA); transient term 0x803206; total feed-forward 0x80320A. Called once from 0x45CC10. re/findings/rail.md section 4.4"
 0x4589B8,0x2549B8,int_flash,func,FUN_004589b8,0x474,ghidra passat_azx_ori.bin 2026-09-15 @4589B8,hypothesis,ghidra,
 0x458E2C,0x254E2C,int_flash,func,FUN_00458e2c,0x44,ghidra passat_azx_ori.bin 2026-09-15 @458E2C,hypothesis,ghidra,
 0x458E70,0x254E70,int_flash,func,FUN_00458e70,0x4,ghidra passat_azx_ori.bin 2026-09-15 @458E70,hypothesis,ghidra,
