@@ -17,6 +17,7 @@ what reproduce it.
 | `b4_eeprom_symbols.py` | Applies agent B4's names and plate comments for the QSPI driver, the M95160 EEPROM primitives, the EEP_CONF block manager and the KWP variant-coding path (issue #18). Run it before `export_symbols.py`. |
 | `b6_injection_symbols.py` | Agent B6's names and plate comments for the fuel-mass -> injection-time chain: `rk2ti`, `fkkvs_func`, `rksplit`, `aes_ti_out`, `awea_ti_to_angle`, the two engine-synchronous tasks, and the `KRKATE` / `KLTIKRPR` / `FKKVS` / `KLHDEV` / `TIMINP` calibration objects (issue #14). Run it before `export_symbols.py`. |
 | `b1_context_and_symbols.py` | Per-function r2 (SDA2) context from the call graph plus the brief-B1 symbols (issues #8 and #11). Run it after `med9_setup.py`; it supersedes `--boot-r2`. |
+| `b9_rail_symbols.csv` | Not a script: the `annotate.py` input that names agent B9's rail-pressure and injection-window chain — `%HDRPSOL` / `%HDR` / `%HDRPIST` / `%VSTMSV` / `%AMSV`, the `%AWEA` angle maps and window terms, `esausg_output`, the `KFPRSOL*` family, `KLPRMAX`, `VHDPMX` / `VMSVMX` and the window scalars (issue #17). Apply it before `export_symbols.py`; see `re/findings/rail.md`. |
 | `b7_ignition_symbols.csv` | Not a script: the `annotate.py` input that names agent B7's ignition/knock chain — `KFZW`, `KFZWOP`, `zwgru_build` and the insertion point, `dwkrz`, the knock modules (issue #15). Apply it before `export_symbols.py`; see `re/findings/ignition.md`. |
 
 ## Prerequisites
@@ -190,3 +191,22 @@ are duplicates and were removed from `re/symbols.csv` by hand:
 `b1_context_and_symbols.py` drops the stale label, and this run did not use
 that script) and `code_directory` at 0x080100 (B1 recorded it as
 `tbl_code_sections`).
+
+## Agent B9 rail-pressure and window symbols (issue #17)
+
+```bash
+./.venv/bin/python ghidra_scripts/annotate.py \
+    --csv ghidra_scripts/b9_rail_symbols.csv \
+    --project-dir /tmp/ghidra_B9 --project-name med9
+```
+
+68 rows: the five `%HDR*` / `%AMSV` processes and their RAM variables, the six
+`KFPRSOL*` setpoint maps with their shared axes, `KLPRMAX` / `PRSOLMN` /
+`VHDPMX` / `VMSVMX`, the `%AWEA` angle maps and the two window scalars, the
+injection output stage `esausg_output` and the per-cylinder reference angles,
+plus three arithmetic helpers. Every plate comment carries its
+VERIFIED-STATIC / HYPOTHESIS tag. Background: `re/findings/rail.md`.
+
+The same two stale rows that brief B7 had to delete by hand
+(`tbl_exception_vectors` at 0x000000 and `code_directory` at 0x080100) come
+back on every `export_symbols.py` run and were removed again.
