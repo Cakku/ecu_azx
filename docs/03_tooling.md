@@ -156,7 +156,30 @@ r2) were right.
   powertrain-bus access (the gateway filters it).
 - DBC in `data/` is the infotainment CAN (PQ35 ICAN), useful only for
   gateway-bridged engine frames (`mGW_Motor` 0x35B etc.), not for the
-  powertrain bus the ECU sits on.
+  powertrain bus the ECU sits on. `data/ethanol_node.dbc` is ours: the one
+  flex-fuel frame the Pico node sends (0x0EC), for SavvyCAN/cantools.
+  Decode captured frames with `tools/ethanol_frame_decode.py`.
+
+### 6.1 Pico flex-fuel node toolchain on this Mac (VERIFIED-DYNAMIC, 2026-09-15)
+
+Verified by building `pico_can_sender` for `PICO_BOARD=pico2` (RP2350) on
+macOS 15 / Apple silicon; `build/pico_can_sender.uf2` is produced with no
+warnings, and the MCP2515 and SSD1306 libraries build unmodified.
+
+```bash
+brew install cmake ninja                 # no sudo
+# Arm GNU toolchain 14.2.Rel1, no sudo (the gcc-arm-embedded cask needs a
+# password for its .pkg installer); unpacked where the Pico VS Code extension
+# also looks, which is the toolchainVersion named in CMakeLists.txt:
+#   ~/.pico-sdk/toolchain/14_2_Rel1
+# Pico SDK 2.2.0 (the sdkVersion in CMakeLists.txt) into the gitignored work/:
+git clone --depth 1 --branch 2.2.0 https://github.com/raspberrypi/pico-sdk.git work/pico-sdk
+git -C work/pico-sdk submodule update --init --depth 1 lib/tinyusb
+```
+
+Exact commands, the sensor pull-up/level-shift network and the host test
+(`pico_can_sender/test/run_tests.sh`, needs only `cc`) are in
+`pico_can_sender/README.md`.
 
 ## 7. Flashing, backup and recovery
 
