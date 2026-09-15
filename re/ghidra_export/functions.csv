@@ -1673,10 +1673,10 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x0AC2C4,0x0AC2C4,ext_flash,func,FUN_000ac2c4,0x1C,ghidra passat_azx_ori.bin 2026-09-15 @0AC2C4,hypothesis,ghidra,
 0x0AC2E0,0x0AC2E0,ext_flash,func,FUN_000ac2e0,0x30,ghidra passat_azx_ori.bin 2026-09-15 @0AC2E0,hypothesis,ghidra,
 0x0AC318,0x0AC318,ext_flash,func,FUN_000ac318,0x58,ghidra passat_azx_ori.bin 2026-09-15 @0AC318,hypothesis,ghidra,
-0x0AC370,0x0AC370,ext_flash,func,FUN_000ac370,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0AC370,hypothesis,ghidra,
+0x0AC370,0x0AC370,ext_flash,func,rk2ti,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0AC370,dynamic,ghidra,"VERIFIED-STATIC + VERIFIED-DYNAMIC. u16 rk2ti(inhibit, rk_i, frt, tv, fcorr): ti_raw = (rk_i*frt)>>9 (the mullw at 0x0AC39C is the flex-fuel multiplication point); ti = ((ti_raw * KLHDEV(ti_raw) * fcorr) >> 30) +sat tv, clamped to >= TIMINP(0x5C7328) and to 0 when inhibit != 0. The FR's RK2TI class, angle-synchronous part of %RKTI. Modelled bit-exactly by emu/models/injection.py. B6 #14, re/findings/injection.md sections 3 and 10"
 0x0AC374,0x0AC374,ext_flash,func,FUN_000ac374,0xB8,ghidra passat_azx_ori.bin 2026-09-15 @0AC374,hypothesis,ghidra,
-0x0AC42C,0x0AC42C,ext_flash,func,FUN_000ac42c,0x8C,ghidra passat_azx_ori.bin 2026-09-15 @0AC42C,hypothesis,ghidra,
-0x0AC4B8,0x0AC4B8,ext_flash,func,FUN_000ac4b8,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0AC4B8,hypothesis,ghidra,
+0x0AC42C,0x0AC42C,ext_flash,func,rkti_dp_angle,0x8C,ghidra passat_azx_ori.bin 2026-09-15 @0AC42C,dynamic,ghidra,"VERIFIED-STATIC + VERIFIED-DYNAMIC. clamp(prist - ((KLPBR(|x|) * scale) >> 17), 0, 0xFFFF): the angle-dependent differential pressure across the injector (FR KLPBR/KFPBRA). B6 #14, re/findings/injection.md section 5.7"
+0x0AC4B8,0x0AC4B8,ext_flash,func,fkkvs_func,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0AC4B8,dynamic,ghidra,"VERIFIED-STATIC + VERIFIED-DYNAMIC. fkkvs_func(rk_i, dp, *tv, *frt, use_fkkvs, *fcorr): one axis_search_u16_hint on the dp axis 0x5D3DBE serves both KLTIKRPR (0x5C72F8) and the dead-time curve (0x5C7310); frt = min((KRKATE * KLTIKRPR(dp)) >> 14, 0xFFFF); fcorr = FKKVS(ti_eff, nmot) in Q15, or 0x8000 when use_fkkvs == 0. The FR's FKKVSFUNC class, time-synchronous part of %RKTI. B6 #14, re/findings/injection.md section 4"
 0x0AC4BC,0x0AC4BC,ext_flash,func,FUN_000ac4bc,0x10C,ghidra passat_azx_ori.bin 2026-09-15 @0AC4BC,hypothesis,ghidra,
 0x0AC5C8,0x0AC5C8,ext_flash,func,FUN_000ac5c8,0x78,ghidra passat_azx_ori.bin 2026-09-15 @0AC5C8,hypothesis,ghidra,
 0x0AC7E0,0x0AC7E0,ext_flash,func,FUN_000ac7e0,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0AC7E0,hypothesis,ghidra,
@@ -3193,7 +3193,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x41A690,0x216690,int_flash,func,FUN_0041a690,0x19C,ghidra passat_azx_ori.bin 2026-09-15 @41A690,hypothesis,ghidra,
 0x41A82C,0x21682C,int_flash,func,FUN_0041a82c,0x208,ghidra passat_azx_ori.bin 2026-09-15 @41A82C,hypothesis,ghidra,
 0x41AA34,0x216A34,int_flash,func,FUN_0041aa34,0x14,ghidra passat_azx_ori.bin 2026-09-15 @41AA34,hypothesis,ghidra,
-0x41AA48,0x216A48,int_flash,func,FUN_0041aa48,0x39C,ghidra passat_azx_ori.bin 2026-09-15 @41AA48,hypothesis,ghidra,
+0x41AA48,0x216A48,int_flash,func,gk_rk,0x39C,ghidra passat_azx_ori.bin 2026-09-15 @41AA48,static,ghidra,"VERIFIED-STATIC. Gemischkontrolle: base fuel mass * fr (0x802DF8 / 0x802E00, Q15) + fra (0x801D1A) * frm (0x801E36 / 0x801E28, Q15), minus 0x80315C, then the ZGST per-cylinder factor 0x801D8C[cyl]; publishes rk at RAM 0x803038 with the sth at 0x41ADD4. B6 #14, re/findings/injection.md section 9"
 0x41ADE4,0x216DE4,int_flash,func,FUN_0041ade4,0x8C,ghidra passat_azx_ori.bin 2026-09-15 @41ADE4,hypothesis,ghidra,
 0x41AE70,0x216E70,int_flash,func,FUN_0041ae70,0xB8,ghidra passat_azx_ori.bin 2026-09-15 @41AE70,hypothesis,ghidra,
 0x41AF2C,0x216F2C,int_flash,func,FUN_0041af2c,0x50,ghidra passat_azx_ori.bin 2026-09-15 @41AF2C,hypothesis,ghidra,
@@ -3202,7 +3202,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x41B93C,0x21793C,int_flash,func,FUN_0041b93c,0x3C,ghidra passat_azx_ori.bin 2026-09-15 @41B93C,hypothesis,ghidra,
 0x41B978,0x217978,int_flash,func,FUN_0041b978,0x2C,ghidra passat_azx_ori.bin 2026-09-15 @41B978,hypothesis,ghidra,
 0x41B9A4,0x2179A4,int_flash,func,FUN_0041b9a4,0x1C,ghidra passat_azx_ori.bin 2026-09-15 @41B9A4,hypothesis,ghidra,
-0x41B9C0,0x2179C0,int_flash,func,FUN_0041b9c0,0x3BC,ghidra passat_azx_ori.bin 2026-09-15 @41B9C0,hypothesis,ghidra,
+0x41B9C0,0x2179C0,int_flash,func,awea_ti_to_angle,0x3BC,ghidra passat_azx_ori.bin 2026-09-15 @41B9C0,static,ghidra,"VERIFIED-STATIC. Converts ti into a crank angle dwi = (ti * k_nmot[0x803072]) >> 13 (result 0x803088) and clamps the start/end-of-injection angles - this, not a ti maximum, is the injection window limit. Window scalars 0x5D396D / 0x5D396E (both 0x00 in this dataset), runtime terms 0x7FD28E / 0x7FD290. The FR's %AWEA. B6 #14, re/findings/injection.md section 8"
 0x41BD7C,0x217D7C,int_flash,func,FUN_0041bd7c,0x88,ghidra passat_azx_ori.bin 2026-09-15 @41BD7C,hypothesis,ghidra,
 0x41BE04,0x217E04,int_flash,func,FUN_0041be04,0x54,ghidra passat_azx_ori.bin 2026-09-15 @41BE04,hypothesis,ghidra,
 0x41BE58,0x217E58,int_flash,func,FUN_0041be58,0x4C,ghidra passat_azx_ori.bin 2026-09-15 @41BE58,hypothesis,ghidra,
@@ -3211,10 +3211,10 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x41C000,0x218000,int_flash,func,FUN_0041c000,0x2DC,ghidra passat_azx_ori.bin 2026-09-15 @41C000,hypothesis,ghidra,
 0x41C2DC,0x2182DC,int_flash,func,FUN_0041c2dc,0x1C,ghidra passat_azx_ori.bin 2026-09-15 @41C2DC,hypothesis,ghidra,
 0x41C2F8,0x2182F8,int_flash,func,FUN_0041c2f8,0xA8,ghidra passat_azx_ori.bin 2026-09-15 @41C2F8,hypothesis,ghidra,
-0x41C3A0,0x2183A0,int_flash,func,FUN_0041c3a0,0xEC,ghidra passat_azx_ori.bin 2026-09-15 @41C3A0,hypothesis,ghidra,
+0x41C3A0,0x2183A0,int_flash,func,rksplit,0xEC,ghidra passat_azx_ori.bin 2026-09-15 @41C3A0,static,ghidra,"VERIFIED-STATIC. Splits rk (RAM 0x803038) over the active injections into 0x8030B4/B6 (type 0x2000), 0x8030BA/BC (type 0x400), 0x8030B8 (homogeneous) and 0x8030BE (start), under the type bits of RAM 0x803092; the split fractions are the bytes 0x801D89 / 0x801D8A. The FR's %RKSPLIT. B6 #14, re/findings/injection.md section 6.1"
 0x41C48C,0x21848C,int_flash,func,FUN_0041c48c,0x30,ghidra passat_azx_ori.bin 2026-09-15 @41C48C,hypothesis,ghidra,
-0x41C4BC,0x2184BC,int_flash,func,FUN_0041c4bc,0x274,ghidra passat_azx_ori.bin 2026-09-15 @41C4BC,hypothesis,ghidra,
-0x41C730,0x218730,int_flash,func,FUN_0041c730,0x7C,ghidra passat_azx_ori.bin 2026-09-15 @41C730,hypothesis,ghidra,
+0x41C4BC,0x2184BC,int_flash,func,aes_ti_out,0x274,ghidra passat_azx_ori.bin 2026-09-15 @41C4BC,static,ghidra,"VERIFIED-STATIC. Calls rk2ti for every active injection, writes the per-injection ti to 0x8030E4/E6/E8/EA and the total to 0x8030C4 (the VCDS group 002.3 value), and raises the 'ti is at TIMINP' flag 0x7FEA54/0x7FEA55. The FR's %AES. B6 #14, re/findings/injection.md sections 2 and 3"
+0x41C730,0x218730,int_flash,func,aes_ti_out_start,0x7C,ghidra passat_azx_ori.bin 2026-09-15 @41C730,static,ghidra,"VERIFIED-STATIC. The start-injection counterpart of aes_ti_out, called from the second engine-synchronous task 0x4224BC. B6 #14, re/findings/injection.md"
 0x41C7AC,0x2187AC,int_flash,func,FUN_0041c7ac,0xF8,ghidra passat_azx_ori.bin 2026-09-15 @41C7AC,hypothesis,ghidra,
 0x41C8A4,0x2188A4,int_flash,func,FUN_0041c8a4,0x68,ghidra passat_azx_ori.bin 2026-09-15 @41C8A4,hypothesis,ghidra,
 0x41C90C,0x21890C,int_flash,func,FUN_0041c90c,0x5C,ghidra passat_azx_ori.bin 2026-09-15 @41C90C,hypothesis,ghidra,
@@ -3283,7 +3283,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x422384,0x21E384,int_flash,func,FUN_00422384,0xC,ghidra passat_azx_ori.bin 2026-09-15 @422384,hypothesis,ghidra,
 0x422390,0x21E390,int_flash,func,FUN_00422390,0x18,ghidra passat_azx_ori.bin 2026-09-15 @422390,hypothesis,ghidra,
 0x4223A8,0x21E3A8,int_flash,func,FUN_004223a8,0x8,ghidra passat_azx_ori.bin 2026-09-15 @4223A8,hypothesis,ghidra,
-0x4223B0,0x21E3B0,int_flash,func,FUN_004223b0,0x10C,ghidra passat_azx_ori.bin 2026-09-15 @4223B0,hypothesis,ghidra,
+0x4223B0,0x21E3B0,int_flash,func,task_segment_a,0x10C,ghidra passat_azx_ori.bin 2026-09-15 @4223B0,static,ghidra,"VERIFIED-STATIC. Engine- (segment-) synchronous ERCOSEK task, TCB entry 5, id 40, priority 0x0A (B1, re/findings/scheduler.md section 4). Flat list of 60 argument-less bl; the fuelling run is 0x422478 gk -> 0x42247C rksplit -> 0x422480 aes_ti_out -> 0x422484 awea. The bl at 0x42247C is B6's flex-fuel hook site. B6 #14, re/findings/injection.md section 6.2"
 0x4224BC,0x21E4BC,int_flash,func,task41_ignition,0xC8,ghidra passat_azx_ori.bin 2026-09-15 @4224BC,static,ghidra,"VERIFIED-STATIC (B7, issue #15). ERCOSEK task id 41, TCB entry 6 at 0x47870C (prio 0x0A, flag 0x7FE642) - see re/findings/scheduler.md section 4. 42 straight-line bl's: the whole ignition module chain, incl. zwopt_build (0x4224DC), zwgru_build (0x4224E0), zwbas_per_bank (0x4224F4), zwmin_select/zwout_select (0x422500, 0x422560) and the output scheduler 0x41CC0C (0x422568). Period not established; segment-synchronous is a HYPOTHESIS."
 0x422584,0x21E584,int_flash,func,FUN_00422584,0x130,ghidra passat_azx_ori.bin 2026-09-15 @422584,hypothesis,ghidra,
 0x4226B4,0x21E6B4,int_flash,func,FUN_004226b4,0xB0,ghidra passat_azx_ori.bin 2026-09-15 @4226B4,hypothesis,ghidra,
@@ -3426,7 +3426,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x430448,0x22C448,int_flash,func,FUN_00430448,0x194,ghidra passat_azx_ori.bin 2026-09-15 @430448,hypothesis,ghidra,
 0x4305DC,0x22C5DC,int_flash,func,FUN_004305dc,0x240,ghidra passat_azx_ori.bin 2026-09-15 @4305DC,hypothesis,ghidra,
 0x43081C,0x22C81C,int_flash,func,FUN_0043081c,0x158,ghidra passat_azx_ori.bin 2026-09-15 @43081C,hypothesis,ghidra,
-0x430974,0x22C974,int_flash,func,FUN_00430974,0x58,ghidra passat_azx_ori.bin 2026-09-15 @430974,hypothesis,ghidra,
+0x430974,0x22C974,int_flash,func,rkti_pre_start,0x58,ghidra passat_azx_ori.bin 2026-09-15 @430974,static,ghidra,"VERIFIED-STATIC. The start-injection variant of rkti_pre: use_fkkvs=0 (the FR suppresses FKKVS during start via B_stendes), outputs frt to 0x8030C8 and tv to 0x8030F2. Called only from task_100ms_int (bl at 0x432B00). B6 #14, re/findings/injection.md section 6.1"
 0x4309CC,0x22C9CC,int_flash,func,FUN_004309cc,0x174,ghidra passat_azx_ori.bin 2026-09-15 @4309CC,hypothesis,ghidra,
 0x430B40,0x22CB40,int_flash,func,FUN_00430b40,0x18,ghidra passat_azx_ori.bin 2026-09-15 @430B40,hypothesis,ghidra,
 0x430B58,0x22CB58,int_flash,func,FUN_00430b58,0x2AC,ghidra passat_azx_ori.bin 2026-09-15 @430B58,hypothesis,ghidra,
@@ -3675,7 +3675,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x454DA0,0x250DA0,int_flash,func,FUN_00454da0,0xC4,ghidra passat_azx_ori.bin 2026-09-15 @454DA0,hypothesis,ghidra,
 0x454E64,0x250E64,int_flash,func,FUN_00454e64,0x3C,ghidra passat_azx_ori.bin 2026-09-15 @454E64,hypothesis,ghidra,
 0x454EA0,0x250EA0,int_flash,func,FUN_00454ea0,0x1A0,ghidra passat_azx_ori.bin 2026-09-15 @454EA0,hypothesis,ghidra,
-0x455040,0x251040,int_flash,func,FUN_00455040,0x198,ghidra passat_azx_ori.bin 2026-09-15 @455040,hypothesis,ghidra,
+0x455040,0x251040,int_flash,func,rkti_pre,0x198,ghidra passat_azx_ori.bin 2026-09-15 @455040,static,ghidra,"VERIFIED-STATIC. Per-injection-type driver of fkkvs_func: picks the active types out of the bit mask at RAM 0x803094, computes dp = prist(0x8031DA) - (0x7FEFAE >> 7) or via rkti_dp_angle, and fills the frt/tv/fcorr triples 0x8030D2..0x8030DE / 0x8030EC..0x8030F2. Called only from task_1000ms_int (bl at 0x45CCEC). B6 #14, re/findings/injection.md sections 4, 6.4"
 0x4551D8,0x2511D8,int_flash,func,FUN_004551d8,0x4,ghidra passat_azx_ori.bin 2026-09-15 @4551D8,hypothesis,ghidra,
 0x4551DC,0x2511DC,int_flash,func,FUN_004551dc,0x270,ghidra passat_azx_ori.bin 2026-09-15 @4551DC,hypothesis,ghidra,
 0x45544C,0x25144C,int_flash,func,FUN_0045544c,0x208,ghidra passat_azx_ori.bin 2026-09-15 @45544C,hypothesis,ghidra,

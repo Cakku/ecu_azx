@@ -15,6 +15,7 @@ what reproduce it.
 | `med9_symbols.py` | Shared CSV/address helpers. Not a Ghidra script; imported by the two above. |
 | `enumerate_maps.py` | Walks the 44 Bosch interpolation helpers in the on-chip flash, resolves the constant arguments at every call site, and writes `re/calibration_draft.csv`, `re/findings/calibration_call_sites.csv` and `re/findings/calibration_coverage.md`. Names the helpers in the program so `export_symbols.py` carries them into `re/symbols.csv` (issue #19). |
 | `b4_eeprom_symbols.py` | Applies agent B4's names and plate comments for the QSPI driver, the M95160 EEPROM primitives, the EEP_CONF block manager and the KWP variant-coding path (issue #18). Run it before `export_symbols.py`. |
+| `b6_injection_symbols.py` | Agent B6's names and plate comments for the fuel-mass -> injection-time chain: `rk2ti`, `fkkvs_func`, `rksplit`, `aes_ti_out`, `awea_ti_to_angle`, the two engine-synchronous tasks, and the `KRKATE` / `KLTIKRPR` / `FKKVS` / `KLHDEV` / `TIMINP` calibration objects (issue #14). Run it before `export_symbols.py`. |
 | `b1_context_and_symbols.py` | Per-function r2 (SDA2) context from the call graph plus the brief-B1 symbols (issues #8 and #11). Run it after `med9_setup.py`; it supersedes `--boot-r2`. |
 | `b7_ignition_symbols.csv` | Not a script: the `annotate.py` input that names agent B7's ignition/knock chain — `KFZW`, `KFZWOP`, `zwgru_build` and the insertion point, `dwkrz`, the knock modules (issue #15). Apply it before `export_symbols.py`; see `re/findings/ignition.md`. |
 
@@ -111,6 +112,17 @@ with their confidence tag in the plate comment. It also drops the stale label
 `tbl_exception_vectors` that `med9_setup.py` still seeds at 0x0 (A2 renamed it
 to `tbl_etr_branch_table` in `re/symbols.csv`; without the drop every
 `export_symbols.py` run appends a duplicate row for 0x000000).
+
+> **2026-09-15, B6 (#14).** The shared project has the same problem at
+> **0x080100**, where the stale label `code_directory` survives next to
+> B1's `tbl_code_sections`. Until a script drops it too, check
+> `re/symbols.csv` for duplicate addresses after every
+> `export_symbols.py` run and delete the stale line:
+>
+> ```bash
+> python3 -c "import csv,collections;r=list(csv.reader(open('re/symbols.csv')))[1:];\
+>   c=collections.Counter(x[0] for x in r);print([a for a,n in c.items() if n>1])"
+> ```
 
 Violations are listed outside Ghidra:
 

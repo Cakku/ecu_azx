@@ -174,6 +174,44 @@ Do not use the lambda adaptation (fra/frau/frao) as the correction path: the
 phases (cranking, warm-up before sensor light-off, WOT enrichment) which is
 where E85 goes lean, and it cannot inform ignition.
 
+#### Added 2026-09-15 (brief B6, issue #14) — the insertion point is resolved, VERIFIED-STATIC
+
+Full derivation and evidence: `re/findings/injection.md`. Model and
+regression test: `emu/models/injection.py`, `tests/test_injection_model.py`.
+
+* **The injector constant is mass-based, not volumetric.** `KRKATE` (u16
+  scalar, **0x5D3DBC = 3858**) is multiplied by `KLTIKRPR(dp)` (0x5C72F8),
+  whose twelve points obey `value x sqrt(dp) = const` to 1 % — the Bernoulli
+  orifice law, i.e. time per unit **mass** at a given pressure. So the factor
+  of §3.3 is applied unchanged (1.50 at E85); **do not** divide by the
+  density ratio.
+* **Insertion point: `rk` at RAM 0x803038**, which has exactly one writer
+  (`sth r6,0x3048(r13)` at 0x41ADD4, in `gk_rk`) and seven readers, all inside
+  `rksplit` (0x41C3A0). Everything the conversion sees — homogeneous, both
+  split modes and the start injection — is derived from that one cell.
+* **Hook site: 0x42247C**, the `bl 0x41C3A0` (`4B FF 9F 25`) inside the
+  engine-synchronous task `task_segment_a` (0x4223B0, ERCOSEK TCB 5, id 40,
+  prio 0x0A). Its neighbours are argument-less `bl`s, so r3-r12 are dead
+  exactly as at B1's 100 ms hook; the stub scales 0x803038 and ends with
+  `b 0x41C3A0`. One word; then `tools/checksum.py fix`.
+* **Fixed point:** `rk` is u16 with no implicit fraction, so
+  `rk = min((rk * F_q10) >> 10, 0xFFFF)` and the §4 `ff_F_curve` in 1/1024 is
+  the right format; `F = 1024` is bit-identical to stock (asserted by the
+  test).
+* **Bench alternative with no code at all:** `KRKATE` has exactly one
+  reference in the whole image, so multiplying the scalar at 0x5D3DBC fuels a
+  fixed blend for a first drive (E85: 3858 -> 5787), then `checksum.py fix`.
+* **The `%UFRKTI` worry does not bind here.** Nothing outside the injection
+  chain reads `rk` or `ti`; the monitoring-shaped function `FUN_00455C60`
+  reads the **pre-`ZGST`** bank values 0x803030/0x803032/0x803034/0x80303A,
+  which the hook is downstream of. The corollary is that after the patch the
+  level-2 path no longer monitors the fuel that is actually injected.
+* **The limit to watch is the injection window, not a `ti` maximum.** `rk2ti`
+  clamps only from below (`TIMINP` = 900 at 0x5C7328). The ceiling is applied
+  in the angle domain by `awea_ti_to_angle` (0x41B9C0) on
+  `dwi = (ti * k_nmot) >> 13` at RAM **0x803088** — that is the signal to log
+  per §3.6.
+
 ### 3.4 Ignition
 Blend factor `f_zw(E)` from a 1D curve (0 at E0, 1 at about E40-50 where
 MBT is usually reached, per prj) applied as
