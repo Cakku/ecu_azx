@@ -162,8 +162,8 @@ EEPROM (ST M95160-class, 2 KB, on the SPI bus) has its own block checksums
 | 0x2BC50 | pointer 0x0002BF50 (CAN configuration structure) | low-alias address |
 | 0x2BC90 | **CAN receive table**, header + 21 entries x 16 bytes `index, 0x01mmnn08 (module/slot/dlc), 4, CAN-ID` | IDs 0x1A0 0x5A0 0x4A0 0x440 0x540 0x320 0x442 0x1AC 0x0C2 0x050(dlc 4) 0x51A 0x5E0 0x390 0x38A(dlc 4) **0x7FF 0x7FF** 0x2A0 0x368 **0x7FF 0x7FF** 0x5C0. The four 0x7FF entries are unused receive slots. |
 | 0x2BDF0 | **CAN transmit table**, header + 16 entries `index, CAN-ID, 0x0101xxxx, dlc` | 0x7C7 0x280 0x288 0x380 0x480 0x488 0x580 0x588 0x48A 0x38A(4) 0x284(6) 0x56A 0x7C4 0x7C5 0x7C5 0x7C6. These are the Motor_x frames the ECU sends (the old notes called this the "registered CAN IDs" and mislabeled several). 0x7C4 matches the CCP DTO id reported for MED9.1. |
-| 0xA5654 | TKMWL measuring-variable table (candidate, MED9Toolchain signature `blr 00 03`) | to be confirmed with 360trev/MED9inf |
-| 0x38EA8 | measuring-block return helper (candidate, toolchain signature) | HYPOTHESIS |
+| 0xA5658 | **TKMWL measuring-variable table**, 2200 x 4 B handler pointers (0xA5658-0xA78B7) | Indexed by the dispatcher at 0x45768 (`lis r12,0xA; addi r12,r12,0x5658; lwzx r31,r12,id*4; mtlr; blrl`), which 360trev/MED9inf finds by signature. 665 ids are implemented, 1535 point at the "not available" stub 0x38EC4. Each handler leaves a VAG (formula, A, B) triple in RAM 0x7FD06F-0x7FD071 through the helper at 0x38EB4. Reached only from the KWP SID 0x21 route (0x35F6C -> 0xA2CC4 -> 0x3583C -> 0x3574C -> 0x45768) and from 0x357E0, which the on-chip flash calls. `tools/measuring_vars.py`, `re/measuring_vars.csv`, `re/findings/measuring_vars.md`. |
+| 0x1C5518 / **0x5C5518** | **Measuring-block group table**, 4 fields x 255 groups of u16 variable ids | `entry(field, group) = 0x5C5518 + field*0x1FE + group*2`; `addi r29,r2,-0x4AD8` at 0x35760 and 0x357F8 with the application r2 = 0x5C9FF0. Full listing in `re/findings/measuring_groups.txt`. |
 | 0x12004-0x121D8 | memory controller init (BR/OR from clock-mode tables at file 0x10020-0x1009C) | |
 | 0x11E44 | OR value adjust (clears a bit when RAM byte 0x7FE9E8 == 1) | |
 
@@ -183,3 +183,20 @@ EEPROM (ST M95160-class, 2 KB, on the SPI bus) has its own block checksums
 - The "free space" list is right about 0x144954+ but those ranges are inside
   checksummed 64 KB blocks; every write there needs `tools/checksum.py fix`.
 - Function-size based guesses about "fueling functions" are unverified.
+
+## 9. Corrections to earlier revisions of this document
+
+2026-09-15, brief A3 (issue #10), evidence in `re/findings/measuring_vars.md`:
+
+- Section 7 said *"0xA5654 TKMWL measuring-variable table (candidate,
+  MED9Toolchain signature `blr 00 03`)"*. **The table starts at 0xA5658.**
+  The byte signature matched the `4E800020` (`blr`) that ends the preceding
+  function plus the first two bytes of the first table entry (`0003 8EC4`),
+  i.e. it was one instruction early. The dispatcher's own `lis`/`addi` pair at
+  0x45780 gives 0xA5658, and `tools/find_abs_refs.py --range 0xA5650 0xA78C0`
+  finds that single reference and no other.
+- Section 7 said *"0x38EA8 measuring-block return helper (candidate, toolchain
+  signature)"*. **The result helper is at 0x38EB4**; 0x38EA8 is the tail of an
+  unrelated flag routine that ends with its own `blr` at 0x38EB0.
+- Both candidates were HYPOTHESIS and were never used for a decision; they are
+  now VERIFIED-STATIC at the corrected addresses.
