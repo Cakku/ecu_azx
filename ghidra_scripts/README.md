@@ -16,6 +16,7 @@ what reproduce it.
 | `enumerate_maps.py` | Walks the 44 Bosch interpolation helpers in the on-chip flash, resolves the constant arguments at every call site, and writes `re/calibration_draft.csv`, `re/findings/calibration_call_sites.csv` and `re/findings/calibration_coverage.md`. Names the helpers in the program so `export_symbols.py` carries them into `re/symbols.csv` (issue #19). |
 | `b4_eeprom_symbols.py` | Applies agent B4's names and plate comments for the QSPI driver, the M95160 EEPROM primitives, the EEP_CONF block manager and the KWP variant-coding path (issue #18). Run it before `export_symbols.py`. |
 | `b1_context_and_symbols.py` | Per-function r2 (SDA2) context from the call graph plus the brief-B1 symbols (issues #8 and #11). Run it after `med9_setup.py`; it supersedes `--boot-r2`. |
+| `b7_ignition_symbols.csv` | Not a script: the `annotate.py` input that names agent B7's ignition/knock chain — `KFZW`, `KFZWOP`, `zwgru_build` and the insertion point, `dwkrz`, the knock modules (issue #15). Apply it before `export_symbols.py`; see `re/findings/ignition.md`. |
 
 ## Prerequisites
 
@@ -156,3 +157,24 @@ What crosses the boundary, and what does not:
 - Ghidra function *signatures*, data types and decompiler settings do not
   round trip. Only names, kinds, sizes and comments do. Anything else has to
   be re-derived by `med9_setup.py`.
+
+## Agent B7's ignition symbols (issue #15)
+
+```bash
+./.venv/bin/python ghidra_scripts/annotate.py \
+    --csv ghidra_scripts/b7_ignition_symbols.csv \
+    --project-dir /tmp/ghidra_B7 --project-name med9
+```
+
+54 rows: the ZWGRU / ZWMIN / ZWOUT chain and its output driver, the KRKE/KRREG
+knock modules and the low-octane detector, `KFZW` / `KFZWOP` and their axes,
+and the RAM variables of the chain. Every plate comment carries its
+VERIFIED-STATIC / HYPOTHESIS tag, so `export_symbols.py` records the
+confidence correctly. Background: `re/findings/ignition.md`.
+
+Two rows that `export_symbols.py` adds from a stock `med9_setup.py` project
+are duplicates and were removed from `re/symbols.csv` by hand:
+`tbl_exception_vectors` at 0x000000 (A2 renamed it `tbl_etr_branch_table`;
+`b1_context_and_symbols.py` drops the stale label, and this run did not use
+that script) and `code_directory` at 0x080100 (B1 recorded it as
+`tbl_code_sections`).

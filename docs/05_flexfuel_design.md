@@ -184,6 +184,43 @@ Do **not** shift `KFZWOP` (torque model optimum) or the knock control
 references. Knock retard (`dwkrz`) staying at zero across blends is the
 acceptance signal.
 
+#### Added 2026-09-15 (brief B7, issue #15) — chain resolved, VERIFIED-STATIC
+
+Full derivation and evidence: `re/findings/ignition.md`.
+
+* **There is no `KFZW/KFZW2` blend in our software.** The FR's double-map
+  interpolation by the inlet-cam factor (`SY_NWS`) and the `KFZWLB1/2` swirl
+  pair are compiled out; the dataset has exactly one base map, **`KFZW` at
+  0x5C75FE** (16 nmot rows x 12 rl cols, s8), read by `zwgru_kfzw_lookup`
+  (0x41D334) through the axis blocks 0x5C7736 (nmot) and 0x5C7758 (rl). The
+  "blend two maps the way the ECU already does" pattern of §1 therefore has
+  no vehicle here — the offset must be an **added term**.
+* **Insertion point: the word at 0x41D40C** inside `zwgru_build`
+  (`FUN_0041d38c`, 0x41D38C), replacing `add r3,r3,r10` with a `bl` to a
+  patch that re-does that add and then adds the offset. It sits after the
+  base map and all base deltas and before the bank offsets, the **knock
+  retard** (`zwbas_per_bank`, 0x41D10C) and `zwmin` / the -54..+58.5 ° output
+  clamp (`zwout_select`, 0x41D464), so knock control and every limit still
+  act on top. Context: **ERCOSEK task id 41** (TCB entry 6 at 0x47870C,
+  entry point 0x4224BC). Only `r3` and `r10` are live at that word; LR is
+  already saved on the caller's stack.
+* **Format**: the whole chain is **s8 at 0.75 °CA per LSB** — proven by the
+  output driver `zw_output_driver` (0x41CD9C), which multiplies by 15/2 to
+  hand the TPU stage 0.1 ° units. So +1 ° = +1.333 counts; calibrate the
+  offset in 0.75 ° steps (the §3.4 range +0..+6 ° is +0..+8 counts).
+* **`KFZWOP` is at 0x5CA3F1** (16 nmot x 11 rl, s8, axes 0x5CA3D6 / 0x5CA3E6),
+  read by `kfzwop_lookup` (0x436B90) and summed into `zwopt` (0x802665) by
+  `zwopt_build` (0x423344). It is **not** shifted, as this section requires.
+  Useful side effect: `KFZWOP - KFZW` is the ECU's own estimate of the
+  advance the base map gives up to knock, and it is 1.5 ° at 1800 rpm / 35 %
+  rising to ~9 ° at 4500 rpm / 90 % — a physical upper bound for `dzw_E`.
+* **`dwkrz`** (the acceptance signal) is the six-byte array at
+  **0x7FCE57-0x7FCE5C**, written by `krreg_knock_retard` (0x416D6C) and shown
+  in VCDS groups 020-024. There is also a stock "bad fuel" detector
+  (`zwgru_low_octane_detect`, 0x0F436C) that latches on the *mean* retard and
+  applies `KFDZK` (0x5D597E); with E85 it must never latch, so its latch bits
+  0x7FD31B bits 0/1 are a second acceptance signal.
+
 ### 3.5 Start and warm-up
 Ethanol needs roughly twice the cranking fuel around 10 C and barely ignites
 below ~10 C without heating. Scale the start quantity and the afterstart /
@@ -318,7 +355,7 @@ RequestUpload snapshots across several ignition cycles) proves a range unused.
 | Periodic task table / hook point (100 ms) | a counter patch increments at 10 Hz |
 | Fuel mass -> injection quantity multiplication (KRKATE path) and its variables (`rk`, `te`/`ti` per bank) | logged `ti` reproduces the decompiled formula for logged inputs |
 | Lambda adaptation variables (`fra`, `frau`, `frao`, `rkat`) | found in the measuring-variable table and logged |
-| `KFZW/KFZW2` blend and the final `zw` output; `dwkrz` | map addresses confirmed by xref and by a bench edit |
+| `KFZW/KFZW2` blend and the final `zw` output; `dwkrz` | map addresses confirmed by xref and by a bench edit — **xref half done 2026-09-15 (B7, §3.4 note): no blend exists, `KFZW` 0x5C75FE, `KFZWOP` 0x5CA3F1, `dwkrz` 0x7FCE57-5C, insertion point 0x41D40C. The bench edit is still open.** |
 | Start/afterstart maps and `tmot` | same |
 | Rail setpoint maps and `ti` window limits | same |
 | `vkKraQu` presence (fuel-quality variant byte) | present/absent decided; if present, its consumers listed |

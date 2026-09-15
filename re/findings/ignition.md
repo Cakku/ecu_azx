@@ -17,6 +17,25 @@ export GHIDRA_INSTALL_DIR=/usr/local/Cellar/ghidra/12.1.3/libexec
 
 ---
 
+## 0. Quick reference
+
+| What | Address | Note |
+|---|---|---|
+| **`KFZW`** base ignition map | **0x5C75FE** | 16 nmot x 12 rl, s8, 0.75 °/LSB (§2) |
+| `KFZW` nmot axis (`SNM16ZUUW`) | 0x5C7736 block / 0x5C7738 data | 16 u16, 0.25 rpm/LSB, 520-6520 rpm |
+| `KFZW` rl axis (`SRL12ZUUW`) | 0x5C7758 block / 0x5C775A data | 12 u16, 100 %/4096 per LSB, 10.2-103.9 % |
+| **`KFZW2` / `KFZWLB*` / `…OUT`** | — | **do not exist in this dataset** (§2.1) |
+| **`KFZWOP`** torque-model optimum | **0x5CA3F1** | 16 nmot x 11 rl, s8; axes 0x5CA3D6 / 0x5CA3E6 (§9). Never shift it |
+| `zwgru` base-angle sum | `FUN_0041d38c` 0x41D38C | **insertion point: the word at 0x41D40C** (§11) |
+| per-bank angle + knock retard | `FUN_0041d10c` 0x41D10C | writes 0x7FD30B / 0x7FD30C (§4, §7) |
+| ZWMIN / ZWSEL / ZWOUT | 0x41D440 / 0x41D464 | clamp -54 ° .. +58.5 ° (§8) |
+| output driver | `FUN_0041cd9c` 0x41CD9C | `zw * 15/2` → 0.1 ° for the TPU stage |
+| **`dwkrz`** per-cylinder knock retard | **0x7FCE57 … 0x7FCE5C** | 6 bytes, firing order 1-5-3-6-2-4, VCDS groups 020-024 (§5) |
+| knock controller | `FUN_00416d6c` 0x416D6C | `%KRREG`; entered from 0x416374 ← 0x417BCC (§13) |
+| ignition angle shown by VCDS | 0x7FEF87 / 0x7FEF88 | group 003 field 4, measuring var id 9 |
+| everything runs in | ERCOSEK **task id 41**, entry 0x4224BC | TCB entry 6 at 0x47870C (§10) |
+| **fixed point** | **s8, 0.75 °CA per LSB** | +1 ° = +1.333 counts (§6) |
+
 ## 1. Where the ignition code lives
 
 The whole base-ignition and knock-control chain sits in the **on-chip flash**
