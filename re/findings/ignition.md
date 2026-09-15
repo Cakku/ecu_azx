@@ -509,3 +509,60 @@ knock-limited. That gap is the physical budget an ethanol advance can spend:
 the flex-fuel offset should stay inside it, which is a useful sanity bound for
 the `dzw_E(nmot, rl)` map of `docs/05_flexfuel_design.md` §3.4 (its proposed
 +0..+2 °, up to +6 ° at high load, fits).
+
+## 13. Knock control: detection, enrichment/monitoring hooks (VERIFIED-STATIC)
+
+### 13.1 Module layout
+
+| Address | Function | Role |
+|---|---|---|
+| 0x417BCC | `FUN_00417bcc` | thin callback: `if (r4 == 1 && r5 == 1) FUN_00416374(r6 & 0xFF)`. Registered through the data word at **0x072574**, not called by any `bl`. `r6` is the cylinder index, so this is the per-knock-window entry into `%KRKE` |
+| 0x416374 | `FUN_00416374` | `%KRKE` — knock detection; keeps the per-cylinder reference levels `0x7FCE4D[6]`, `0x7FEE2A[6]`, `0x7FEE38[6]`, reseeds them from the calibration scalars 0x5C83F0 / 0x5C83DE on an enable edge, and computes the integration window `0x7FCE4B` as the minimum of 0x5C83EA…0x5C83ED and `DAT_008020c4` with a floor of 2 |
+| 0x416D6C | `FUN_00416d6c` | `%KRREG` — stationary retard (§5), the only callee of 0x416374 that writes `0x7FCE57[6]` |
+| 0x4163E0 | `FUN_004163e0` | reads three 8 x 4 s16 maps at **0x5C82BE**, **0x5C831A**, **0x5C8376** (axes 0x5C82B6/0x5C82A6, 0x5C8312/0x5C8302, 0x5C836E/0x5C835E) — the `%KRKE` reference/threshold family (`KFKE0…KFKE7`-equivalents) |
+
+### 13.2 The stock "bad fuel" detector — the mirror image of a flex-fuel offset
+
+`FUN_000f436c` (0x0F436C) is the FR's `zwgru-low-octane-fuel` branch
+(FR p3090, labels `CNOKT`, `KFSWKFZK`, `KFSWKFZKR`, `KFDZK`, `TSWZK`,
+`TSWZKR`). It watches the **mean** knock retard `DAT_007fce76` (0x7FCE76):
+
+```c
+if (mean_retard < KFSWKFZK(y, x))        /* more retard than the threshold  */
+    if (++cnt_0x802090 > 0x5D5BBE) set   bit0 of 0x7FD31B;   /* latch on    */
+if (KFSWKFZKR(y, x) < mean_retard)       /* recovered                        */
+    if (++cnt_0x80208F > 0x5D5BBF) set   bit1 of 0x7FD31B;   /* latch off   */
+0x7F9424 bit0 = the latch;
+DAT_0080208e = (latch) ? KFDZK(y, x) : 0;
+```
+
+| Object | Address | Shape | FR name |
+|---|---|---|---|
+| switch-on threshold | **0x5D5A3E** | 16x12 s8, nx at 0x5C89E0 | `KFSWKFZK` |
+| switch-back threshold | **0x5D5AFE** | 16x12 s8, same axes | `KFSWKFZKR` |
+| retard applied | **0x5D597E** | 16x12 s8, same axes | `KFDZK` |
+| debounce counts | 0x5D5BBE / 0x5D5BBF | u8 | `TSWZK` / `TSWZKR` |
+| resulting delta | 0x80208E | s8 RAM | fed straight into `FUN_0041d10c` |
+| latch bits | 0x7FD31B bits 0/1, 0x7F9424 bit 0 | | |
+
+`DAT_0080208e` is one of the terms `FUN_0041d10c` adds (§4), so the stock
+software already has an additive, RAM-borne ignition delta that is computed
+in a slow task and consumed segment-synchronously — exactly the shape the
+flex-fuel offset needs. **With E85 this detector must never latch**; watching
+0x7FD31B bits 0/1 is a cheap acceptance signal alongside `dwkrz` staying at
+zero.
+
+### 13.3 Where else the knock retard is read (monitoring targets)
+
+`0x7FCE76` (mean retard, exported) is read at 0x039AA4 (measuring handler),
+0x0C3A5C, 0x0C4414, 0x0F439C / 0x0F4410 (the detector above), 0x40A3CC,
+0x436AA4, 0x454C6C and **0x4594E8**. The last one sits in the exhaust-gas
+temperature model: `if (DAT_005d396c & 8) tabgm += DAT_007fce76;` — i.e. the
+knock retard raises the modelled exhaust temperature, which is what pulls
+component-protection enrichment in. That is the **knock-related enrichment
+path** the brief asks for: it is indirect, through the exhaust-temperature
+model, not through a dedicated knock-enrichment map.
+
+`0x7FCE74` (mean of the six per-cylinder calibration offsets 0x5C83F8) and
+`0x7FCE77` (mean of the controller's internal retards) are local to `%KRREG`
+plus one measuring handler each (0x03B658, 0x40A3B0).
