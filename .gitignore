@@ -1,8 +1,9 @@
-__pycache__/
-.venv/
-*.pyc
-work/
 *.fixed.bin
 *.patched
+*.pyc
 .DS_Store
+.venv/
+__pycache__/
+build/
 ghidra_projects/
+work/
