@@ -16,6 +16,8 @@ document and `med9lib.py` together.
 | `bindiff.py` | Diff two dumps and classify every changed byte as *patch* (listed in a `patch.json`), *descriptor* (a checksum sum/~sum word) or **unexpected**. Exit 1 on anything unexpected. |
 | `logcmp.py` | Compare a baseline and a candidate log over their common variables with per-variable tolerances. Format and tolerance file: `logging/README.md`. |
 | `blobdis.py` | Disassemble a raw big-endian PowerPC blob at a chosen CPU address; `--check-sda` fails if patch code touches r2/r13. |
+| `callgraph.py` | Static PowerPC call graph: every `bl` target is a function entry, each function is walked as a CFG (`--reach`, `--func`, `--callers`, `--entries`). Also extracts r2/r13-relative accesses and finds `lis`+D-form pairs that address a register range (`--xref-store`). |
+| `r2_context.py` | Decides the SDA2 base (r2) of every function from the call graph and checks every r2-relative access against it: reports references that leave the SDA2 window, land outside a mapped region, or hit 0xFF filler. Evidence for issue #8. |
 
 Quick checks:
 
@@ -26,6 +28,9 @@ python3 tools/find_abs_refs.py data/passat_azx_ori.bin --target 0x6FC100   # BR0
 python3 tools/ethanol_frame_decode.py "0EC#322A320500000100"   # -> E 50 %, 2 C, OK
 python3 tools/measuring_vars.py data/passat_azx_ori.bin --csv re/measuring_vars.csv
 python3 tools/measuring_vars.py data/passat_azx_ori.bin --groups
+python3 tools/callgraph.py data/passat_azx_ori.bin \
+        --reach 0x1004 0x12328 --stop 0x986AC 0x9E3E0 0x405588   # the boot module
+python3 tools/r2_context.py data/passat_azx_ori.bin --compare --violations
 ```
 
 Regression checks before a file goes anywhere near the car
