@@ -186,8 +186,48 @@ other used vectors -> 0x110F0, a fatal-error handler that spins).
 Which functions run under which r2 must be established from the call graph in
 Ghidra (both bases land on dense data, so no static shortcut). Default to
 0x5C9FF0 and override for the boot module reachable from 0x1004.
-One outlier `lis r2,0xD5; addi r2,r2,-0x3210` at 0x86330 (r2 = 0xD4CDF0) is
-unexplained.
+
+> **2026-09-15 (B1, issue #8) — the boot module is delimited, and the 0x86330
+> outlier is explained. VERIFIED-STATIC.** Full derivation and the commands:
+> `re/findings/boot.md` §1 and §3.
+>
+> **The boot module is exactly 119 functions in 0x001004-0x01978F.** Seeding a
+> static call-graph walk (`tools/callgraph.py`) at `boot_start` (0x1004) and
+> `boot_main_init` (0x12328) and stopping at `app_sda_setup_a/b/int` (0x986AC,
+> 0x9E3E0, 0x405588) reaches 119 functions; **all 118** `bl` targets that lie
+> in 0x001000-0x019800 are among them, and **no** boot function calls or
+> tail-branches outside that window, so the subgraph is closed. Its
+> instructions occupy twelve ranges (0x001004-0x001287, 0x0110F0-0x011117,
+> 0x011524-0x011CB3, 0x011CE0-0x01382B, 0x01383C-0x0138D3, 0x013D64-0x0155FF,
+> 0x015620-0x016843, 0x016860-0x0179EB, 0x017A10-0x017B33, 0x017CF0-0x01810B,
+> 0x01814C-0x018227, 0x01831C-0x01978F). These are what
+> `ghidra_scripts/b1_context_and_symbols.py` gives r2 = 0x017FF0; everything
+> else in 0x000000-0x1FFFFF and 0x404000-0x47FFFF keeps 0x5C9FF0.
+>
+> **`med9_setup.py --boot-r2` is too generous** and should not be used on its
+> own: its blanket `BOOT_R2_RANGE = (0x001000, 0x01FFFF)` also covers **100
+> application functions between 0x019948 and 0x01E848**, none of them reachable
+> from the boot seeds. Code *does* live in the block documented as "constant
+> data 0x10000-0x1FFFF": the boot module's own body plus those 100 functions.
+>
+> **Check.** `tools/r2_context.py` resolves every r2-relative D-form access in
+> the image under its assigned base: `unmapped = 0` and `outside_window = 0` on
+> both sides (177 boot references, 3,338 application references). The 120 that
+> land on an 0xFF byte are all accounted for: the 10 boot ones are `addi`
+> instructions computing the *base pointer* of `tbl_or_values_by_clockmode`
+> (0x010020), whose OR entries start with 0xFF by construction; the 110
+> application ones are calibration cells that hold 0xFF.
+>
+> **The outlier `lis r2,0xD5; addi r2,r2,-0x3210` at 0x86330 (r2 = 0xD4CDF0).**
+> Six instructions earlier the same function computes `0x804800 - 0x081A00 =
+> 0x782E00`, and **0x5C9FF0 + 0x782E00 = 0xD4CDF0 exactly**. It is the
+> application SDA2 base with a flash-to-RAM relocation delta folded in, emitted
+> by the linker for the routine that is copied from flash 0x081A00 to external
+> SRAM 0x804800 and run there (`bl 0x806EA0` at 0x861B0, flash original
+> 0x840A0 — almost certainly the external-flash programming driver). It is
+> **inert**: the relocated block 0x081A00-0x085400 contains zero r2-relative
+> references, and 0x862DC restores r2 = 0x5C9FF0 on the way out. Leaving
+> r2 = 0x5C9FF0 over 0x86284-0x86350 is therefore correct.
 
 ## 5. Structure markers and directories
 
@@ -247,7 +287,7 @@ EEPROM (ST M95160-class, 2 KB, on the SPI bus) has its own block checksums
 
 | File / CPU address | Table | Detail |
 |---|---|---|
-| 0x2B870 | KWP2000 / OBD service dispatch, 24 entries x 20 bytes: `SID FF FF FF, flags, handler, handler2, 0` | SIDs 0x14 0x21 0x3B 0x2C 0x18 0x17 0x81 0x10 0x31 0x32 0x35 0x36 0x37 0x27 0x82 0x20, OBD 0x01-0x04 0x06-0x09. **No 0x23 ReadMemoryByAddress, no 0x3D.** 0x2C DynamicallyDefineLocalId + 0x21 ReadDataByLocalId + 0x35 RequestUpload are present (live RAM logging route). Handlers for 0x81 0x82 0x20 0x31 0x32 0x06 live in on-chip flash. |
+| **0x2B820** | KWP2000 / OBD service dispatch, **28 entries x 20 bytes**: `SID FF FF FF, session-mask, handler, handler2, extra` (corrected 2026-09-15 by agent B3; the earlier row said 0x2B870 / 24 entries and missed SIDs 0x12, 0x3E TesterPresent, 0x1A, 0x83) | SIDs 12 3E 1A 83 14 21 3B 2C 18 17 81 10 31 32 35 36 37 27 82 20, OBD 01 02 03 04 06 07 08 09. Gated by diagnostic session only (entry+4 = 1<<session), not by SecurityAccess. **No 0x23 ReadMemoryByAddress, no 0x3D.** 0x2C DDLI (ids 0xF0-0xF9) + 0x21 need only a session; 0x35/0x36 RequestUpload/TransferData need session 0x86 (security level 2, key = seed + 0x11170, constant at 0xA331C; level 1 = 5-round LFSR mask 0x5FBD5DBD). Dispatcher `kwp_service_dispatch` at 0x13E98C. Handlers for 0x3E 0x1A 0x83 0x81 0x82 0x20 0x31 0x32 0x06 live in on-chip flash. Full detail: `re/findings/kwp.md`. |
 | 0x2BC38 | TouCAN **register** base table | 0x707080, 0x707480, 0x707880. These are the CANMCR addresses = module base + 0x80; the module bases are 0x707000/0x707400/0x707800 and the 16 message buffers of module *x* start at base+0x100 (2026-09-15, A2; MPC561RM Table 16-10 p. 16-17). |
 | 0x2BC50 | pointer 0x0002BF50 (CAN configuration structure) | low-alias address |
 | 0x2BC90 | **CAN receive table**, header + 21 entries x 16 bytes `index, 0x01mmnn08 (module/slot/dlc), 4, CAN-ID` | IDs 0x1A0 0x5A0 0x4A0 0x440 0x540 0x320 0x442 0x1AC 0x0C2 0x050(dlc 4) 0x51A 0x5E0 0x390 0x38A(dlc 4) **0x7FF 0x7FF** 0x2A0 0x368 **0x7FF 0x7FF** 0x5C0. The four 0x7FF entries are unused receive slots. |
@@ -255,6 +295,7 @@ EEPROM (ST M95160-class, 2 KB, on the SPI bus) has its own block checksums
 | 0xA5658 | **TKMWL measuring-variable table**, 2200 x 4 B handler pointers (0xA5658-0xA78B7) | Indexed by the dispatcher at 0x45768 (`lis r12,0xA; addi r12,r12,0x5658; lwzx r31,r12,id*4; mtlr; blrl`), which 360trev/MED9inf finds by signature. 665 ids are implemented, 1535 point at the "not available" stub 0x38EC4. Each handler leaves a VAG (formula, A, B) triple in RAM 0x7FD06F-0x7FD071 through the helper at 0x38EB4. Reached only from the KWP SID 0x21 route (0x35F6C -> 0xA2CC4 -> 0x3583C -> 0x3574C -> 0x45768) and from 0x357E0, which the on-chip flash calls. `tools/measuring_vars.py`, `re/measuring_vars.csv`, `re/findings/measuring_vars.md`. |
 | 0x1C5518 / **0x5C5518** | **Measuring-block group table**, 4 fields x 255 groups of u16 variable ids | `entry(field, group) = 0x5C5518 + field*0x1FE + group*2`; `addi r29,r2,-0x4AD8` at 0x35760 and 0x357F8 with the application r2 = 0x5C9FF0. Full listing in `re/findings/measuring_groups.txt`. |
 | 0x12004-0x121D8 | memory controller init (BR/OR from clock-mode tables at file 0x10020-0x1009C) | |
+| 0x40C000-0x411FFF (file 0x208000-0x20DFFF) | **Bosch/ASCET runtime library** in the on-chip flash: 44 interpolation helpers (1-D curve, 2-D map, shared-axis "group" forms, axis search, value-array interpolators) plus saturating arithmetic, debounce counters, ramps and filters | Called 1,343 times from the external-flash application across the region boundary. Every calibration table in the dump is reached through one of them. Full list with argument conventions and data layout: `re/findings/calibration_maps.md`; inventory in `re/calibration_draft.csv` (2026-09-15, B5, issue #19). |
 | 0x11E44 | `boot_or_adjust`: OR value adjust | `rlwinm r3,r3,0,24,22` (0x5463062C) = `r3 &= 0xFFFFFEFF`, i.e. **clears bit 0x100 (bit 23)**, and only when RAM byte 0x7FE9E8 is exactly 1. Called from the nine sites in 0x11F08-0x121B4; the result is stored to OR0/OR1/OR2/OR3 (0x6FC104/0x10C/0x114/0x11C), so bit 0x100 is the OR-register burst-inhibit field (field name COMMUNITY, MPC5xx UM; bit position VERIFIED-STATIC). Emulated both ways, 2026-09-15 (VERIFIED-DYNAMIC, `emu/`, `tests/test_emu.py`). Note the table entry 0xFF800650 already has that bit clear, so it is returned unchanged. |
 
 ## 8. Corrections to `med9_re/old_work`
@@ -275,6 +316,38 @@ EEPROM (ST M95160-class, 2 KB, on the SPI bus) has its own block checksums
 - Function-size based guesses about "fueling functions" are unverified.
 
 ## 9. Corrections to this document
+
+### 2026-09-15 — agent B5, issue #19 (evidence: `re/findings/calibration_maps.md`)
+
+Additions, not corrections to a stated fact, but they change how section 2
+should be read.
+
+- Section 2 says the on-chip flash 0x404000-0x47FFFF "holds the KWP/flash
+  programming services and a second copy of the application start-up". It also
+  holds **the shared Bosch/ASCET runtime library at 0x40C000-0x411FFF**, and
+  that is where all 44 table-lookup helpers live. The application in external
+  flash calls them with ordinary `bl` (±32 MB reach). **VERIFIED-STATIC**,
+  Ghidra decompilation; 1,343 call sites, 1,306 of them with fully constant
+  arguments.
+- The calibration data layout is now known. Self-describing tables are
+  `{ n; axis[n]; val[n] }` and `{ ny; nx; yaxis[ny]; xaxis[nx]; val[ny*nx] }`
+  in u8/s8/u16/s16; group tables pass the axis and value arrays separately and
+  read `n` out of the shared axis block. **The value array is indexed
+  `val[iy*nx + ix]`, so the second axis argument is the X (stride 1) axis.**
+- Of the 7,055 references into 0x5C0000-0x5FFFFF (section 3), **2,196 form a
+  pointer** (`lis`+`addi`, i.e. a table argument) and the remaining ~4,850 are
+  direct `lbz`/`lhz`/`lha` loads of single calibration values. Counting
+  r2-relative loads as well, 8,870 loads reach 5,488 distinct scalar addresses.
+- 1,066 distinct tables, curves and axes detected: 151 + 83 two-dimensional
+  with resolved axes, 195 more value arrays from direct interpolator calls,
+  312 + 172 curves, 153 standalone breakpoint blocks. Coverage of
+  0x5C2000-0x5E2FFF is 49.0 % (63 % of the part below the zero-filled reserve
+  at 0x5DB0EE). Details: `re/findings/calibration_coverage.md`.
+- **Free space confirmed by reading the bytes: 0x5E2510-0x5FFFFF (file
+  0x1E2510-0x1FFFFF), 121,584 bytes, is all 0xFF, and the highest address any
+  detected table, axis or scalar load reaches is 0x5E2502** (the block marker
+  at 0x5E2500). The FFCAL001 block of `06_patch_pipeline.md` section 3 is
+  therefore free as planned. **VERIFIED-STATIC**.
 
 ### 2026-09-15 — agent A3, issue #10 (evidence: `re/findings/measuring_vars.md`) and agent A5, issues #21/#24 (evidence: `tests/test_emu.py`)
 
@@ -324,3 +397,38 @@ Evidence and full derivations: `re/findings/mpc5xx_registers.md`.
   to 0x400000+offset.
 - Not a correction but a sharpening: the table at file 0x2BC38 holds TouCAN
   **CANMCR** addresses (module base + 0x80), not module bases (section 7).
+
+### 2026-09-15 — agent B3, issue #13 (evidence: `re/findings/kwp.md`, emulation tests `tools/kwp_seckey_verify.py`, `tools/kwp_upload_verify.py`)
+
+- Section 7 said the KWP dispatch table is *"0x2B870, 24 entries"*. The dispatcher reads its configuration from a structure whose first word is **0x2B820** and whose count is **28**; the four entries before 0x2B870 (SIDs 0x12, 0x3E, 0x1A, 0x83) were missed by the byte-pattern walk that produced the original row. Confirmed by dumping file 0x2B820-0x2B86F.
+- The `flags` word is a diagnostic-session bit mask, not a security requirement; SecurityAccess is only needed for the upload services. The community `seed + 0x11170` key is level 2 and is now VERIFIED-DYNAMIC.
+### 2026-09-15 — agent B1, issues #8 and #11 (evidence: `re/findings/boot.md`, `re/findings/scheduler.md`)
+
+- Section 3 called 0x010000-0x01FFFF "constant data". It is **constant data
+  *and* code**: the boot module's body (0x0110F0-0x01978F) plus 100
+  application functions at 0x019948-0x01E848. Section 4 now carries the exact
+  boot ranges.
+- Section 4's "one outlier … is unexplained" is **resolved** (see the note in
+  that section): 0xD4CDF0 = 0x5C9FF0 + (0x804800 - 0x081A00).
+- Section 3 listed two routines copied to DECRAM. There are **three**: file
+  0x10FEC (0xE4 B), file 0x11118 (0x238 B) and **file 0x11350 (0x1D4 B**, copy
+  loop 0x12F78-0x12F80, called at 0x12F84). The three sources tile
+  0x10FEC-0x11523 exactly.
+- Section 3's list of blocks starting with `5A5A5A5A` and the 0x80100
+  directory: slot **+0x20 of the directory (0x080120) is 0x0009E3B4, the
+  application entry**. `boot_main_init` reaches it with
+  `lwz r9,-0x1600(r13); lwz r9,0x20(r9); mtlr r9; blrl` at 0x13070-0x1307C —
+  the single handover point from boot to application. If it ever returns,
+  `boot_start` falls into `ba 0x110F0` (fatal spin).
+- **File 0x080000-0x0800FF is a second BBC ETR branch table** (same layout as
+  the one at file 0x0), pointing at the application exception handlers at
+  0x4055A0-0x4062A4 in on-chip flash. Both tables send the external interrupt
+  to a fatal spin, while the application demonstrably runs with MSR[EE] = 1
+  (it uses the RCPU `EIE`/`EID` SPRs 80/81) — so the live table really is the
+  one at 0x400000, in the missing 16 KB. Another argument for the BDM read.
+- New for section 3's peripheral list, from issue #11: the scheduler's clock
+  is the USIU **Time Base with reference B** — `TBSCR` 0x6FC200, `TBREF1`
+  0x6FC208 — and the **PIT** (`PISCR` 0x6FC240) is used only as a
+  software-triggerable interrupt at a selectable level. `PITC` (0x6FC244) is
+  never written. The OS is **ETAS ERCOSEK V4.1.16** (string at file 0x345D0
+  and 0x9C3F0).

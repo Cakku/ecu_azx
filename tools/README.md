@@ -11,11 +11,17 @@ document and `med9lib.py` together.
 | `checksum.py` | `verify` / `fix` the 65 Bosch block checksums (sum of 16-bit words, stored as sum/~sum). Run `verify` on every file before it goes anywhere near the car. |
 | `layout_report.py` | Structural overview of a dump: fill/entropy map, `5A5A5A5A` block markers, ID strings, boot register setup, checksum tables. |
 | `find_abs_refs.py` | Resolve `lis`+offset absolute references; find who touches an address, or histogram address usage. |
+| `find_branch_refs.py` | Control-flow counterpart of `find_abs_refs.py`: who `b`/`bl`s to an address, and where the address appears as a 32-bit pointer word. Finds the callers Ghidra's auto-analysis misses. |
 | `ethanol_frame_decode.py` | Decode the Pico flex-fuel node's CAN frame (0x0EC) from candump / candump -L / SavvyCAN CSV lines or a whole log, with plausibility and counter/gap checks. `--live` uses python-can if installed; everything else is dependency-free. Layout also in `data/ethanol_node.dbc`. |
 | `measuring_vars.py` | Measuring-variable (TKMWL) table: find the dispatcher, walk all 2200 handlers, report each variable's RAM address/width and VAG display formula; `--groups` dumps the measuring-block group table. |
 | `bindiff.py` | Diff two dumps and classify every changed byte as *patch* (listed in a `patch.json`), *descriptor* (a checksum sum/~sum word) or **unexpected**. Exit 1 on anything unexpected. |
 | `logcmp.py` | Compare a baseline and a candidate log over their common variables with per-variable tolerances. Format and tolerance file: `logging/README.md`. |
+| `draft_to_xdf.py` | `re/calibration_draft.csv` -> a TunerPro `.xdf`. Maps CPU addresses to **file offsets** through `med9lib`, emits big-endian row-major tables, and validates the result structurally (`--validate`, `--self-test`). No scaling is applied: every value is raw counts. |
 | `blobdis.py` | Disassemble a raw big-endian PowerPC blob at a chosen CPU address; `--check-sda` fails if patch code touches r2/r13. |
+| `eeprom_map.py` | Decode the SPI EEPROM block layout (EEP_CONF, file 0xB2FF0): block table, copies, RAM mirror, free space; `--clients` maps which block bytes the firmware actually uses; `--check` verifies the block checksums of a real 2 KB EEPROM read. `re/findings/eeprom.md`. |
+| `callgraph.py` | Static PowerPC call graph: every `bl` target is a function entry, each function is walked as a CFG (`--reach`, `--func`, `--callers`, `--entries`). Also extracts r2/r13-relative accesses and finds `lis`+D-form pairs that address a register range (`--xref-store`). |
+| `r2_context.py` | Decides the SDA2 base (r2) of every function from the call graph and checks every r2-relative access against it: reports references that leave the SDA2 window, land outside a mapped region, or hit 0xFF filler. Evidence for issue #8. |
+| `sda_xref.py` | Whole-image cross-references. `--var LO [HI]` decodes every r2/r13-relative D-form load/store and prints the ones resolving into the range — the small-data accesses `callgraph.py --xref-store` cannot see. `--code ADDR...` prints every `b`/`bl` **site** targeting an address (not the enclosing function), so a flat ERCOSEK task body reads off directly. Used throughout `re/findings/rail.md` (issue #17). |
 
 Quick checks:
 
@@ -26,6 +32,14 @@ python3 tools/find_abs_refs.py data/passat_azx_ori.bin --target 0x6FC100   # BR0
 python3 tools/ethanol_frame_decode.py "0EC#322A320500000100"   # -> E 50 %, 2 C, OK
 python3 tools/measuring_vars.py data/passat_azx_ori.bin --csv re/measuring_vars.csv
 python3 tools/measuring_vars.py data/passat_azx_ori.bin --groups
+python3 tools/draft_to_xdf.py re/calibration_draft.csv -o re/med9_draft.xdf \
+        --min-confidence hypothesis            # 1,066 tables
+python3 tools/draft_to_xdf.py --validate re/med9_draft.xdf
+python3 tools/callgraph.py data/passat_azx_ori.bin \
+        --reach 0x1004 0x12328 --stop 0x986AC 0x9E3E0 0x405588   # the boot module
+python3 tools/r2_context.py data/passat_azx_ori.bin --compare --violations
+python3 tools/sda_xref.py data/passat_azx_ori.bin --var 0x8031DA   # prist readers/writers
+python3 tools/sda_xref.py data/passat_azx_ori.bin --code 0x457BC8  # who calls the HDR controller
 ```
 
 Regression checks before a file goes anywhere near the car
@@ -51,7 +65,8 @@ pip install -r requirements.txt
 python3 -m unittest discover -s tests -v      # 31 tests, needs data/passat_azx_ori.bin
 ```
 
-`tests/` contains `test_bindiff.py` (builds a patched copy in a temp directory
+`tests/` contains `test_draft_to_xdf.py` (the XDF skeleton, the file-offset
+mapping and the `val[iy*nx+ix]` layout), `test_bindiff.py` (builds a patched copy in a temp directory
 and checks that only the edits and their descriptors moved), `test_logcmp.py`
 (the synthetic logs in `logging/samples/`) and `test_emu.py` (the Unicorn
 harness, `emu/README.md`). Every test that loads the dump asserts its SHA-256

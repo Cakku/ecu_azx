@@ -116,7 +116,7 @@ SEED_FUNCTIONS = [
 
 # Labels that are not functions.
 SEED_LABELS = [
-    (0x000000, "tbl_exception_vectors"),
+    (0x000000, "tbl_etr_branch_table"),
     (0x017FF0, "r2_boot_sda2_base"),
     (0x080100, "code_directory"),
     (0x144950, "end_of_code"),
@@ -370,7 +370,7 @@ class Setup(object):
             if (word & 0xFC000000) != 0x48000000:   # primary opcode 18: b/ba/bl/bla
                 continue
             if offset == 0:
-                continue                        # tbl_exception_vectors already labels 0x0
+                continue                        # tbl_etr_branch_table already labels 0x0
             if self.flat.disassemble(self.addr(offset)):
                 seeded += 1
                 target = word & 0x03FFFFFC

@@ -10,7 +10,16 @@ what reproduce it.
 | `med9_setup.py` | Builds the verified memory map (docs/03_tooling.md §2.1), seeds disassembly, types the known tables, runs auto-analysis and prints an acceptance report. Run this first, on a fresh import. |
 | `export_symbols.py` | Ghidra → `re/ghidra_export/functions.csv` (all functions) and merge of the named symbols into `re/symbols.csv`. |
 | `import_symbols.py` | `re/symbols.csv` → names, functions and plate comments in a fresh project. |
+| `decompile.py` | Read-only: dump decompiled C, disassembly, callers/callees or references for given addresses from the command line. |
+| `annotate.py` | Bulk-apply a `address,name,kind,comment` CSV of names and plate comments, so a headless session's findings can be exported by `export_symbols.py`. |
 | `med9_symbols.py` | Shared CSV/address helpers. Not a Ghidra script; imported by the two above. |
+| `enumerate_maps.py` | Walks the 44 Bosch interpolation helpers in the on-chip flash, resolves the constant arguments at every call site, and writes `re/calibration_draft.csv`, `re/findings/calibration_call_sites.csv` and `re/findings/calibration_coverage.md`. Names the helpers in the program so `export_symbols.py` carries them into `re/symbols.csv` (issue #19). |
+| `b4_eeprom_symbols.py` | Applies agent B4's names and plate comments for the QSPI driver, the M95160 EEPROM primitives, the EEP_CONF block manager and the KWP variant-coding path (issue #18). Run it before `export_symbols.py`. |
+| `b6_injection_symbols.py` | Agent B6's names and plate comments for the fuel-mass -> injection-time chain: `rk2ti`, `fkkvs_func`, `rksplit`, `aes_ti_out`, `awea_ti_to_angle`, the two engine-synchronous tasks, and the `KRKATE` / `KLTIKRPR` / `FKKVS` / `KLHDEV` / `TIMINP` calibration objects (issue #14). Run it before `export_symbols.py`. |
+| `b1_context_and_symbols.py` | Per-function r2 (SDA2) context from the call graph plus the brief-B1 symbols (issues #8 and #11). Run it after `med9_setup.py`; it supersedes `--boot-r2`. |
+| `b8_start_symbols.csv` | Not a script: the `annotate.py` input that names agent B8's start path -- `%ESSTT` and its maps, the engine-state flags, `tmst`/`tmot`, `zwstt` and the start-ignition maps, the efficiency->ignition warm-up path (issue #16). Apply it before `export_symbols.py`; see `re/findings/start.md`. |
+| `b9_rail_symbols.csv` | Not a script: the `annotate.py` input that names agent B9's rail-pressure and injection-window chain — `%HDRPSOL` / `%HDR` / `%HDRPIST` / `%VSTMSV` / `%AMSV`, the `%AWEA` angle maps and window terms, `esausg_output`, the `KFPRSOL*` family, `KLPRMAX`, `VHDPMX` / `VMSVMX` and the window scalars (issue #17). Apply it before `export_symbols.py`; see `re/findings/rail.md`. |
+| `b7_ignition_symbols.csv` | Not a script: the `annotate.py` input that names agent B7's ignition/knock chain — `KFZW`, `KFZWOP`, `zwgru_build` and the insertion point, `dwkrz`, the knock modules (issue #15). Apply it before `export_symbols.py`; see `re/findings/ignition.md`. |
 
 ## Prerequisites
 
@@ -73,6 +82,56 @@ on-chip flash at 0x200000. `med9_setup.py` deletes that block and recreates
 `EXT_FLASH` and `INT_FLASH` from the same `FileBytes`, so the tail lands at
 0x404000.
 
+## Calibration map draft (issue #19)
+
+```bash
+./.venv/bin/python ghidra_scripts/enumerate_maps.py \
+    --project-dir /tmp/ghidra_B5 --project-name med9 --repo .
+```
+
+About 25 s. `--label` additionally puts `cand_*` labels on the 1,066 detected
+tables; leave it off before an `export_symbols.py` run, or they all land in the
+shared `re/symbols.csv`. `--no-scalars` skips the direct-load scan.
+Background and the data layout: `re/findings/calibration_maps.md`.
+## Per-function r2 context (issue #8)
+
+`med9_setup.py --boot-r2` sets r2 = 0x017FF0 over a blanket 0x001000-0x01FFFF.
+That range is too wide -- 100 application functions live at 0x019948-0x01E848
+(`re/findings/boot.md` section 1.1). Use this instead, after the map is built:
+
+```bash
+./.venv/bin/python -m pyghidra.ghidra_launch \
+    --install-dir "$GHIDRA_INSTALL_DIR" \
+    ghidra.app.util.headless.AnalyzeHeadless ghidra_projects med9 \
+    -process passat_azx_ori.bin -noanalysis \
+    -scriptPath ghidra_scripts -postScript b1_context_and_symbols.py "$PWD"
+```
+
+It derives the 119-function boot module with `tools/callgraph.py`, sets
+r2 = 0x017FF0 over exactly those twelve address ranges and 0x5C9FF0 over the
+rest of the code, prints nine read-back probes, and applies 42 named symbols
+with their confidence tag in the plate comment. It also drops the stale label
+`tbl_exception_vectors` that `med9_setup.py` still seeds at 0x0 (A2 renamed it
+to `tbl_etr_branch_table` in `re/symbols.csv`; without the drop every
+`export_symbols.py` run appends a duplicate row for 0x000000).
+
+> **2026-09-15, B6 (#14).** The shared project has the same problem at
+> **0x080100**, where the stale label `code_directory` survives next to
+> B1's `tbl_code_sections`. Until a script drops it too, check
+> `re/symbols.csv` for duplicate addresses after every
+> `export_symbols.py` run and delete the stale line:
+>
+> ```bash
+> python3 -c "import csv,collections;r=list(csv.reader(open('re/symbols.csv')))[1:];\
+>   c=collections.Counter(x[0] for x in r);print([a for a,n in c.items() if n>1])"
+> ```
+
+Violations are listed outside Ghidra:
+
+```bash
+python3 tools/r2_context.py data/passat_azx_ori.bin --compare --violations
+```
+
 ## Symbol round trip (issue #9)
 
 Export after a working session:
@@ -112,3 +171,64 @@ What crosses the boundary, and what does not:
 - Ghidra function *signatures*, data types and decompiler settings do not
   round trip. Only names, kinds, sizes and comments do. Anything else has to
   be re-derived by `med9_setup.py`.
+
+## Agent B7's ignition symbols (issue #15)
+
+```bash
+./.venv/bin/python ghidra_scripts/annotate.py \
+    --csv ghidra_scripts/b7_ignition_symbols.csv \
+    --project-dir /tmp/ghidra_B7 --project-name med9
+```
+
+54 rows: the ZWGRU / ZWMIN / ZWOUT chain and its output driver, the KRKE/KRREG
+knock modules and the low-octane detector, `KFZW` / `KFZWOP` and their axes,
+and the RAM variables of the chain. Every plate comment carries its
+VERIFIED-STATIC / HYPOTHESIS tag, so `export_symbols.py` records the
+confidence correctly. Background: `re/findings/ignition.md`.
+
+Two rows that `export_symbols.py` adds from a stock `med9_setup.py` project
+are duplicates and were removed from `re/symbols.csv` by hand:
+`tbl_exception_vectors` at 0x000000 (A2 renamed it `tbl_etr_branch_table`;
+`b1_context_and_symbols.py` drops the stale label, and this run did not use
+that script) and `code_directory` at 0x080100 (B1 recorded it as
+`tbl_code_sections`).
+
+## Agent B8's start symbols (issue #16)
+
+```bash
+./.venv/bin/python ghidra_scripts/annotate.py \
+    --csv ghidra_scripts/b8_start_symbols.csv \
+    --project-dir /tmp/ghidra_B8 --project-name med9
+```
+
+52 rows: the start-quantity module `esstt_ksta` (0x41A268) and its
+high-pressure twin, `KFKSTT` / `KFWKSTT` / `KFWKSTN`, the start ignition
+builder `zwstt_build` (0x431294) with `KFZWSTT`, the engine-state chain
+(`B_st`, `B_stend`, `B_not_running`, the after-start timer), `tmot` / `tmot_w`
+/ `tmst`, and the efficiency-to-ignition warm-up path. The plate comments
+carry the VERIFIED-STATIC / VERIFIED-DYNAMIC / HYPOTHESIS tag, so
+`export_symbols.py` records the confidence correctly. Background:
+`re/findings/start.md`.
+
+The same two stale rows the B7 section mentions (`tbl_exception_vectors` at
+0x000000 and `code_directory` at 0x080100) reappear on every
+`export_symbols.py` run made without `b1_context_and_symbols.py`; they were
+removed from `re/symbols.csv` by hand again after the B8 export.
+## Agent B9 rail-pressure and window symbols (issue #17)
+
+```bash
+./.venv/bin/python ghidra_scripts/annotate.py \
+    --csv ghidra_scripts/b9_rail_symbols.csv \
+    --project-dir /tmp/ghidra_B9 --project-name med9
+```
+
+68 rows: the five `%HDR*` / `%AMSV` processes and their RAM variables, the six
+`KFPRSOL*` setpoint maps with their shared axes, `KLPRMAX` / `PRSOLMN` /
+`VHDPMX` / `VMSVMX`, the `%AWEA` angle maps and the two window scalars, the
+injection output stage `esausg_output` and the per-cylinder reference angles,
+plus three arithmetic helpers. Every plate comment carries its
+VERIFIED-STATIC / HYPOTHESIS tag. Background: `re/findings/rail.md`.
+
+The same two stale rows that brief B7 had to delete by hand
+(`tbl_exception_vectors` at 0x000000 and `code_directory` at 0x080100) come
+back on every `export_symbols.py` run and were removed again.
