@@ -108,10 +108,9 @@ homogeneous map at 0x5D5324 reads (rows = nmot, columns = load):
 documented FSI operating range. At 0.01 bar/LSB the idle value would be
 70 bar and full load 190 bar.
 
-**(c) The sensor characteristic.** `%GGDSKV` converts the averaged rail
-pressure ADC (`0x802030`) through the self-describing 3-point curve at
-**0x5C5D518A**... corrected: **0x5D518A** (`lookup_1d_u16` call at
-0x457B90 region, see §4.1):
+**(c) The sensor characteristic.** `%GGDSKV` (`ggdskv_sensor`, 0x457A88)
+converts the averaged rail-pressure ADC (`0x802030`) through the
+self-describing 3-point curve at **0x5D518A**, via `lookup_1d_u16`:
 
 ```
 0x5D518A:  n = 3
@@ -616,6 +615,12 @@ form is
 
 ### 9.4 What that means, and what it does not
 
+> **Read §14 with this section.** Everything below is correct about *what the
+> clamp does*, but §14 shows that in normal running (rail pressure above
+> 13 bar) the clamp is **not armed at all** — the whole window machinery is a
+> low-rail-pressure safety net.
+
+
 1. **There is no exceedance flag and no DTC.** The clamp writes only
    `0x80307E`; nothing in the image tests for the branch having been taken,
    and no fault path is entered. **VERIFIED-STATIC**: `0x803088` (`dwi`) has
@@ -811,8 +816,109 @@ do, with no new path and no DTC.
 |---|---|
 | Absolute meaning of VAG display format 0x53 (would confirm 0.005 bar/LSB from outside the image) | open — one VCDS log of group 106 against a known rail pressure settles it |
 | The period of the on-chip task at 0x45CAC4. B1 has it as 1000 ms (HYPOTHESIS); the entire rail-pressure controller, `%AWEA`'s angle maps and `rkti_pre` live in it, which a 1 Hz raster cannot support | **open, and it matters** — see §7 |
-| `0x7FEA48` / `0x5D3CDC = 2600`: the sense of the 13 bar gate on the window model, and whether the angle clamp is live in normal operation | open — see §12.4 |
+| `0x7FEA48` / `0x5D3CDC = 2600`: the sense of the 13 bar gate on the window model, and whether the angle clamp is live in normal operation | **SETTLED — see §14.** The gate is `prist > 13.0 bar`; in normal running the angle clamp, the driver cut-off and the charge limit are all disarmed |
 | Percent scaling of the u8 `rl` (0x7FEF74) that indexes `KFWBHO1SW`; the axis tops out at 107 counts | open |
 | Which FR name belongs to which `KFPRSOL*` variant (the mode bits of 0x7FB69A were not decoded) | HYPOTHESIS — the addresses and the selection logic are VERIFIED-STATIC, the names are guesses |
 | The DTC number behind `0x80201E` bits 2/4/6 | open — the fault-path manager (0x4067FC family) was not followed |
 | Stock WOT `ti` (needed to turn §9.5 into a hard margin) | open — one logged WOT pull with VCDS group 002 |
+
+---
+
+## 14. Correction to §9 and §10, same day: the window check is a low-pressure safety net
+
+Found while chasing the `0x7FEA48` gate listed as an open item in §13. It does
+not move any address; it changes **when** the window machinery is live, and it
+adds the proof of the angle unit that §8 could only infer.
+
+### 14.1 The angle unit is now proved outright
+
+`esausg_output` (**`FUN_00409834`**, 0x409834-0x409C17) is the injection
+output stage: it turns the per-cylinder angles `0x80309C[6]` / `0x8030A8[6]`
+into TPU arguments and hands them to the driver through the function pointers
+`0x7FCDC8` and `0x7FCDCC`. Three things fall out of it, all **VERIFIED-STATIC**:
+
+1. Every angle difference is wrapped with
+   `if (x < 0) x += 0x7800; else if (x > 0x77FF) x -= 0x7800;`
+   — so **0x7800 = 30720 is one engine cycle = 720 degCA**, i.e.
+   **1 LSB = 720/30720 = 3/128 = 0.0234375 degCA**, exactly as §8 derived.
+2. The per-cylinder reference angles are the u16 array **`0x409CA0[6]`** =
+   `3072, 8192, 13312, 18432, 23552, 28672` = **72, 192, 312, 432, 552,
+   672 degCA** — six values spaced **exactly 120 degCA**, the firing interval
+   of a six-cylinder engine. Nothing but 3/128 degCA per LSB produces that.
+3. The conversion handed to the TPU is `* 0xF >> 6` = x 15/64, and
+   `(3/128) x (64/15) = 0.1`, so the driver unit is **0.1 degCA** — the same
+   TPU unit B7 found for the ignition output driver (which multiplies its
+   0.75 degCA s8 by 15/2). The two internal units are a factor 32 apart, which
+   is precisely the `* 0x20` that every `%AWEA` u8 map carries.
+
+So §8's conclusion stands on evidence, not inference: **the angle LSB is
+3/128 degCA and `ti` is 1 us per LSB.**
+
+### 14.2 `0x7FD290` is a hardware cut-off angle, not just a comparison term
+
+```
+; --- esausg_output, per cylinder uVar2 ---
+if (b_wbh_invalid(0x7FEA48) == 0) {
+     cut = (u16 0x409CA0[cyl] - u8 0x7FD290 * 0x20) mod 0x7800
+     0x7FB11C = (cut * 15) >> 6                       ; 0.1 degCA
+     (*0x7FCDCC)(0x7FB11C, cyl)                       ; program the cut-off channel
+}
+...
+(*0x7FCDC8)(b_wbh_invalid == 0, start_angle, ..., cyl)   ; first argument = enable
+```
+
+The injection therefore has a **hard end angle in the driver**, at
+`cylinder reference - 67 * 0.75 degCA = reference - 50.25 degCA`
+(cylinder 0: 72 - 50.25 = 21.75 degCA in the absolute frame). When it is
+armed, an over-long injection is **cut**, and fuel is lost.
+
+### 14.3 …and it is armed only below 13 bar of rail pressure
+
+```
+00454884  ...
+0045488C  lhz   r31,0x31EA(r13)      ; prist_w
+00454894  lhz   r10,0x3CDC(r10)      ; PRWBHMX @ 0x5D3CDC = 2600 = 13.0 bar
+0045489C  cmpw  r10,r31
+004548A0  bge   0x004548B0           ; prist <= 13 bar -> compute the margin
+004548A4  li    r12,1
+004548A8  stb   r12,-0x15A8(r13)     ; 0x7FEA48 = 1 and SKIP
+```
+
+`0x7FEA48 = (prist > 13.0 bar)`, so in any normally running engine
+(`KFPRSOLHOM` never goes below 35 bar) it is **1**. Consequences:
+
+* `esausg_output` does **not** program the cut-off channel and passes
+  `enable = 0` (§14.2);
+* `awea_ti_to_angle`'s test is
+  `(0x7FEA48 == 0 && 0x7FE91F != 0) || (0x80201E & 0x20)`
+  (0x41BB28-0x41BB48), so with `0x7FEA48 = 1` the **angle clamp of §9.3 runs
+  only when the fuel-system fault bit is set**;
+* `0x803070`, the charge limit of §10, is `0xFFFF` unless that same fault bit
+  is set.
+
+**All three interventions share one arming condition class: something is
+wrong with the rail pressure.** That is physically coherent — injector flow
+goes as `sqrt(dp)`, so at low rail pressure `ti` explodes and an injection
+really can overrun the window; at normal pressure the `KFWBHO1SW` calibration
+guarantees the fit and the runtime net is switched off.
+
+### 14.4 What this changes for the flex-fuel work
+
+* **On E85 at normal rail pressure nothing in the ECU enforces the injection
+  window.** The +40 % `ti` will simply be injected, with the start angle
+  walking earlier as `KFWBHO1SW` dictates. There is no clamp, no flag, no
+  charge limit and no DTC to trip — and no protection either. The margin
+  computed in §9.5 is a *calibration* margin we have to respect ourselves.
+* **The dangerous case is a pump that cannot follow.** If a raised setpoint
+  plus E85's higher volume demand ever lets `prist` fall below **13.0 bar**
+  (`PRWBHMX`, 0x5D3CDC) — a stall, a hot restart, a saturated pump at WOT —
+  then *all* of it arms at once: the driver cut-off at 50.25 degCA, the angle
+  clamp, and (with the fault bit) a charge limit that falls to about 30 % at
+  6000 min^-1. The failure mode is a sudden, simultaneous fuel cut and torque
+  drop, not a gentle limit.
+* **So the acceptance signal is `prist` staying above 13 bar, and the
+  quantity to watch is `0x80316E` pinned at `VMSVMX` = 5000** (§12.2) — the
+  early warning that the pump is out of volume.
+* The §12.3 recommendation is unchanged and now better motivated: if we want a
+  torque limit that follows the *window* rather than a *fault*, we have to add
+  it, and 0x0C7CF8 is still the clean place.

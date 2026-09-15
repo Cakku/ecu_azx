@@ -2980,7 +2980,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x409580,0x205580,int_flash,func,FUN_00409580,0x288,ghidra passat_azx_ori.bin 2026-09-15 @409580,hypothesis,ghidra,
 0x409808,0x205808,int_flash,func,FUN_00409808,0x28,ghidra passat_azx_ori.bin 2026-09-15 @409808,hypothesis,ghidra,
 0x409830,0x205830,int_flash,func,FUN_00409830,0x4,ghidra passat_azx_ori.bin 2026-09-15 @409830,hypothesis,ghidra,
-0x409834,0x205834,int_flash,func,FUN_00409834,0x3E4,ghidra passat_azx_ori.bin 2026-09-15 @409834,hypothesis,ghidra,
+0x409834,0x205834,int_flash,func,esausg_output,0x3E4,ghidra passat_azx_ori.bin 2026-09-15 @409834,static,ghidra,"VERIFIED-STATIC (B9, issue #17). %ESAUSG: the injection output stage. Converts the per-cylinder start angles 0x80309C[6] / 0x8030A8[6] against the reference array tbl_cyl_ref_angle (0x409CA0) with a mod-0x7800 wrap, scales by 15/64 into the TPU unit of 0.1 degCA and calls the drivers through the function pointers 0x7FCDC8 / 0x7FCDCC. It also programs the HARD INJECTION CUT-OFF angle (reference - 0x7FD290*0x20 = 50.25 degCA) and passes b_wbh_invalid == 0 as the enable - so the cut-off is armed only while rail pressure is at or below PRWBHMX (13.0 bar). re/findings/rail.md section 14"
 0x409CAC,0x205CAC,int_flash,func,FUN_00409cac,0x68,ghidra passat_azx_ori.bin 2026-09-15 @409CAC,hypothesis,ghidra,
 0x409D14,0x205D14,int_flash,func,FUN_00409d14,0x2C4,ghidra passat_azx_ori.bin 2026-09-15 @409D14,hypothesis,ghidra,
 0x409FD8,0x205FD8,int_flash,func,FUN_00409fd8,0x110,ghidra passat_azx_ori.bin 2026-09-15 @409FD8,hypothesis,ghidra,
