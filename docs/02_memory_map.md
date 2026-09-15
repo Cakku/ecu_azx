@@ -50,6 +50,21 @@ sector that KESSv2 skips (HYPOTHESIS). Community reads of the same part number
 via other tools are 2,621,440 bytes, i.e. include it. **Get a K-TAG BDM read
 before the first write** (see the plan).
 
+> **2026-09-15 (A2, issue #6) — the missing 16 KB explained. VERIFIED-STATIC
+> (silicon) + HYPOTHESIS (contents).** The MPC561/MPC563 reference manual,
+> Fig. 21-8 "512-Kbyte Array Configuration", p. 21-19, shows that the UC3F
+> array's first 16 KB is **"small block 0"**, an independently erasable and
+> independently protectable block that also **hosts the shadow row** — the
+> non-volatile store for the hard-reset configuration word (`UC3FCFIG`, incl.
+> FLEN / ISB / ETRE / OERC / DME / IP) and the censorship bits (§21.2.3,
+> Table 21-6, p. 21-17). With ISB=1 that block is exactly 0x400000-0x403FFF.
+> The ECU's own checksum descriptors cover 0x404000-0x47FFFF, i.e. the whole
+> array *except* small block 0 — consistent with the ECU's flash routine never
+> touching it and with the tool refusing to read it.
+> Second reason to get the BDM read: the live exception-vector branch table is
+> most likely inside those 16 KB too — see the note in section 3.
+> Details: `re/findings/mpc5xx_registers.md` §8 and §5.
+
 `med9_re/passat_azx_flash.bin` is simply the first 2 MB of the dump.
 
 ## 3. Address space seen by the CPU
@@ -60,6 +75,17 @@ the ISB field and set it to 1: the MPC5xx internal memory map is relocated to
 addresses plus 0x400000. The file `ppc_med9/data/languages/ppc_med9.pspec`
 uses the unrelocated addresses and is therefore wrong for this ECU.
 
+> **2026-09-15 (A2, issue #6) — ISB encoding confirmed. VERIFIED-STATIC.**
+> IMMR is SPR 638, ISB is bits 28:30 and `001` selects base **0x0040 0000**
+> (MPC561/MPC563 Reference Manual Rev. 1.2, §6.2.2.1.2, Fig. 6-13 / Table 6-12,
+> p. 6-28…6-29). `andi. r10,r10,0xFFF1` clears exactly the ISB mask 0x0000000E
+> and `ori r10,r10,0x2` sets bit 30 ⇒ ISB=1. FLEN (bit 20, on-chip flash
+> enable) is *preserved*, so it comes from the reset configuration word.
+> The same table gives PARTNUM (bits 0:7): **MPC561 = 0x35, MPC563 = 0x36**,
+> and only the MPC563/MPC564 have the 512 KB UC3F flash — so the `cmpwi r3,0x35`
+> at file 0x1236C is the "is this the flashless part?" test and our silicon
+> takes the other branch. Full decode: `re/findings/mpc5xx_registers.md` §1.
+
 | CPU range | What | Evidence |
 |---|---|---|
 | 0x000000-0x1FFFFF | External flash, primary mapping. Exception vectors at 0x0-0x1FFF, boot code 0x1004, constant data 0x10000-0x1FFFF, code 0x20000-0x14494F, calibration 0x1C0000-0x1DFFFF. | BR0 base 0x000000 written at 0x12010/0x12034/0x12064 |
@@ -67,12 +93,21 @@ uses the unrelocated addresses and is therefore wrong for this ECU.
 | 0x400000-0x47FFFF | On-chip flash (512 KB). Holds the KWP/flash-programming services and a second copy of the application start-up. | section 2 |
 | **0x480000-0x5FFFFF** | Alias of external flash offset 0x080000-0x1FFFFF. The firmware uses it only for **calibration: 7,055 absolute references into 0x5C0000-0x5E2FFF**, 3 into the rest. | `find_abs_refs.py --hist` |
 | 0x600000-0x6F7FFF | Flash alias, unused. | |
+| 0x6F8000-0x6F87FF | DECRAM (2 KB on-chip RAM). Boot copies **two** routines here in turn and runs each: 0xE4 bytes from file 0x10FEC (loop 0x11FAC-0x11FC8, called at 0x11FCC) and 0x238 bytes from file 0x11118 (loop 0x120D8-0x120F4, called at 0x120FC), to reprogram the flash chip select. The second also uses 0x6F8620+ as a scratch counter array during the TPU scan at 0x14604. | disassembly; second routine emulated 2026-09-15 (`tests/test_emu.py::TestDecramRoutine`) |
+| 0x6FC000-0x6FC3FF | USIU (SIUMCR, memory controller BR0-3/OR0-3, DMBR/DMOR, PLL, timers). Confirmed by emulating the boot, 2026-09-15: SIUMCR 0x6FC000, SIPEND 0x6FC010, BR0-OR3 0x6FC100-0x6FC11C, DMBR/DMOR 0x6FC140/0x6FC144, SCCR 0x6FC280, **PLPRCR 0x6FC284**, RSR 0x6FC288 (VERIFIED-DYNAMIC, `emu/boot_trace.py`). | 145 refs |
+| 0x6FC800 | UC3F flash control | 5 refs |
+| 0x700000-0x70FFFF | IMB modules: TPU3 A/B 0x704000/0x704400, QADC A/B 0x704800/0x704C00, QSMCM 0x705000 (49 refs), MIOS14 0x706000, **TouCAN A/B/C 0x707080/0x707480/0x707880**, UIMB 0x707F80. The boot also copies **0x800 bytes from file 0x10624-0x10E23 to 0x702000-0x7027FF** (loop 0x18098-0x180A0, word count 0x200 read from file 0x10E24). The content (`3FFFFFFE 7FFFFEFE BFFF07FC ...`) looks like TPU3 microcode (HYPOTHESIS: TPU3 code RAM). | table of the three CAN bases at file 0x2BC38; 0x702000 from `emu/boot_trace.py` and disassembly, 2026-09-15 |
+| 0x780000 | CALRAM control | 1 ref |
+| 0x7F8000-0x7FFFFF | On-chip SRAM 32 KB. Stack top 0x7FEFFC. | r1 set at file 0x10DC |
+| 0x400000-0x47FFFF | On-chip flash (512 KB, UC3F). Holds the KWP/flash-programming services and a second copy of the application start-up. | section 2 |
+| **0x5C0000-0x5FFFFF** | **Dual-mapped window onto external flash 0x1C0000-0x1FFFFF** (CS0), set up by DMBR/DMOR at file 0x1250C. The firmware uses it for **calibration: 7,055 absolute references into 0x5C0000-0x5E2FFF**. | `find_abs_refs.py --hist`; DMBR decode, see note below |
+| 0x480000-0x5BFFFF, 0x600000-0x6F7FFF | **Nothing responds.** Internal "Reserved for Flash" space; the memory controller does not serve addresses inside the internal 4 MB block. | MPC561RM §10.8 p. 10-28 |
 | 0x6F8000-0x6F87FF | DECRAM (2 KB on-chip RAM). Boot copies a 0x238-byte routine from file 0x11118 here and runs it to reprogram the flash chip select (file 0x120C8-0x120FC). | disassembly |
 | 0x6FC000-0x6FC3FF | USIU (SIUMCR, memory controller BR0-3/OR0-3, DMBR/DMOR, PLL, timers). | 145 refs |
 | 0x6FC800 | UC3F flash control | 5 refs |
-| 0x700000-0x70FFFF | IMB modules: TPU3 A/B 0x704000/0x704400, QADC A/B 0x704800/0x704C00, QSMCM 0x705000 (49 refs), MIOS14 0x706000, **TouCAN A/B/C 0x707080/0x707480/0x707880**, UIMB 0x707F80. | table of the three CAN bases at file 0x2BC38 |
-| 0x780000 | CALRAM control | 1 ref |
-| 0x7F8000-0x7FFFFF | On-chip SRAM 32 KB. Stack top 0x7FEFFC. | r1 set at file 0x10DC |
+| 0x700000-0x707FFF | IMB modules: DPTRAM control 0x700000 / array 0x702000, TPU3 A/B 0x704000/0x704400, QADC A/B 0x704800/0x704C00, QSMCM 0x705000 (49 refs), PPM 0x705C00, MIOS14 0x706000, **TouCAN A/B/C module base 0x707000/0x707400/0x707800** (the table at file 0x2BC38 holds base+0x80 = CANMCR), UIMB 0x707F80. 0x708000-0x77FFFF is "Reserved for IMB". | table of the three CAN register bases at file 0x2BC38; MPC561RM Fig. 1-4 p. 1-13 |
+| 0x780000-0x7800FF | CALRAM / READI control | 1 ref |
+| 0x7F8000-0x7FFFFF | On-chip SRAM 32 KB — the manual calls it **CALRAM**, with 0x7FF000-0x7FFFFF a 4 KB overlay section. Stack top 0x7FEFFC. | r1 set at file 0x10DC; MPC561RM §22 p. 22-1 |
 | 0x800000-0x807FFF | External SRAM 32 KB (CS1). RAM init table at file 0x1C2E78 gives 0x800000..0x807FF8; highest static reference 0x805784. | BR1 base 0x800000 at 0x12118 |
 | 0x900000-0x93FFFF | CS2 external device, 20 refs. Unknown (accessed by the DECRAM routine, which is why the old emulator crashed at PC 0x6F80B8). | BR2 at 0x1216C |
 | 0xA00000-0xA07FFF | CS3 external device, 2 refs. Unknown. | BR3 at 0x121A8 |
@@ -83,6 +118,61 @@ that maps onto the flash has not been checked (HYPOTHESIS: address bits above
 the external bus width are ignored, so 0xFFF00xxx hits CS0). The vector table
 at file 0x0 uses absolute `ba` branches (reset 0x100 -> 0x49C -> 0x1004; all
 other used vectors -> 0x110F0, a fatal-error handler that spins).
+
+> **2026-09-15 (A2, issue #6) — MSR[IP]=1 solved; the old hypothesis is wrong.
+> VERIFIED-STATIC.** Nothing is ever fetched from 0xFFF00000. The BBC's
+> **Exception Table Relocation** (MPC561RM §4.3.1, Table 4-1/4-2, p. 4-8…4-10)
+> rewrites every `0xFFF0 0x00` vector fetch to `Page_Offset + <small offset>`,
+> **two words (8 bytes) per entry**, with `Page_Offset = 0x400000 × ISB` for
+> `BBCMCR[OERC] = 00`. **File 0x000000-0x0000FF is exactly such a branch
+> table**: 32 slots of 8 bytes, every offset Table 4-1 defines populated
+> (+0x008 system reset → `ba 0x3C4`, +0x028 external interrupt →
+> `ba 0x80028`, +0x010 machine check → `ba 0x164`, …, +0x0F8 → `ba 0x3A4`),
+> the undefined gaps filled with `ba 0x144`.
+> ETRE (BBCMCR bit 19) and OERC (bits 24:25) come from the reset configuration
+> word and are never written by software — the boot code read-modify-writes
+> BBCMCR (SPR 560) at file 0x1118-0x1138 but only sets bit 30 (DCAE).
+> **Consequence:** once ISB=1 the live table is at 0x400000-0x4000FF, i.e.
+> inside the 16 KB the dump is missing (section 2). The `ba 0x49C -> 0x1004`
+> word at file 0x100 is the *classic-layout* reset entry, kept for the case
+> RCW[IP]=0; that classic table is incomplete (file 0x500, the external
+> interrupt vector, is zero), which is further proof the ETR table is the one
+> in use. The external address bus is only ADDR[8:31] (24 pins, MPC561RM §9.1
+> p. 9-1) and BR0/OR0 match no 0xFFFxxxxx address, so the old "address bits are
+> ignored, 0xFFF00xxx hits CS0" guess is **refuted**.
+> Details: `re/findings/mpc5xx_registers.md` §5.
+
+> **2026-09-15 (A2, issue #6) — chip selects decoded. VERIFIED-STATIC.**
+> BR/OR field layout: MPC561RM Fig. 10-23/10-24, Table 10-8/10-10,
+> p. 10-32…10-36. Decode of the values this firmware writes:
+>
+> | Reg | Value | Region | Port | Wait states |
+> |---|---|---|---|---|
+> | BR0 | 0x000103 / 0x00090B | base 0x000000, valid, **write-protected**, burst inhibited | 32-bit / **16-bit** | — |
+> | OR0 | 0xFF800650, 0xFF8006FF, 0xFF800150/140/130/120 | AM=0xFF800000 ⇒ **8 MB, 0x000000-0x7FFFFF** in every clock mode | | SCY 5, 15, 5, 4, 3, 2 |
+> | BR1 | 0x800403 | base 0x800000, valid | **8-bit** | — |
+> | OR1 | 0xFFFC0100…0xFFFC0180 | AM=0xFFFC0000 ⇒ **256 KB, 0x800000-0x83FFFF** (32 KB SRAM aliased 8×) | | SCY 0…8 |
+> | BR2 | 0x900823 | base 0x900000, valid, **byte enables (WEBS=1)** | **16-bit** | — |
+> | OR2 | 0xFFFC0110 | **256 KB, 0x900000-0x93FFFF** | | SCY 1 |
+> | BR3 | 0xA00003 | base 0xA00000, valid | 32-bit | — |
+> | OR3 | 0xFFFF8C20 / 0xFFFF8C30 | AM=0xFFFF8000 ⇒ **32 KB, 0xA00000-0xA07FFF** | | SCY 2 / 3 |
+>
+> `0x0FFF1F00` is **not** a valid OR2 (its AM would mask address bits 0-3 and
+> repeat the region every 256 MB); treat it as a mis-attributed constant.
+>
+> The "8 MB CS0 region" half of the old model is **confirmed**; the "flash
+> aliased at 0x400000-0x5FFFFF wherever no internal module responds" half is
+> **refuted**: §10.8 p. 10-28 says an address inside the internal block is
+> served internally and *ignored by the memory controller*. The one window that
+> really does reach CS0 is opened by the dual-mapping registers:
+> `DMOR = 0x70000000`, `DMBR = 0x70000001` at file 0x1250C-0x12514 give
+> BA=AM=`0b111000`, DMCS=000 (CS0), DME=1, ATM=000 (code *and* data). Eqn. 10-1
+> (p. 10-25) `bus_address[0:16] == {0000000, ISB[0:2], 0, BA[1:6]}` with ISB=1
+> yields base **0x5C0000**, size 2^18 ⇒ **0x5C0000-0x5FFFFF → external flash
+> 0x1C0000-0x1FFFFF**. That is precisely the calibration range the firmware
+> addresses (r2 = 0x5C9FF0, section 4) and that the checksum table at file
+> 0x1C3300 covers (section 6), which independently confirms the mapping.
+> Details: `re/findings/mpc5xx_registers.md` §3 and §4.
 
 ## 4. Small data area registers
 
@@ -158,14 +248,14 @@ EEPROM (ST M95160-class, 2 KB, on the SPI bus) has its own block checksums
 | File / CPU address | Table | Detail |
 |---|---|---|
 | 0x2B870 | KWP2000 / OBD service dispatch, 24 entries x 20 bytes: `SID FF FF FF, flags, handler, handler2, 0` | SIDs 0x14 0x21 0x3B 0x2C 0x18 0x17 0x81 0x10 0x31 0x32 0x35 0x36 0x37 0x27 0x82 0x20, OBD 0x01-0x04 0x06-0x09. **No 0x23 ReadMemoryByAddress, no 0x3D.** 0x2C DynamicallyDefineLocalId + 0x21 ReadDataByLocalId + 0x35 RequestUpload are present (live RAM logging route). Handlers for 0x81 0x82 0x20 0x31 0x32 0x06 live in on-chip flash. |
-| 0x2BC38 | TouCAN module base table | 0x707080, 0x707480, 0x707880 |
+| 0x2BC38 | TouCAN **register** base table | 0x707080, 0x707480, 0x707880. These are the CANMCR addresses = module base + 0x80; the module bases are 0x707000/0x707400/0x707800 and the 16 message buffers of module *x* start at base+0x100 (2026-09-15, A2; MPC561RM Table 16-10 p. 16-17). |
 | 0x2BC50 | pointer 0x0002BF50 (CAN configuration structure) | low-alias address |
 | 0x2BC90 | **CAN receive table**, header + 21 entries x 16 bytes `index, 0x01mmnn08 (module/slot/dlc), 4, CAN-ID` | IDs 0x1A0 0x5A0 0x4A0 0x440 0x540 0x320 0x442 0x1AC 0x0C2 0x050(dlc 4) 0x51A 0x5E0 0x390 0x38A(dlc 4) **0x7FF 0x7FF** 0x2A0 0x368 **0x7FF 0x7FF** 0x5C0. The four 0x7FF entries are unused receive slots. |
 | 0x2BDF0 | **CAN transmit table**, header + 16 entries `index, CAN-ID, 0x0101xxxx, dlc` | 0x7C7 0x280 0x288 0x380 0x480 0x488 0x580 0x588 0x48A 0x38A(4) 0x284(6) 0x56A 0x7C4 0x7C5 0x7C5 0x7C6. These are the Motor_x frames the ECU sends (the old notes called this the "registered CAN IDs" and mislabeled several). 0x7C4 matches the CCP DTO id reported for MED9.1. |
-| 0xA5654 | TKMWL measuring-variable table (candidate, MED9Toolchain signature `blr 00 03`) | to be confirmed with 360trev/MED9inf |
-| 0x38EA8 | measuring-block return helper (candidate, toolchain signature) | HYPOTHESIS |
+| 0xA5658 | **TKMWL measuring-variable table**, 2200 x 4 B handler pointers (0xA5658-0xA78B7) | Indexed by the dispatcher at 0x45768 (`lis r12,0xA; addi r12,r12,0x5658; lwzx r31,r12,id*4; mtlr; blrl`), which 360trev/MED9inf finds by signature. 665 ids are implemented, 1535 point at the "not available" stub 0x38EC4. Each handler leaves a VAG (formula, A, B) triple in RAM 0x7FD06F-0x7FD071 through the helper at 0x38EB4. Reached only from the KWP SID 0x21 route (0x35F6C -> 0xA2CC4 -> 0x3583C -> 0x3574C -> 0x45768) and from 0x357E0, which the on-chip flash calls. `tools/measuring_vars.py`, `re/measuring_vars.csv`, `re/findings/measuring_vars.md`. |
+| 0x1C5518 / **0x5C5518** | **Measuring-block group table**, 4 fields x 255 groups of u16 variable ids | `entry(field, group) = 0x5C5518 + field*0x1FE + group*2`; `addi r29,r2,-0x4AD8` at 0x35760 and 0x357F8 with the application r2 = 0x5C9FF0. Full listing in `re/findings/measuring_groups.txt`. |
 | 0x12004-0x121D8 | memory controller init (BR/OR from clock-mode tables at file 0x10020-0x1009C) | |
-| 0x11E44 | OR value adjust (clears a bit when RAM byte 0x7FE9E8 == 1) | |
+| 0x11E44 | `boot_or_adjust`: OR value adjust | `rlwinm r3,r3,0,24,22` (0x5463062C) = `r3 &= 0xFFFFFEFF`, i.e. **clears bit 0x100 (bit 23)**, and only when RAM byte 0x7FE9E8 is exactly 1. Called from the nine sites in 0x11F08-0x121B4; the result is stored to OR0/OR1/OR2/OR3 (0x6FC104/0x10C/0x114/0x11C), so bit 0x100 is the OR-register burst-inhibit field (field name COMMUNITY, MPC5xx UM; bit position VERIFIED-STATIC). Emulated both ways, 2026-09-15 (VERIFIED-DYNAMIC, `emu/`, `tests/test_emu.py`). Note the table entry 0xFF800650 already has that bit clear, so it is returned unchanged. |
 
 ## 8. Corrections to `med9_re/old_work`
 
@@ -183,3 +273,54 @@ EEPROM (ST M95160-class, 2 KB, on the SPI bus) has its own block checksums
 - The "free space" list is right about 0x144954+ but those ranges are inside
   checksummed 64 KB blocks; every write there needs `tools/checksum.py fix`.
 - Function-size based guesses about "fueling functions" are unverified.
+
+## 9. Corrections to this document
+
+### 2026-09-15 — agent A3, issue #10 (evidence: `re/findings/measuring_vars.md`) and agent A5, issues #21/#24 (evidence: `tests/test_emu.py`)
+
+- Section 7 said *"0xA5654 TKMWL measuring-variable table (candidate,
+  MED9Toolchain signature `blr 00 03`)"*. **The table starts at 0xA5658.**
+  The byte signature matched the `4E800020` (`blr`) that ends the preceding
+  function plus the first two bytes of the first table entry (`0003 8EC4`),
+  i.e. it was one instruction early. The dispatcher's own `lis`/`addi` pair at
+  0x45780 gives 0xA5658, and `tools/find_abs_refs.py --range 0xA5650 0xA78C0`
+  finds that single reference and no other.
+- Section 7 said *"0x38EA8 measuring-block return helper (candidate, toolchain
+  signature)"*. **The result helper is at 0x38EB4**; 0x38EA8 is the tail of an
+  unrelated flag routine that ends with its own `blr` at 0x38EB0.
+- Both candidates were HYPOTHESIS and were never used for a decision; they are
+  now VERIFIED-STATIC at the corrected addresses.
+- "Crash at 0x6F80B8" (again): re-run in the new harness on 2026-09-15, the
+  DECRAM routine executes 0x6F8000-0x6F8234 and returns cleanly for every value
+  of the flash-type nibble at RAM 0x7F800C, with no access to 0x900000 on any
+  of those paths. Whatever the old emulator was doing at 0x6F80B8
+  (`cmpwi r11, 4`) it was not following this code.  Evidence:
+  `tests/test_emu.py::TestDecramRoutine` (VERIFIED-DYNAMIC).
+
+### 2026-09-15 — agent A2, issue #6 (MPC561/MPC563 Reference Manual Rev. 1.2)
+
+Evidence and full derivations: `re/findings/mpc5xx_registers.md`.
+
+- **"0x480000-0x5FFFFF is an alias of external flash 0x080000-0x1FFFFF"** and
+  **"0x600000-0x6F7FFF flash alias, unused"** (section 3) were wrong. The
+  memory controller never serves an address that lies inside the internal
+  4 MB block (§10.8, p. 10-28), so CS0 does not shine through there. Only
+  **0x5C0000-0x5FFFFF** is reachable, through the DMBR/DMOR dual mapping, and
+  it lands on external flash **0x1C0000-0x1FFFFF**. The arithmetic
+  `cpu - 0x400000 = file` that `tools/med9lib.py` used is right; the *extent*
+  was too wide. `med9lib.REGIONS` and `cpu_to_file()` are narrowed accordingly
+  in the same commit, and `file_to_cpu(prefer_high=True)` now only returns the
+  high address for offsets >= 0x1C0000.
+- **"The vector table at file 0x0 uses absolute `ba` branches"** (section 3)
+  described the right bytes but the wrong structure. It is a **BBC exception
+  table relocation branch table** — 32 entries, 8 bytes apart, layout fixed by
+  MPC561RM Table 4-1 — not a classic 0x100-spaced PowerPC vector table. The
+  `ba` at file 0x100 belongs to the classic layout and is only reached when the
+  reset configuration word has IP=0. `re/symbols.csv` corrected
+  (`tbl_etr_branch_table`).
+- **"IP=1 … HYPOTHESIS: address bits above the external bus width are ignored,
+  so 0xFFF00xxx hits CS0"** (section 3) is **refuted**. Vector fetches are
+  rewritten by the BBC before they ever reach a bus; with ISB=1 they resolve
+  to 0x400000+offset.
+- Not a correction but a sharpening: the table at file 0x2BC38 holds TouCAN
+  **CANMCR** addresses (module base + 0x80), not module bases (section 7).
