@@ -223,3 +223,222 @@ angle-dependent back-pressure of the FR's `KLPBR`/`KFPBRA`.
 The five objects 0x5C729C, 0x5C72C6, 0x5C72F8, 0x5C7310, 0x5C7328 are
 **contiguous and exactly adjacent** (42 + 50 + 24 + 24 + 2 bytes), which is
 the independent check that the two bare value arrays really have 12 entries.
+
+## 6. The multiplication point for the flex-fuel factor
+
+### 6.1 The candidates, and why `rk` wins
+
+| Candidate | Where | Verdict |
+|---|---|---|
+| **A. `rk` in RAM, 0x803038, between `gk_rk_out` and `rksplit`** | hook the `bl 0x41C3A0` at **0x42247C** in the segment task | **recommended** |
+| B. the `mullw r31,r4,r5` at 0x0AC39C inside `rk2ti` | the arithmetic point itself | works, but `rk2ti` is a shared leaf called seven times per segment and its registers are all live; a hook there has to be an in-place instruction rewrite, not a `bl` |
+| C. `KRKATE`, the u16 scalar at 0x5D3DBC | a pure calibration change | perfect coverage, zero code — but it is a **constant**: it cannot follow E%, and `frt` is only recomputed in a slow raster (§6.4) |
+| D. `frt` in RAM, 0x8030D2/D4/D6/D8 | after `rkti_pre` | four cells instead of one, and the slow-raster latency of C |
+| E. `ti` (the FR's warning about `%UFRKTI`) | after `rk2ti` | not needed here, see §7 |
+
+**Why A.** `rk` at RAM 0x803038 is written by exactly one instruction and read
+by exactly seven, all of them inside `rksplit`:
+
+```bash
+python3 tools/callgraph.py data/passat_azx_ori.bin --xref-store 0x803038 0x803038
+# ... or the r13-relative index used for this brief:
+#   0x41ADD4  sth r6,0x3048(r13)   <- the only writer  (gk_rk_out)
+#   0x41C3B8 0x41C3E0 0x41C3F4 0x41C408 0x41C440 0x41C454 0x41C4B0  (rksplit)
+```
+
+**VERIFIED-STATIC.** Every per-injection quantity that `rk2ti` ever sees
+(0x8030B4, 0x8030B6, 0x8030B8, 0x8030BA, 0x8030BC, 0x8030BE) is derived from
+that one cell inside `rksplit`, under exactly the same `0x803092` type bits
+that `aes_ti_out` tests before calling `rk2ti`. So a factor applied there
+reaches **homogeneous, both split modes and the start injection** — every
+injection mode the software has.
+
+The seeding writes of `FUN_00454EA0` (0x454ED4, 0x454F2C, 0x454F54, 0x455004,
+0x45502C) do **not** escape this: they only run for a type whose bit is set in
+0x803094 (requested) but clear in 0x803092 (current), i.e. never in the segment
+whose `ti` is actually used, and `rksplit` runs before `aes_ti_out` in the task
+(0x42247C before 0x422480).
+
+### 6.2 The hook site
+
+```
+00422478  4B FF 89 6D  bl 0x0041ADE4   ; gk (writes rk -> 0x803038)
+0042247C  4B FF 9F 25  bl 0x0041C3A0   ; rksplit          <-- replace this word
+00422480  4B FF A0 3D  bl 0x0041C4BC   ; aes_ti_out (7 x rk2ti)
+00422484  4B FF 95 3D  bl 0x0041B9C0   ; awea (ti -> crank angle, window limits)
+```
+
+* **Task:** `FUN_004223B0`, ERCOSEK TCB entry 5, **task id 40, priority 0x0A**
+  (B1's table in `re/findings/scheduler.md` §4). It is the
+  **segment-synchronous** task: it is the only caller of `aes_ti_out`, and its
+  sibling `FUN_004224BC` (TCB 6, id 41) is the only caller of 0x41C730.
+  Neither is one of the 10/20/100/1000 ms rasters.
+* **Registers:** the task body is a flat list of **argument-less `bl`s**, so
+  B1's §7 argument applies unchanged — **r3-r12, CR, CTR, XER are all dead**
+  across 0x42247C, LR is free (the stub is entered with `bl`), and r1 is the
+  task's own stack. The stub must not touch r2 (0x5C9FF0), r13 (0x7FFFF0) or
+  r14-r31.
+* **Patch shape:** `bl <ff_rk_scale>` in place of `bl 0x41C3A0`; the stub does
+  `rk = min((rk * F) >> 10, 0xFFFF)` on RAM 0x803038 and ends with
+  `b 0x41C3A0` so the original call still happens. One word changed.
+* **Checksum:** 0x42247C is in the on-chip flash, covered by the 54-entry code
+  descriptor table at file 0x0A0000, so `python3 tools/checksum.py fix` is
+  required after the patch (`verify` must then print `ALL OK (65 blocks)`).
+
+### 6.3 Fixed-point format of the value being scaled
+
+`rk` is an **unsigned 16-bit** integer; `rksplit` and `gk_rk_out` both saturate
+it at 0xFFFF. It carries no sign and no implicit fraction of its own — the
+whole scaling lives in `KRKATE` and `KLTIKRPR` — so the factor is a plain
+unsigned multiply. `docs/05_flexfuel_design.md` §4 specifies `ff_F_curve` in
+**1/1024**, which fits: `rk_new = min((rk * F_q10) >> 10, 0xFFFF)` and
+`F_q10 = 1024` is bit-identical to stock (asserted by
+`tests/test_injection_model.py::test_flex_fuel_factor_1_is_a_no_op`).
+
+**Headroom (HYPOTHESIS, from the calibration's own axes).** `ti_raw =
+(rk * frt) >> 9`, `frt ~ 1370` at 100 bar, and the calibrated `ti_raw` range is
+bounded by the `KLHDEV` axis (550..6500) and the `FKKVS` y axis (500..7000).
+That puts the working `rk` at roughly 200..2700, i.e. a factor of 24 below the
+0xFFFF saturation — an E100 factor of 1.63 cannot overflow it. The stub should
+still clamp, because `rk` itself saturates at 0xFFFF in over-run/fault states.
+
+### 6.4 If a calibration-only experiment is wanted first
+
+`KRKATE` (0x5D3DBC, u16, **3858**) has **exactly one reference in the whole
+image** — `lhz r3,0x3DBC(r3)` at 0x0AC528, with the `lis r3,0x5D` at 0x0AC51C
+(`tools/callgraph.py --xref-store 0x5D3DB0 0x5D3DD8` finds that one and the
+axis pointer at 0x0AC4E8, nothing else). So multiplying it by a fixed factor
+is the minimal, reversible, code-free way to fuel a fixed blend on the bench
+(E85 -> 3858 * 1.50 = 5787), covering every injection mode including start.
+It is in the calibration block 0x5C0000-0x5FFFFF, so `checksum.py fix` applies
+here too.
+
+Its one drawback for the real feature is timing: `frt` is produced by
+`rkti_pre` (0x455040), which the image calls **only** from `task_1000ms_int`
+(`bl 0x455040` at 0x45CCEC), and the start-injection variant `FUN_00430974`
+only from `task_100ms_int` (`bl 0x430974` at 0x432B00). The FR calls this the
+"time-synchronous part" of `%RKTI`, so the split is by design — but it means a
+factor applied through `frt`/`KRKATE` would follow E% with that raster's
+latency, while a factor applied at `rk` acts on the very next segment.
+(B1 flagged the exact periods of the two on-chip slow rasters as an open item;
+whatever they are, `rk` is the faster path.)
+
+## 7. The level-2 monitor: A2's warning does not bind here
+
+A2's FR index (`re/findings/fr_index.md` §7) warns that `%UFRKTI` recomputes
+an allowed fuel mass, so a flex-fuel patch should act on `rk` rather than on
+`ti`. On **this** binary the constraint is weaker than feared, and the reason
+is worth recording:
+
+* Nothing outside the injection chain reads the computed `ti`. The four
+  per-injection results 0x8030E4/E6/E8/EA are read only by `awea`
+  (0x41B9C0) and 0x41C000/0x41C12C/0x41C178/0x41C1D0, and the total
+  `ti_sum` 0x8030C4 only by the measuring handler 0x03EA3C and by
+  `FUN_00432BDC`, which copies it to 0x802316 for diagnosis.
+* Nothing outside `rksplit` reads `rk` (0x803038) — see §6.1.
+* The monitoring-style function that *does* look at fuel mass,
+  `FUN_00455C60` (0x455C60-0x4565EF, called from the same slow raster, using
+  the coarse 8-bit `nmot` at 0x7FCE95 and its own 8-bit maps in 0x5D46xx /
+  0x5D47xx), reads the **pre-`ZGST`** values `min(0x803030, 0x80303A)` and
+  `min(0x803032, 0x803034)` — i.e. the bank values *before* the final
+  cylinder-balancing multiply that produces 0x803038.
+
+So a factor applied at 0x803038 is downstream of every consumer except
+`rk2ti`: the monitor keeps seeing the gasoline fuel mass. That is the desired
+behaviour for the MVP (no DTC), and it is also the thing to re-examine before
+anyone trusts the monitor afterwards — it will no longer be monitoring the
+fuel that is actually injected. **VERIFIED-STATIC** for the reference sets;
+**HYPOTHESIS** that `FUN_00455C60` is the EGAS level-2 fuel path (its shape
+says monitor; the FR page `UFRKTI` p3922 was not matched instruction by
+instruction).
+
+## 8. The `ti` limits and the injection window
+
+* **Minimum:** `TIMINP` = u16 at **0x5C7328 = 900**, applied unconditionally at
+  the end of `rk2ti` (0x0AC410-0x0AC41C). `aes_ti_out` compares the result
+  against the same cell to raise the "injection time is at its minimum" flag
+  (0x7FEA54 / 0x7FEA55). It is also read at 0x0ECE4C.
+* **Maximum:** there is **no `ti` maximum** in `rk2ti`; the only ceilings in
+  the arithmetic are the 0xFFFF saturations. The real limit is the
+  **injection window, enforced in the angle domain** by `awea`
+  (`FUN_0041B9C0`, 0x41B9C0-0x41BD7B), which converts
+  `dwi = (ti * k_nmot[0x803072]) >> 13` (stored at 0x803088) and then clamps
+  the start/end angles with the u8 window scalars **0x5D396D** and **0x5D396E**
+  (both used as `value * 0x20`; **both are 0x00 in this dataset**, so today the
+  limit is carried entirely by the runtime terms 0x7FD28E / 0x7FD290 and the
+  constant `0x2300`). `awea` is the `bl 0x41B9C0` at 0x422484
+  (`4B FF 95 3D`), immediately after `aes_ti_out`.
+* Consequence for the flex-fuel work: raising `rk` by 50 % raises `dwi` by
+  ~50 % and will hit that window before it hits any `ti` clamp — which is
+  exactly what `docs/05_flexfuel_design.md` §3.6 predicted. 0x803088 (`dwi`)
+  is the quantity to log.
+
+## 9. Upstream: where `rk` itself comes from (`GK`), for briefs B7/B8
+
+`gk_rk` = `FUN_0041AA48` (0x41AA48-0x41ADE3), called from 0x41AE5C and
+0x41AF14 inside `FUN_0041ADE4`, which is the `bl` at 0x422478 — the
+instruction before the hook site. It computes both banks and publishes the
+one belonging to the current segment. Bank-A path, in order
+(**VERIFIED-STATIC** from the decompilation; the FR labels are **COMMUNITY**):
+
+| Step | Operation | RAM |
+|---|---|---|
+| base | `(0x801CF2 * 0x80302C) >> 7` (or a 3-term product in the second mode) | -> 0x80302E |
+| fuel/air | `* 0x7FED38 >> 11` | |
+| additive | `+ (s16)0x8030F8` | -> 0x80303E (x2) |
+| per-injection normalisation (mode-dependent) | `(x << 12) / 0x80304A` | |
+| **`fr`** closed-loop lambda factor, Q15 | `* 0x802DF8 >> 15` (bank B: 0x802E00) | |
+| **`fra`** additive adaptation | `+ (s16)0x801D1A` | |
+| **`frm`** multiplicative adaptation, Q15 | `* 0x801E36 >> 15` (bank B: 0x801E28) | -> 0x803034 / 0x803032 |
+| component/diagnostic subtraction (skipped when 0x8033FA & 4) | `- 0x80315C` | -> 0x803030 / 0x80303A |
+| **`ZGST`** per-cylinder balancing, Q15 | `* u16 0x801D8C[cyl] >> 15`, index from 0x7FEF7E / 0x7FEF80 | -> **0x803038 = `rk`** |
+
+The four RAM cells 0x802DF8 / 0x802E00 (measuring ids 29 / 28, VCDS group
+001.3 / 001.4) and 0x801E36 / 0x801E28 (measuring ids 33 / 34, VCDS group
+032.2 / 032.4) are the lambda controller output `fr_w` and the multiplicative
+adaptation `frm_w` per bank — **VERIFIED-STATIC** that they multiply `rk` in
+Q15 at those instructions, **COMMUNITY** for the names. That closes the
+`fra`/`frm` item of `docs/05_flexfuel_design.md` §7 on the fuel side.
+
+## 10. Verification: the Python model
+
+`emu/models/injection.py` is a bit-exact model of `rk2ti` (0x0AC370),
+`fkkvs_func` (0x0AC4B8) and `rkti_dp_angle` (0x0AC42C), reading every
+calibration constant out of the image rather than hard-coding it.
+
+```bash
+./.venv/bin/python -m emu.models.injection            # print the constants and a sweep
+./.venv/bin/python -m emu.models.injection --verify   # compare against the ECU code
+./.venv/bin/python -m unittest tests.test_injection_model -v
+```
+
+`--verify` runs the three real functions in the A5 Unicorn harness over a grid
+of inputs (rk 0..65535, frt 1..65535, tv, fcorr, dp 0..65535, nmot 0..40000,
+`use_fkkvs` 0 and 1, both `rk2ti` shift branches, the inhibit path, the
+`TIMINP` clamp and both saturations) and compares bit for bit:
+
+```
+all 4061 cases match
+```
+
+**VERIFIED-DYNAMIC** (emulator). Two things fell out of getting it exact:
+
+* **No FPU anywhere in this chain.** Every step is 32-bit integer
+  `mullw`/`rlwinm`/`srw`/`divwu`; there is no `lfs`/`stfs` in 0x0AC370-0x0AC5C4
+  and none in the helpers it calls. The A5 note about FPU routines does not
+  apply here.
+* `tv` reaches `rk2ti` in r6 as a **zero-extended** u16 (every caller uses
+  `lhz`), even though the dead-time array is `s16` and is interpolated with
+  `lha`. A negative dead time would therefore act as a huge positive one. No
+  point of the shipped curve is negative (950 .. 316), so this is latent.
+
+## 11. Open items
+
+| Question | Status |
+|---|---|
+| Physical unit of `ti`. `TIMINP = 900`, the `KLHDEV` axis 550..6500 and the `FKKVS` y axis 500..7000 are all consistent with **1 LSB = 1 us** (0.9 ms minimum, 7 ms full scale), but that is HYPOTHESIS. The VCDS handler divides by 255 and uses display formula 0x16 with A = 0xFF, which we have not decoded. | open — one logged drive with VCDS group 002 settles it |
+| Physical unit of `dp` / `prist`. The axis runs 400..24000 and the values obey `k/sqrt(dp)` exactly, so it is a pressure; **0.01 bar/LSB** (4..240 bar) is the natural reading but unproven. | open — log the rail pressure measuring block against the RAM cell 0x8031DA |
+| Absolute scaling of `rk` (hence `KRKATE` in ms/%) | open — follows from the two above |
+| Exact periods of `task_100ms_int` (0x4328E4) and `task_1000ms_int` (0x45CAC4), which drive `frt` | open — B1's open item; it decides how much latency option C/D would have |
+| Is `FUN_00455C60` really the EGAS level-2 fuel monitor (`%UFRKTI`)? | HYPOTHESIS — shape matches; not matched to the FR page |
+| Battery-voltage dependence of the dead time. In this dataset `tv` is a curve over `dp` only. A `TVUB`-style voltage term may live in the output stage (`KT_ES`) rather than in `%RKTI`. | open — B7/B9 territory |
