@@ -138,7 +138,7 @@ TABLES = [
     (0x5C3300, "tbl_checksum_cal",           "checksum", 6),
     (0x02B870, "tbl_kwp_services",           "kwp",      24),
     (0x02BC38, "tbl_toucan_bases",           "u32",      3),
-    (0x02BC50, "ptr_can_config_area",        "u32",      2),
+    (0x02BC50, "ptr_can_config",             "u32",      2),
     (0x02BC90, "tbl_can_rx",                 "can_rx",   22),
     (0x02BDF0, "tbl_can_tx",                 "can_tx",   17),
 ]
@@ -155,6 +155,12 @@ KWP_ENTRY_SIZE = 20
 # Acceptance checks reported at the end (brief A1 / issue #7).
 ACCEPT_DECOMPILE = 0x020004
 ACCEPT_FUNCTION = 0x4386D8
+
+# Plate comment appended to everything this script names.  export_symbols.py
+# reads the tag back out of the comment, so the knowledge base records where
+# the confidence came from instead of guessing (docs/04_re_guidelines.md s1).
+EVIDENCE = ("VERIFIED-STATIC -- ghidra_scripts/med9_setup.py, "
+            "from docs/02_memory_map.md")
 
 
 # --------------------------------------------------------------------------
@@ -339,6 +345,7 @@ class Setup(object):
                 array = ArrayDataType(base, count, element)
                 self.flat.createData(self.addr(address), array)
                 self.flat.createLabel(self.addr(address), name, True)
+                self.flat.setPlateComment(self.addr(address), EVIDENCE)
                 self.say("data  %-24s %08X  %d x %d B" % (name, address, count, element))
             except Exception as exc:          # noqa: BLE001 - report and continue
                 self.say("data  %-24s %08X  FAILED: %s" % (name, address, exc))
@@ -349,6 +356,7 @@ class Setup(object):
                                        self.addr(address + length - 1))
                 self.flat.createData(self.addr(address), TerminatedStringDataType())
                 self.flat.createLabel(self.addr(address), name, True)
+                self.flat.setPlateComment(self.addr(address), EVIDENCE)
                 self.say("data  %-24s %08X  string" % (name, address))
             except Exception as exc:          # noqa: BLE001
                 self.say("data  %-24s %08X  FAILED: %s" % (name, address, exc))
@@ -361,6 +369,8 @@ class Setup(object):
             word = self.u32(offset)
             if (word & 0xFC000000) != 0x48000000:   # primary opcode 18: b/ba/bl/bla
                 continue
+            if offset == 0:
+                continue                        # tbl_exception_vectors already labels 0x0
             if self.flat.disassemble(self.addr(offset)):
                 seeded += 1
                 target = word & 0x03FFFFFC
@@ -372,7 +382,8 @@ class Setup(object):
                                       "vector_%03X" % offset, False)
                 self.flat.setPlateComment(
                     self.addr(offset),
-                    "MPC5xx exception vector %#05x -> %08X" % (offset, target & 0xFFFFFF))
+                    "MPC5xx exception vector %#05x -> %08X\n%s"
+                    % (offset, target & 0xFFFFFF, EVIDENCE))
         self.say("vector table: %d of 32 entries are branches and were disassembled"
                  % seeded)
         return seeded
@@ -389,6 +400,7 @@ class Setup(object):
                 func.setName(name, _source_user())
             if func is not None:
                 made += 1
+                self.flat.setPlateComment(a, EVIDENCE)
         self.say("seed functions: %d of %d created or named"
                  % (made, len(SEED_FUNCTIONS)))
         return made
@@ -425,7 +437,7 @@ class Setup(object):
                 if func is not None:
                     self.flat.setPlateComment(
                         a, "KWP2000/OBD service %#04x handler (%s), tbl_kwp_services[%d]"
-                           % (sid, slot, i))
+                           "\n%s" % (sid, slot, i, EVIDENCE))
         self.say("kwp dispatch table: %d handler functions created/named" % made)
         return made
 
@@ -468,6 +480,7 @@ class Setup(object):
         for address, name in SEED_LABELS:
             try:
                 self.flat.createLabel(self.addr(address), name, True)
+                self.flat.setPlateComment(self.addr(address), EVIDENCE)
             except Exception as exc:          # noqa: BLE001
                 self.say("label %s at %08X FAILED: %s" % (name, address, exc))
 
