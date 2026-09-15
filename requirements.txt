@@ -1,0 +1,6 @@
+# Python tooling for the MED9.1 project (create a venv: python3.13 -m venv .venv)
+capstone==5.0.*        # PowerPC disassembly in scripts (pin 5.x; 6.0 changes the PPC API)
+unicorn==2.1.*         # fast function-level emulation (needs MSR[FP] set for float code)
+cantools>=44           # DBC parsing / signal decoding
+python-can>=4.6        # CAN interfaces (slcan, gs_usb, socketcand)
+pyelftools>=0.31       # ELF symbol/section extraction from compiled patches

@@ -1,0 +1,43 @@
+cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
+0x000000,0x000000,ext_flash,table,tbl_exception_vectors,0x2000,"tools scan: ba branches every 0x100",static,dump,"reset 0x100 -> 0x49C; used vectors -> 0x110F0"
+0x000100,0x000100,ext_flash,func,reset_vector,4,"ba 0x49c",static,dump,
+0x00049C,0x00049C,ext_flash,func,boot_trampoline,4,"b 0x1004",static,dump,
+0x001004,0x001004,ext_flash,func,boot_start,0xF4,"disassembly: IMMR ISB=1, BR0|=0x100, IC_CST, MSR 0x3942, SIPEND poll, r1/r13/r2 setup, bl 0x12328",static,dump,"r1=0x7FEFFC r13=0x7FFFF0 r2=0x17FF0"
+0x0110F0,0x0110F0,ext_flash,func,fatal_exception_handler,0x28,"PLPRCR |= 0x80, MSR 0x2942, sth 0x704002, infinite loop",static,dump,"target of unused exception vectors"
+0x011118,0x011118,ext_flash,func,decram_flashcs_routine_src,0x238,"copied to 0x6F8000 by boot at file 0x120C8-0x120FC then bl 0x6f8000",static,dump,"accesses CS2 device 0x900000"
+0x011E44,0x011E44,ext_flash,func,boot_or_adjust,0x14,"lbz 0x7FE9E8(r13-0x1608); rlwinm clears bit 8 of OR value",static,dump,
+0x012004,0x012004,ext_flash,func,boot_memctrl_init,0x1D8,"stores to BR0/OR0 BR1/OR1 BR2/OR2 BR3/OR3 (0x6FC100-0x6FC11C)",static,dump,"BR0=0x000000|0x103/0x90B; BR1=0x800000|0x403; BR2=0x900000|0x823; BR3=0xA00000|3; OR tables at file 0x10020-0x1009C"
+0x012328,0x012328,ext_flash,func,boot_main_init,,"called from boot_start; checks IMMR PARTNUM==0x35",static,dump,
+0x017FF0,0x017FF0,ext_flash,const,r2_boot_sda2_base,,"lis r2,1; addi r2,r2,0x7ff0 at file 0x10E8",static,dump,"boot module small data in 0x10000-0x1FFFF"
+0x020004,0x020004,ext_flash,func,romcheck_result_set,0x1C,"li r3,0; stb r3,-0x7DA6(r13); li r4,0xFF; stb ... blr",static,dump,"community crc_check patch site (constants 0x55/0xAA)"
+0x02B870,0x02B870,ext_flash,table,tbl_kwp_services,0x1E0,"24 entries x 20 B parsed by script",static,dump,"SIDs 14 21 3B 2C 18 17 81 10 31 32 35 36 37 27 82 20 01 02 03 04 06 07 08 09; no 0x23/0x3D"
+0x02BC38,0x02BC38,ext_flash,table,tbl_toucan_bases,0xC,"0x707080 0x707480 0x707880",static,dump,
+0x02BC50,0x02BC50,ext_flash,const,ptr_can_config,4,"value 0x0002BF50",static,dump,
+0x02BC90,0x02BC90,ext_flash,table,tbl_can_rx,0x160,"header + 21 x 16 B: index, 0x01mmnn08, 4, id",static,dump,"ids 1A0 5A0 4A0 440 540 320 442 1AC 0C2 050 51A 5E0 390 38A 7FF 7FF 2A0 368 7FF 7FF 5C0"
+0x02BDF0,0x02BDF0,ext_flash,table,tbl_can_tx,0x110,"header + 16 x 16 B: index, id, 0x0101xxxx, dlc",static,dump,"ids 7C7 280 288 380 480 488 580 588 48A 38A 284 56A 7C4 7C5 7C5 7C6"
+0x038EA8,0x038EA8,ext_flash,func,cand_kwp_measblock_return,,"MED9Toolchain signature match at file 0x38EC4 - 28",hypothesis,MED9Toolchain,
+0x0A5654,0x0A5654,ext_flash,table,cand_tbl_tkmwl,,"MED9Toolchain signature 'blr 00 03' match",hypothesis,MED9Toolchain,"confirm with 360trev/MED9inf"
+0x0986AC,0x0986AC,ext_flash,func,app_sda_setup_a,0x10,"lis/addi r13=0x7FFFF0 r2=0x5C9FF0",static,dump,
+0x09E3E0,0x09E3E0,ext_flash,func,app_sda_setup_b,0x10,"lis/addi r13=0x7FFFF0 r2=0x5C9FF0",static,dump,
+0x405588,0x201588,int_flash,func,app_sda_setup_int,0x10,"lis/addi r13=0x7FFFF0 r2=0x5C9FF0",static,dump,
+0x001FF0,0x001FF0,ext_flash,table,tbl_checksum_boot,0x10,"checksum.py",static,dump,"1 entry 0x0-0x1FFF"
+0x01FFC0,0x01FFC0,ext_flash,table,tbl_checksum_const,0x40,"checksum.py",static,dump,"4 x 16 KB 0x10000-0x1FFFF"
+0x0A0000,0x0A0000,ext_flash,table,tbl_checksum_code,0x360,"checksum.py",static,dump,"54 entries incl. on-chip flash 0x404000-0x47FFFF"
+0x5C3300,0x1C3300,cal,table,tbl_checksum_cal,0x60,"checksum.py",static,dump,"6 entries 0x5C2000-0x5FFFFF"
+0x01E73C,0x01E73C,ext_flash,table,tbl_runtime_check_regions_a,,"0x404000-0x47FFFF followed by RAM ptrs 0x7FCC8C 0x7FCCC4",static,dump,
+0x0829A0,0x0829A0,ext_flash,table,tbl_runtime_check_regions_b,,"0x404000-0x47FFFF followed by RAM ptrs 0x805690 0x8056D4",static,dump,
+0x0A3A18,0x0A3A18,ext_flash,table,tbl_runtime_check_regions_c,,"0x404000-0x47FFFF, 0x5C2E00-0x5FFFFF",static,dump,
+0x080100,0x080100,ext_flash,marker,code_directory,0x30,"5A5A5A5A 33333333 + 10 pointers",static,dump,
+0x144950,0x144950,ext_flash,marker,end_of_code,8,"02030600 5A5A5A5A then 0xFF",static,dump,"MED9Toolchain FREE_FLASH signature"
+0x5C2000,0x1C2000,cal,marker,cal_directory,0x20,"5A5A5A5A CCCCCCCC + pointers 0x1C2080 0x1C2040 0x1C20C0 0x1C2100 0x1E2500",static,dump,
+0x5C21F0,0x1C21F0,cal,const,str_bosch_project,0x40,"56/1/MED91/3/6W6432.D//D9133_43K6P0/D9133_43K6P0/080506/",static,dump,
+0x5CEE20,0x1CEE20,cal,const,ecu_ident_block,0x50,"03H906032 / P3.2 FSI-EU4 / 9387 / 0261S02226 / 1037382557 / 4.7.6 A / P0000",static,dump,
+0x5C2E78,0x1C2E78,cal,table,tbl_ram_init_ranges,,"00800000 00800004 00807FF8 007FE588",static,dump,"external SRAM 0x800000-0x807FFF"
+0x7FEFFC,,sram_int,const,initial_stack_top,,"boot_start",static,dump,
+0x7FFFF0,,sram_int,const,r13_sda_base,,"boot_start and app_sda_setup",static,dump,"r13-relative range 0x7F8000-0x8073E9"
+0x5C9FF0,0x1C9FF0,cal,const,r2_app_sda2_base,,"app_sda_setup_a/b/int",static,dump,"application read-only small data"
+0x7F824A,,sram_int,var,romcheck_result_flags,4,"romcheck_result_set writes r13-0x7DA6..-0x7DA3",static,dump,
+0x7FE9E8,,sram_int,var,boot_mode_flag,1,"r13-0x1608 read by boot_or_adjust and boot_main_init",static,dump,
+0x6F8000,,periph,region,decram_code_copy,0x238,"boot copies 0x11118.. here and calls it",static,dump,
+0x900000,,periph,region,cs2_external_device,,"BR2; 20 refs; accessed from DECRAM routine",static,dump,"identity unknown"
+0xA00000,,periph,region,cs3_external_device,,"BR3; 2 refs",static,dump,"identity unknown"

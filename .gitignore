@@ -1,1 +1,8 @@
-﻿__pycache__/
+__pycache__/
+.venv/
+*.pyc
+work/
+*.fixed.bin
+*.patched
+.DS_Store
+ghidra_projects/

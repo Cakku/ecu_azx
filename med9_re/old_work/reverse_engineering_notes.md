@@ -1,3 +1,5 @@
+> **STATUS (2026-09-15): SUPERSEDED / UNVERIFIED.** These notes were written against a wrong memory map (2 MB image only, peripherals at ISB=0 addresses, transmit table mistaken for receive table). See `docs/02_memory_map.md` for the verified layout and the list of corrections. Kept for history only.
+
 # MED9.1 Reverse Engineering Notes
 
 ## Memory Map Matches

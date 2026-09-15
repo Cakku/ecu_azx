@@ -1,0 +1,190 @@
+# Tooling and environment
+
+This Mac is an Apple M2 Pro running macOS 26 with an **x86_64 (Rosetta)
+Homebrew in /usr/local** and Python 3.14 from it. Everything below works
+under Rosetta; a native `/opt/homebrew` install would be faster but is not
+required. Versions were checked in September 2026.
+
+## 1. Repository Python tools
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python3 tools/checksum.py verify -q data/passat_azx_ori.bin   # ALL OK (65 blocks)
+```
+
+`tools/med9lib.py` is the single source of truth for address mapping. Import
+it in every new script instead of hard-coding offsets.
+
+Python 3.14 works for capstone 5.0.x, unicorn 2.1.4 and cantools (tested
+here). If you add `pypcode`/`angr` use a Python 3.13 venv; their wheels lag.
+
+## 2. Ghidra
+
+- Install: `brew install ghidra` (formula, currently 12.1.3; the cask no
+  longer exists). It pulls `openjdk@21`. Manual zip install also works;
+  remove the quarantine attribute before unzipping. Ghidra 12.1.x accepts any
+  JDK >= 21 (the installed JDK 24 launches it; 21 is the supported one).
+- Language: **`PowerPC:BE:32:default`**, compiler `default`. Do not use VLE,
+  e500, 4xx or MPC8270 variants. The classic MPC5xx core is plain 32-bit PPC
+  with FPU; most SPRs show as `sprNNN` (638 = IMMR, 560 = IC_CST).
+- PyGhidra (Python 3 API) ships with 12.x: install its wheel from
+  `<GhidraInstallDir>/Ghidra/Features/PyGhidra/pypkg/dist` into the venv;
+  `pyghidra` runs headless by default, `-g` for the GUI.
+- Headless import example (adjust paths):
+
+```bash
+analyzeHeadless ~/ghidra_projects med9 -import data/passat_azx_ori.bin \
+  -loader BinaryLoader -loader-baseAddr 0x0 -loader-blockName EXT_FLASH \
+  -processor PowerPC:BE:32:default -cspec default -noanalysis \
+  -scriptPath ghidra_scripts -postScript med9_setup.py
+```
+
+### 2.1 What `med9_setup.py` must do (to be written in Phase 1)
+
+1. Truncate/adjust the imported block so `EXT_FLASH` covers file 0x0-0x1FFFFF
+   at 0x000000.
+2. Create `INT_FLASH` at 0x404000 length 0x7C000 from file offset 0x200000
+   (`Memory.createInitializedBlock` with the file bytes).
+3. Create `CAL_ALIAS` at 0x5C0000 length 0x40000 as a **byte-mapped block**
+   onto 0x1C0000 (`createByteMappedBlock`), so calibration references resolve
+   to the same bytes without duplicating code. Add a mapped block for
+   0x480000-0x5BFFFF only if a real reference into it shows up (three found).
+4. Uninitialised RAM blocks: `SRAM_INT` 0x7F8000/0x8000, `SRAM_EXT`
+   0x800000/0x8000, `DECRAM` 0x6F8000/0x800, `USIU` 0x6FC000/0x400,
+   `UC3F_CTL` 0x6FC800/0x20, IMB modules 0x704000-0x707FFF (one block per
+   module, names from `02_memory_map.md`), `CS2_DEV` 0x900000/0x40000,
+   `CS3_DEV` 0xA00000/0x8000, `CALRAM_CTL` 0x780000/0x40.
+5. Register values over all code: r13 = 0x7FFFF0; r2 = 0x5C9FF0; then
+   r2 = 0x17FF0 over the boot module (functions reachable from 0x1004 until
+   the application SDA setup at 0x986AC/0x9E3E0/0x405588). Use
+   `ProgramContext.setValue(register, start, end, BigInteger)`.
+6. Disassemble the vector table entries (`ba`) at 0x0-0x1000 and the tail
+   start 0x404000, create functions at the KWP handler addresses and the
+   checksum/CAN tables as data, then run auto-analysis.
+7. Export functions/symbols/comments to `re/` (see the guidelines doc).
+
+EliasTuning/Med9GhidraScripts has a working `med9-install.py` for 2 MB ECUs
+(ROM at 0x400000, RAM at 0x600000, same r13/r2) and a `no_globals` cspec that
+stops the decompiler folding SDA globals; borrow from it, but keep our map.
+
+### 2.2 Other Ghidra uses
+
+- Version Tracking / `ghidriff` to diff our binary against related dumps
+  (e.g. 03H906032 with another software number) and to port symbols.
+- `EmulatorHelper` for unit-testing single functions (section 5).
+
+## 3. PowerPC cross compiler for patches
+
+Recommended: **devkitPPC** (GCC 15, target `powerpc-eabi`, macOS binaries).
+
+```bash
+# install devkitPro pacman (pkg from github.com/devkitPro/pacman/releases), then
+sudo dkp-pacman -S devkitPPC
+export DEVKITPPC=/opt/devkitpro/devkitPPC
+$DEVKITPPC/bin/powerpc-eabi-gcc -mcpu=505 -mbig-endian -meabi -msdata=none -G0 \
+  -ffixed-r2 -ffixed-r13 -mno-relocatable -mstrict-align -msoft-float \
+  -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-pic \
+  -fno-stack-protector -fno-asynchronous-unwind-tables -Os -c patch.c
+```
+
+Flags that matter: `-mcpu=505` is the MPC5xx entry; `-msdata=none -G0
+-ffixed-r2 -ffixed-r13` stop GCC from creating or using small-data sections
+and from touching the ECU's SDA registers; `-msoft-float` keeps the FPU out
+of hooked contexts (we use integer math anyway; if a float routine is ever
+needed, `-mhard-float` is available on this core but the hook must then save
+FP state). Link with a script that places `.text/.rodata/.data` at the chosen
+free-flash address and `.bss` at the chosen RAM address (`06_patch_pipeline.md`).
+Extract with `powerpc-eabi-objcopy -O binary`, symbols with `nm -n`, and
+always disassemble the final blob with
+`objdump -D -b binary -m powerpc:common -EB --adjust-vma=ADDR`.
+
+Alternative: Homebrew LLVM (`brew install llvm lld`) with
+`clang --target=powerpc-none-eabi -mcpu=603e ...` and `ld.lld -m elf32ppc`.
+LLVM reserves r2/r13 on 32-bit SVR4 by itself, but has no libgcc for PPC
+(avoid 64-bit division and float conversions). Docker with Debian
+`gcc-powerpc-linux-gnu` is a third option with the same flags.
+The Windows-only gnutoolchains build referenced by MED9Toolchain is not usable here.
+
+## 4. Disassembly and analysis in Python
+
+- `capstone` 5.0.x: `Cs(CS_ARCH_PPC, CS_MODE_32 | CS_MODE_BIG_ENDIAN)`.
+  Pin 5.x; 6.0 changes the PPC API. Never name a script `dis.py` (shadows the
+  stdlib and breaks capstone's import).
+- `tools/find_abs_refs.py` for `lis`+offset cross references outside Ghidra.
+- Binary diff: `cmp -l a.bin b.bin | wc -l` and `radiff2` (`brew install radare2`).
+- Map/table finders: Ghidra xrefs from the Bosch interpolation routines are
+  the reliable way; TunerPro (under CrossOver/Wine) and WinOLS (Windows VM)
+  for editing once a definition exists; `openremap`, `romHEX14`, MxT as
+  heuristic helpers.
+- Variable table / ECU id parser: **360trev/MED9inf** (C, tested by its author on
+  a 3.6 FSI 03H906032DQ), and nubcake's MED9info.
+
+## 5. Emulation
+
+| Use | Tool | Notes |
+|---|---|---|
+| Unit test of a pure function (map lookup, fuel math) | Ghidra `EmulatorHelper` from PyGhidra | same semantics as the decompiler, FP modelled, SPRs are registers |
+| Fast tracing of boot / longer paths | Unicorn 2.1.4 (`UC_ARCH_PPC`, `UC_MODE_32|UC_MODE_BIG_ENDIAN`, cpu model 603E) | set MSR[FP] before float code; no MPC5xx SPR model; stub USIU/PLL/watchdog polling; map DECRAM 0x6F8000 (the boot copies code there and calls it) and a CS2 stub at 0x900000 |
+| Symbolic questions | angr / pypcode (Python 3.13) | heavy; optional |
+
+QEMU has no MPC5xx machine and is not useful here. The old
+`med9_re/old_work/emulator.py` failed because it mapped peripherals at the
+ISB=0 addresses and lacked DECRAM and CS2; its register values (r1, r13, boot
+r2) were right.
+
+## 6. CAN and diagnostics
+
+- Mac has no SocketCAN. Options: **slcan** adapter (CANable) via
+  `python-can` `slcan`, **gs_usb/candleLight** via `python-can[gs-usb]`
+  (libusb is installed), or the existing **Pi Zero + socketcand** route
+  (`pi_can_setup/`) which also feeds SavvyCAN. SavvyCAN has arm64 macOS builds.
+- Bus survey: `pi_can_setup/find_active_ids.py` on the powertrain CAN before
+  choosing the ethanol frame id.
+- Diagnostics transport: VW **TP2.0 over CAN (channel setup on 0x200, engine
+  logical address 0x01) carrying KWP2000**. Libraries: EliasTuning/MED9RamReader
+  (0x2C/0x21 + RequestUpload, needs the seed/key), EliasTuning/KWP2000-CAN,
+  I-CAN-hack/pq-flasher (TP2.0 + KWP + CCP, panda hardware; ports exist for
+  python-can), notyal/vwcanread (Passat B6 MED9.1 target). Security access:
+  community reports `key = seed + 0x11170` for the development session on
+  MED9.1; verify on our KWP 0x27 handler.
+- Live RAM: **ReadMemoryByAddress (0x23) is not implemented** (our table
+  confirms). Use DynamicallyDefineLocalIdentifier (0x2C) + ReadDataByLocalId
+  (0x21), ~40 samples/s, or RequestUpload (0x35) for whole-RAM snapshots.
+  Alternative without a PC tool: patch spare measuring-block slots so VCDS
+  shows RAM values. CCP over CAN (MED9.1 CRO/DTO 0x7C3/0x7C4) needs direct
+  powertrain-bus access (the gateway filters it).
+- DBC in `data/` is the infotainment CAN (PQ35 ICAN), useful only for
+  gateway-bridged engine frames (`mGW_Motor` 0x35B etc.), not for the
+  powertrain bus the ECU sits on.
+
+## 7. Flashing, backup and recovery
+
+- **KESSv2**: reads/writes this ECU with protocol 179 (MED9.1.1) over OBD and
+  applies its own checksum correction. KESSv2 is end-of-life (no new
+  subscriptions, updates only while the current one lasts). Software is
+  Windows-only; USB drivers are the weak point in VMs, so use a real Intel
+  Windows laptop if possible.
+- **K-TAG with the "BDM Motorola MPC5xx" positioning frame, protocol 64**:
+  bench read/write of external flash, on-chip flash and EEPROM via the 14-pin
+  BDM pads (no protection at that level). This is both the complete backup
+  and the recovery path after a failed OBD write. Use a frame, not soldering;
+  the pads are easy to destroy.
+- OBD writes do not touch the EEPROM (immobiliser data, adaptation, flash
+  counter). Read-protected ECUs answer `7F 27 35`; ours read fine.
+- Procedure and checklist: `04_re_guidelines.md` section 6.
+- EEPROM tools for backup analysis only: E2PA (Windows), EliasTuning/MED9-EEPROM-Tool (Python).
+
+## 8. Reference documents to obtain
+
+- Bosch **MED9.1 Funktionsrahmen** (TFSI edition, ~55 MB PDF on s4wiki:
+  `files.s4wiki.com/docs/MED9.1 TFSI.pdf`); the VR6 FSI software differs in
+  places but module and variable names carry over.
+- MPC561/MPC563 Reference Manual (NXP `MPC561RM.pdf`) for USIU, TouCAN,
+  QADC, UC3F, dual mapping (DMBR/DMOR) and IMMR bit definitions.
+- An A2L for a 03H906032 software close to 1037382557 would be the single
+  most valuable artefact (all map and RAM symbols); none is public.
+- Community code to read: EliasTuning `Med9GhidraScripts`, `MED9Toolchain`,
+  `MED9.1-Compiler`, `MED9-Patches`, `MED9.1-Multimap-Tool`, `MED9RamReader`,
+  `MED9-CCP`; 360trev `MED9inf`; the nefariousmotorsports MED9.1 threads by
+  Basano (IDA setup, CAN_CONF, checksums, DDLI logging).
