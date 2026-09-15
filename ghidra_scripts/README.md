@@ -11,6 +11,7 @@ what reproduce it.
 | `export_symbols.py` | Ghidra → `re/ghidra_export/functions.csv` (all functions) and merge of the named symbols into `re/symbols.csv`. |
 | `import_symbols.py` | `re/symbols.csv` → names, functions and plate comments in a fresh project. |
 | `med9_symbols.py` | Shared CSV/address helpers. Not a Ghidra script; imported by the two above. |
+| `b1_context_and_symbols.py` | Per-function r2 (SDA2) context from the call graph plus the brief-B1 symbols (issues #8 and #11). Run it after `med9_setup.py`; it supersedes `--boot-r2`. |
 
 ## Prerequisites
 
@@ -72,6 +73,34 @@ creates a single block for the whole 2,605,056-byte file, which would put the
 on-chip flash at 0x200000. `med9_setup.py` deletes that block and recreates
 `EXT_FLASH` and `INT_FLASH` from the same `FileBytes`, so the tail lands at
 0x404000.
+
+## Per-function r2 context (issue #8)
+
+`med9_setup.py --boot-r2` sets r2 = 0x017FF0 over a blanket 0x001000-0x01FFFF.
+That range is too wide -- 100 application functions live at 0x019948-0x01E848
+(`re/findings/boot.md` section 1.1). Use this instead, after the map is built:
+
+```bash
+./.venv/bin/python -m pyghidra.ghidra_launch \
+    --install-dir "$GHIDRA_INSTALL_DIR" \
+    ghidra.app.util.headless.AnalyzeHeadless ghidra_projects med9 \
+    -process passat_azx_ori.bin -noanalysis \
+    -scriptPath ghidra_scripts -postScript b1_context_and_symbols.py "$PWD"
+```
+
+It derives the 119-function boot module with `tools/callgraph.py`, sets
+r2 = 0x017FF0 over exactly those twelve address ranges and 0x5C9FF0 over the
+rest of the code, prints nine read-back probes, and applies 42 named symbols
+with their confidence tag in the plate comment. It also drops the stale label
+`tbl_exception_vectors` that `med9_setup.py` still seeds at 0x0 (A2 renamed it
+to `tbl_etr_branch_table` in `re/symbols.csv`; without the drop every
+`export_symbols.py` run appends a duplicate row for 0x000000).
+
+Violations are listed outside Ghidra:
+
+```bash
+python3 tools/r2_context.py data/passat_azx_ori.bin --compare --violations
+```
 
 ## Symbol round trip (issue #9)
 
