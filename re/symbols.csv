@@ -1,6 +1,6 @@
 cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
-0x000000,0x000000,ext_flash,table,tbl_exception_vectors,0x2000,"tools scan: ba branches every 0x100",static,dump,"reset 0x100 -> 0x49C; used vectors -> 0x110F0"
-0x000100,0x000100,ext_flash,func,reset_vector,4,"ba 0x49c",static,dump,
+0x000000,0x000000,ext_flash,table,tbl_etr_branch_table,0x100,"32 x 8 B ba entries matching MPC561RM Table 4-1 (BBC exception table relocation); xxd -s 0 -l 0x100",static,dump,"CORRECTED 2026-09-15 A2: not a 0x100-spaced vector table. +0x08 reset -> 0x3C4; +0x10 machine check -> 0x164; +0x28 external interrupt -> 0x80028; unused -> 0x144; Page_Offset = 0x400000*ISB so the live copy is at 0x400000 (missing 16 KB)"
+0x000100,0x000100,ext_flash,func,reset_vector,4,"ba 0x49c",static,dump,"classic 0x100-spaced layout, used only when RCW[IP]=0; that layout is incomplete (file 0x500, the external-interrupt vector, is zero) - the live table is the ETR one at 0x0"
 0x00049C,0x00049C,ext_flash,func,boot_trampoline,4,"b 0x1004",static,dump,
 0x001004,0x001004,ext_flash,func,boot_start,0xF4,"disassembly: IMMR ISB=1, BR0|=0x100, IC_CST, MSR 0x3942, SIPEND poll, r1/r13/r2 setup, bl 0x12328",static,dump,"r1=0x7FEFFC r13=0x7FFFF0 r2=0x17FF0"
 0x0110F0,0x0110F0,ext_flash,func,fatal_exception_handler,0x28,"PLPRCR |= 0x80, MSR 0x2942, sth 0x704002, infinite loop",static,dump,"target of unused exception vectors"
@@ -41,3 +41,23 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x6F8000,,periph,region,decram_code_copy,0x238,"boot copies 0x11118.. here and calls it",static,dump,
 0x900000,,periph,region,cs2_external_device,,"BR2; 20 refs; accessed from DECRAM routine",static,dump,"identity unknown"
 0xA00000,,periph,region,cs3_external_device,,"BR3; 2 refs",static,dump,"identity unknown"
+0x5C0000,0x1C0000,cal,region,cal_dualmap_window,0x40000,"DMBR=0x70000001 DMOR=0x70000000 at file 0x1250C; MPC561RM Eqn 10-1",static,dump,"CPU 0x5C0000-0x5FFFFF -> external flash 0x1C0000-0x1FFFFF, CS0, code+data"
+0x6FC100,,periph,var,usiu_br0,4,"MPC561RM Table 10-6 p.10-31 (0x2FC100 + ISB base)",static,manual,"written at file 0x12010/0x12034/0x12064 with 0x000103 / 0x00090B"
+0x6FC104,,periph,var,usiu_or0,4,"MPC561RM Table 10-6",static,manual,"8 MB region: AM=0xFF800000 in every clock mode"
+0x6FC108,,periph,var,usiu_br1,4,"MPC561RM Table 10-6",static,manual,"0x800403: base 0x800000, 8-bit port"
+0x6FC10C,,periph,var,usiu_or1,4,"MPC561RM Table 10-6",static,manual,"0xFFFC01x0: 256 KB region 0x800000-0x83FFFF"
+0x6FC110,,periph,var,usiu_br2,4,"MPC561RM Table 10-6",static,manual,"0x900823: base 0x900000, 16-bit port, byte enables"
+0x6FC114,,periph,var,usiu_or2,4,"MPC561RM Table 10-6",static,manual,"0xFFFC0110: 256 KB region 0x900000-0x93FFFF"
+0x6FC118,,periph,var,usiu_br3,4,"MPC561RM Table 10-6",static,manual,"0xA00003: base 0xA00000, 32-bit port"
+0x6FC11C,,periph,var,usiu_or3,4,"MPC561RM Table 10-6",static,manual,"0xFFFF8C20/30: 32 KB region 0xA00000-0xA07FFF"
+0x6FC140,,periph,var,usiu_dmbr,4,"stw r11,0x140(r31) at file 0x12514",static,dump,"0x70000001: BA=0b111000, DMCS=CS0, DME=1"
+0x6FC144,,periph,var,usiu_dmor,4,"stw r12,0x144(r31) at file 0x1250C",static,dump,"0x70000000: AM=0b111000, ATM=0 (code+data)"
+0x6FC000,,periph,var,usiu_siumcr,4,"MPC561RM Table 5-1 p.5-3",static,manual,"bit 1 IP = initial MSR[IP]"
+0x6FC010,,periph,var,usiu_sipend,4,"MPC561RM Table 5-1",static,manual,"polled by boot via lis 0x70 / lwz -0x3FF0"
+0x6FC800,,periph,var,uc3f_control,0xC,"MPC561RM sec.21.2.1; 5 refs",static,manual,"UC3FMCR/UC3FMCRE/UC3FCTL, on-chip flash program+erase"
+0x400000,,int_flash,region,uc3f_small_block_0,0x4000,"MPC561RM Fig.21-8 p.21-19",static,manual,"missing from the dump; hosts the shadow row / reset configuration word"
+0x705000,,periph,region,qsmcm,0x400,"MPC561RM Table 15-1 p.15-3; 49 refs",static,manual,"QSPI ctrl 0x705018-0x70501F, RX RAM 0x705140, TX RAM 0x705180, CMD RAM 0x7051C0 (EEPROM driver)"
+0x707000,,periph,region,toucan_a,0x400,"MPC561RM Fig.1-4 / Table 16-10",static,manual,"CANMCR 0x707080, IMASK 0x7070A2, IFLAG 0x7070A4, MB n at 0x707100+0x10n"
+0x707400,,periph,region,toucan_b,0x400,"MPC561RM Fig.1-4 / Table 16-10",static,manual,"CANMCR 0x707480"
+0x707800,,periph,region,toucan_c,0x400,"MPC561RM Fig.1-4 / Table 16-10",static,manual,"CANMCR 0x707880"
+0x001118,0x001118,ext_flash,func,boot_bbcmcr_setup,0x28,"mfspr r9,560; ori r9,r9,2; mtspr 560,r9; isync at file 0x1118-0x1138",static,dump,"BBCMCR: only DCAE set; ETRE/OERC left at reset-configuration-word values"
