@@ -42,10 +42,14 @@ add_subdirectory(lib/harbys-ssd1306)
 
 # -------------------------------------------------------------
 # Executable
+#   ff_sensor.c holds the whole measurement / plausibility / frame logic and is
+#   deliberately free of SDK dependencies: pico_can_sender/test builds the very
+#   same file for the host (see test/run_tests.sh).
 # -------------------------------------------------------------
 add_executable(pico_can_sender
     src/main.cpp
-    src/pot.cpp
+    src/ff_sensor.c
+    src/sensor_input.cpp
     src/can_hw.cpp
     src/display.cpp
 )
@@ -62,11 +66,11 @@ target_include_directories(pico_can_sender PRIVATE
 # -------------------------------------------------------------
 target_link_libraries(pico_can_sender
     pico_stdlib
-    hardware_adc
     hardware_spi
     hardware_i2c
-    pico_mcp2515   
-    pico_ssd1306   
+    hardware_gpio
+    pico_mcp2515
+    pico_ssd1306
 )
 
 # -------------------------------------------------------------
@@ -75,3 +79,14 @@ target_link_libraries(pico_can_sender
 pico_enable_stdio_usb(pico_can_sender 1)
 pico_enable_stdio_uart(pico_can_sender 0)
 pico_add_extra_outputs(pico_can_sender)
+
+# -------------------------------------------------------------
+# Host tests: "cmake --build build --target ff_tests" runs exactly what
+# test/run_tests.sh runs, but with the cross compiler left out of the way.
+# -------------------------------------------------------------
+add_custom_target(ff_tests
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_tests.sh
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test
+    COMMENT "Running host tests for ff_sensor.c"
+    USES_TERMINAL
+)

@@ -1,0 +1,6 @@
+[submodule "pico_can_sender/lib/pico-mcp2515"]
+	path = pico_can_sender/lib/pico-mcp2515
+	url = https://github.com/adamczykpiotr/pico-mcp2515.git
+[submodule "pico_can_sender/lib/harbys-ssd1306"]
+	path = pico_can_sender/lib/harbys-ssd1306
+	url = https://github.com/Harbys/pico-ssd1306.git

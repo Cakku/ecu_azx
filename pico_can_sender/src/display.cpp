@@ -1,14 +1,15 @@
 #include "display.h"
+
 #include "hardware/i2c.h"
 #include "pico/stdlib.h"
+
 #include <cstdio>
 
-// Harbys library includes
+/* Harbys/pico-ssd1306 */
 #include "shapeRenderer/ShapeRenderer.h"
 #include "ssd1306.h"
 #include "textRenderer/TextRenderer.h"
 
-// I2C Pin definitions
 #define DISP_I2C_PORT i2c0
 #define DISP_SDA_PIN 4
 #define DISP_SCL_PIN 5
@@ -16,70 +17,80 @@
 #define DISP_WIDTH 128
 #define DISP_HEIGHT 64
 
-// Create the display object pointer
-pico_ssd1306::SSD1306 *display = nullptr;
+static pico_ssd1306::SSD1306 *s_display = nullptr;
 
-void display_init(void) {
-  // I2C Init
-  i2c_init(DISP_I2C_PORT, 400000); // 400kHz
-  gpio_set_function(DISP_SDA_PIN, GPIO_FUNC_I2C);
-  gpio_set_function(DISP_SCL_PIN, GPIO_FUNC_I2C);
-  gpio_pull_up(DISP_SDA_PIN);
-  gpio_pull_up(DISP_SCL_PIN);
+void display_init(void)
+{
+    i2c_init(DISP_I2C_PORT, 400000);
+    gpio_set_function(DISP_SDA_PIN, GPIO_FUNC_I2C);
+    gpio_set_function(DISP_SCL_PIN, GPIO_FUNC_I2C);
+    gpio_pull_up(DISP_SDA_PIN);
+    gpio_pull_up(DISP_SCL_PIN);
 
-  // Display Init - instantiate AFTER I2C is ready
-  // This prevents crash during global constructor execution before main()
-  display = new pico_ssd1306::SSD1306(DISP_I2C_PORT, DISP_ADDR,
-                                      pico_ssd1306::Size::W128xH64);
-
-  display->setOrientation(false); // 0 = false (not flipped)
-  display->turnOn();
+    /* Instantiated after I2C is up: a global constructor would run before
+     * main() and hang on the first transfer. */
+    s_display = new pico_ssd1306::SSD1306(DISP_I2C_PORT, DISP_ADDR,
+                                          pico_ssd1306::Size::W128xH64);
+    s_display->setOrientation(false);
+    s_display->turnOn();
 }
 
-void display_update(uint8_t pot_val, bool can_status) {
-  if (!display)
-    return; // Safety check
+void display_splash(const char *line1, const char *line2)
+{
+    if (s_display == nullptr) {
+        return;
+    }
+    s_display->clear();
+    pico_ssd1306::drawText(s_display, font_8x8, line1 ? line1 : "", 0, 16);
+    pico_ssd1306::drawText(s_display, font_8x8, line2 ? line2 : "", 0, 32);
+    s_display->sendBuffer();
+}
 
-  display->clear();
+void display_update(const ff_output_t *out, bool can_ok, uint16_t can_id)
+{
+    char buf[24];
 
-  // Header
-  pico_ssd1306::drawText(display, font_8x8, "CAN Sender", 0, 0);
+    if (s_display == nullptr || out == nullptr) {
+        return;
+    }
 
-  // Status
-  if (can_status) {
-    pico_ssd1306::drawText(display, font_8x8, "OK", 80, 0);
-  } else {
-    pico_ssd1306::drawText(display, font_8x8, "ERR", 80, 0);
-  }
+    s_display->clear();
 
-  // CAN ID Info
-  pico_ssd1306::drawText(display, font_8x8, "ID: 0x123", 0, 16);
+    /* Header: identifier being transmitted and the CAN health. */
+    snprintf(buf, sizeof(buf), "FF 0x%03X", (unsigned)(can_id & 0x7FFu));
+    pico_ssd1306::drawText(s_display, font_8x8, buf, 0, 0);
+    pico_ssd1306::drawText(s_display, font_8x8, can_ok ? "CAN OK" : "CAN ER", 76, 0);
+    pico_ssd1306::drawLine(s_display, 0, 10, 127, 10);
 
-  // Value Text
-  char buf[16];
-  sprintf(buf, "Val: %d%%", pot_val);
-  pico_ssd1306::drawText(display, font_8x8, buf, 0, 32);
+    /* Ethanol content, the headline number. */
+    snprintf(buf, sizeof(buf), "E%3u%%", (unsigned)out->ethanol_pct);
+    pico_ssd1306::drawText(s_display, font_12x16, buf, 0, 14);
 
-  // Gauge Bar
-  // Original: x=0, y=48, w=128, h=10
-  // Harbys: x0, y0, x1, y1
-  // x1 = x0 + w - 1 = 0 + 128 - 1 = 127
-  // y1 = y0 + h - 1 = 48 + 10 - 1 = 57
-  pico_ssd1306::drawRect(display, 0, 48, 127, 57);
+    /* Fuel temperature. */
+    snprintf(buf, sizeof(buf), "T %4d C", (int)out->fuel_temp_c);
+    pico_ssd1306::drawText(s_display, font_8x8, buf, 64, 18);
 
-  // Draw Fill
-  if (pot_val > 100)
-    pot_val = 100;
+    /* Raw frequency with one decimal. */
+    {
+        uint32_t f_x10 = (out->freq_avg_mhz + 50u) / 100u;
+        snprintf(buf, sizeof(buf), "f %3u.%01u Hz", (unsigned)(f_x10 / 10u),
+                 (unsigned)(f_x10 % 10u));
+        pico_ssd1306::drawText(s_display, font_8x8, buf, 0, 34);
+    }
 
-  uint8_t fill_w = (pot_val * 128) / 100;
-  if (fill_w > 0) {
-    // fill_w is width. x1 = 0 + fill_w - 1
-    // Clip x1 to 127
-    uint8_t x1 = fill_w - 1;
-    if (x1 > 127)
-      x1 = 127;
-    pico_ssd1306::fillRect(display, 0, 48, x1, 57);
-  }
+    /* Status line. */
+    snprintf(buf, sizeof(buf), "S %s", ff_status_name(out->status));
+    pico_ssd1306::drawText(s_display, font_8x8, buf, 0, 46);
 
-  display->sendBuffer();
+    /* Ethanol bar graph across the bottom. */
+    {
+        uint8_t pct = out->ethanol_pct > 100u ? 100u : out->ethanol_pct;
+        uint8_t fill = (uint8_t)((pct * 127u) / 100u);
+        pico_ssd1306::drawRect(s_display, 0, 56, 127, 63);
+        if (fill > 0u) {
+            pico_ssd1306::fillRect(s_display, 0, 56, fill, 63);
+        }
+    }
+
+    s_display->sendBuffer();
 }
