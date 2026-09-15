@@ -202,3 +202,170 @@ The alternative — the `mullw`/`srawi` pair at 0x41AA88/0x41AA8C inside
 `gk_rk` — is one instruction pair but sits in the hottest path of the
 segment task, so prefer the two `sth` sites.
 Fixed point at the hook: u16, **1024 = 1.0**, saturate at 0xFFFF.
+
+## 4. The engine-state chain (VERIFIED-STATIC)
+
+Five one-byte flags, in the order they change during a start:
+
+| RAM | role | written by | rule |
+|---|---|---|---|
+| **0x7FEAD0** | engine **not** running (off / cranking / stalled) | `FUN_000bd6e8` 0x0BD6E8-0x0BD893 | set when the speed-signal counter 0x7FCE98 > 4; cleared when 0x802128 bit 3 is set and the segment period 0x7FD68C is shorter than `200000000 / KAL(0x5C866C)`, i.e. nmot above a threshold |
+| 0x7FE91F | crankshaft turning | 0x0BD1D4 / 0x0BD200 | thresholds `0x7FD059` / `0x7FD05A`, two 3-point curves over temperature (0x5CEE11, 0x5CEE18) |
+| **0x7FE91D** | **`B_st`** — start attempt active | `FUN_00419cac` 0x419CAC-0x419CD7 | `0x7FEAD0 ? 0 : (0x7FE91F ? 1 : keep)` |
+| **0x7FE920** | **start end reached** | `FUN_00419cd8` 0x419CD8-0x419D3B | `0x7FE91D && (0x7FD058 & 1)` |
+| 0x7FD05B | cycles since start end, u8, saturates | same | `0x7FE920 ? ++ : 0` |
+| **0x7FE921** | **`B_stend`** — start finished | same | `0x7FD05B > 3` |
+| 0x7FECCA | 0x7FE921 sampled into the segment task | 0x422A60-0x422A68 (`lbz 0x7FE921; stb 0x7FECCA`) | used by the ignition chain, §5 |
+| 0x7FEA33 | `gk_rk` path selector | 0x41AE3C (set when 0x7FE920), 0x41AED4 (cleared) | 0 → start path (`ksta`), 1 → running path |
+
+`FUN_000d0dfc` (0x0D0DFC-0x0D0E87) clears 0x7FE920 / 0x7FE921 / 0x7FE91D / 0x7FD05B
+whenever 0x7FEAD0 is set, and runs the **after-start timer**:
+
+```c
+if (DAT_007fe91f != 0 && DAT_008011d8 != 0xFFFF) DAT_008011d8++;   /* 0x0D0E54 */
+```
+
+**0x8011D8 is a u16 time-since-engine-turning counter** (one writer, 0x0D0E54;
+25 readers across the rail-pressure, catalyst, diagnosis and idle modules).
+It is not reset at start end, only at power-up (0x11BD3C), so it is
+"time since the engine started turning" — the FR's `tnst_w` role.
+
+### 4.1 After-start and warm-up enrichment: what this dataset actually does
+
+**Negative finding (VERIFIED-STATIC): there is no separate `fnsk` / `fwlk` /
+`fnswl_w` factor multiplying `rk` in this software.** The complete list of
+multiplicative terms on the fuel path is fixed by `gk_rk` (0x41AA48) and by
+B6 §9, and every one of them is accounted for:
+
+| term | RAM | what it is |
+|---|---|---|
+| tester mixture trim | 0x801CF2 | `(0x7FD066 << 6 + 0x6000) * K(0x5D350C=128) >> 15`, i.e. `0.75 + n/512` in Q7; `0x7FD066` has **no code writer at all** — it is only reachable through the tester pointer table at 0x0A3ADC (`decompile.py --refs 0x7FD066`), so it is 1.0 in normal operation |
+| **start quantity** | **0x80302C** | §3 — the only temperature-driven enrichment on the fuel path |
+| running mixture | 0x803020 | the torque/λ cascade, §4.2 |
+| charge | 0x7FED38 | `rl`, u16, 4096 = 100 % (writer 0x418A3C, source `rl_w` 0x7FEFB2) |
+| `fr` / `fra` / `frm` | 0x802DF8, 0x802E00, 0x801D1A, 0x801E36, 0x801E28 | lambda control and its adaptation (B6 §9) |
+| `ZGST` | 0x801D8C[cyl] | per-cylinder balancing |
+
+So the **after-start decay is `KFWKSTT` over the injection count** (§3.1) and
+nothing else, and the **warm-up enrichment is expressed as a torque/efficiency
+and λ request**, not as a fuel factor. That is the BDE (FSI) form of the FR's
+ESNSWL/LANSWL pair: the ECU heats the catalyst with ignition retard (§5.1) and
+holds λ = 1 rather than enriching.
+
+### 4.2 The running-mixture cascade (for completeness; partly HYPOTHESIS)
+
+`FUN_00419da4` (0x419DA4-0x41A263) builds 0x803020, the factor `gk_rk` uses
+once the start has ended:
+
+```c
+0x80301C = 0x7FD266 * (0x7FD065 * 0x7FD267 *
+              ((0x801D00 | 0x7FD263) * ((0x801D06>>8) * iVar3 >> 8)) >> 14) >> 7;
+0x803022 = min(0x80301C + 0x1000, 0xFFFF);          /* 0x1000 = 4096 */
+0x803020 = mul_q15(0x803026, (0x7FD264 * 0x803022) >> 7);   /* sth at 0x41A250 */
+```
+
+with the sub-factors written by `FUN_004302dc` (0x7FD264, 0x7FD265, 0x7FD261),
+`FUN_00430448` (0x7FD267, 0x7FD268, 0x803026 — its two maps 0x5C6B64 and
+0x5C6C12 are **all 128**, i.e. neutral) and `FUN_0010c874`
+(0x801CF4-0x801D02, the maps 0x5D36E0 / 0x5D3568 / 0x5D361B / 0x5D3610).
+All of these are ≤ 1.0 weightings; none of them enriches over coolant
+temperature. Scaling: 0x803020 is Q12 (4096 = 1.0), because the running branch
+of `gk_rk` computes `(0x7FD270 * 0x801CF2 * 0x803020) >> 16` with two Q7
+factors and must produce the same 1024 = 1.0 as the start branch.
+
+**Insertion point S2 (post-start, if a warm-running ethanol factor is ever
+wanted here rather than at B6's `rk` hook): the `sth` of 0x803020 at
+0x41A250**, Q12, saturate at 0xFFFF. It is *not* recommended — it duplicates
+B6's hook at 0x42247C and covers every operating point, not just warm-up.
+
+## 5. The start ignition angle `zwstt` (VERIFIED-STATIC)
+
+**During the start the whole per-bank ignition angle is replaced by one RAM
+byte, `zwstt` at 0x802096 — `zwgru`, the bank offsets and the knock retard are
+all bypassed.** In `zwbas_per_bank` (`FUN_0041d10c`, 0x41D10C, B7 §4):
+
+```c
+if (DAT_007fecca == '\0')            /* start not finished */
+     iVar10 = (int)DAT_00802096;     /* <- zwstt replaces everything */
+else iVar10 = iVar9 + DAT_007fd347 + dwkrz[cyl];
+iVar10 = iVar10 + cand_DZW_BANK_OFFSET;    /* s8 clamp, then 0x7FD30B / 0x7FD30C */
+```
+
+0x7FECCA is a copy of the "start finished" flag 0x7FE921 sampled into the
+segment task (`lbz r12,-0x16CF(r13); stb r12,-0x1326(r13)` at
+0x422A60/0x422A64), so the condition is exactly `!B_stend`.
+
+`zwstt` is built by **`FUN_00431294` (0x431294-0x43139F)**, in the same 10 ms
+module group as `FUN_004310c8`, the driver of `zwgru_kfzw_lookup`:
+
+```c
+if (DAT_007fecca == '\0') {                       /* only while starting */
+  if ((DAT_007fce0c & 2) == 0) {
+    a = lookup_2d_g_u8_u8_s8(8,0x5C7B54, 8,0x5C7B5C, 0x5C7B64, zdgz=0x7FCE14, tmst=0x8021F6);
+    b = lookup_2d_g_u8_u8_s8(3,0x5C7B1A, 6,0x5C7B1D, 0x5C7B23, nmot8=0x7FCE95, tmst);
+    v = clamp_s8(a + b);
+  } else {
+    v = lookup_2d_g_u8_u8_s8(3,0x5C7B37, 6,0x5C7B3A, 0x5C7B40, nmot8, tmst);
+  }
+  c = lookup_1d_g_u8_s8(6,0x5C7BA5, 0x5C7BAB, 0x7FD3E5);
+  DAT_00802096 = clamp_s8(c + v);                 /* stb at 0x431384 */
+}
+```
+
+| object | address | shape / type | axes | note |
+|---|---|---|---|---|
+| **`KFZWSTT`** start-angle map | **0x5C7B64** | 8 (zdgz) x 8 (tmst), **s8**, 0.75 °CA/LSB | y 0x5C7B54 = 0,3,5,7,8,9,11,12 ignitions since start; x 0x5C7B5C = -30, -20.25, -15, -9.75, 0, 15, 30, 90 °C | call 0x431304 |
+| `KFZWSTN` speed term | 0x5C7B23 | 3 (nmot) x 6 (tmst), s8 | y 0x5C7B1A = 5/10/15 (200/400/600 rpm at 40 rpm/LSB); x 0x5C7B1D = -30…90 °C | **all zero** |
+| alternative map (`0x7FCE0C` bit 1 set) | 0x5C7B40 | 3 (nmot) x 6 (tmst), s8 | y 0x5C7B37 = 5/10/20; x 0x5C7B3A = -30, -20.25, -9.75, 0, 30, 80.25 °C | 0…+8, -4 in the hot column |
+| 1D additive term over 0x7FD3E5 | 0x5C7BAB | 6, s8 | axis 0x5C7BA5 = 40,80,120,160,200,240 | **all zero** |
+
+`KFZWSTT` contents (rows = ignitions since start, columns = `tmst`; raw s8
+counts, x 0.75 gives °CA, positive = before TDC):
+
+```
+zdgz \ tmst  -30  -20.25  -15  -9.75   0    15    30    90 °C
+   0        -66    -55   -46   -39   -22   -7    -2    -4
+   3        -66    -55   -42   -29    -9    0    -2    -4
+   5        -47    -39   -28   -11     4    0    -2    -4
+   7        -30    -25   -16     1     7    0    -2    -4
+   8        -20    -13    -8     5     7    0    -2    -4
+   9        -12     -9     1     8     7    0    -2    -4
+  11         -9     -9     8     8     7    0    -2    -4
+  12         13      8     8     8     7    0    -2    -4
+```
+
+i.e. the first combustion of a -30 °C start fires at **-49.5 °CA (49.5 ° after
+TDC)** and the angle walks forward to +9.75 ° by the twelfth ignition, while a
+hot start sits at a flat -3 °. `zdgz` (0x7FCE14) is the low byte of the u16
+ignition counter 0x7FEDA0, incremented once per new firing bank at 0x0ACC1C
+and copied to 0x7FCE14 at 0x0ACC24.
+
+**Insertion point Z1 (start ignition): the `stb r31,0x2096(r13)` at 0x431384**,
+or an added term in `FUN_00431294` before the final `clamp_s8`. Format **s8,
+0.75 °CA per LSB** — the fixed point B7 established for the whole ignition
+chain. An ethanol-dependent advance of +2…+4 ° at cold start is +3…+5 counts.
+Note that during the start there is no knock protection acting on this value
+(the knock retard is bypassed), so the offset must be small and should be
+limited to `tmst` below about 40 °C.
+
+### 5.1 Warm-up ignition: an efficiency request, not a `dzwwl` map
+
+The FR's `ZWWL` (`dzwwl`, `KFZWWLNM`, `KFZWWLRL`) has no direct equivalent.
+Once the start has finished, the warm-up / catalyst-heating retard reaches
+`zwgru` through the **torque-coordinator efficiency demand**:
+
+* `FUN_00442c18` (0x442C18-0x44308F) produces the two efficiency setpoints
+  0x803046 / 0x803044 (u16, **4096 = 1.0**), their mean 0x803042 and
+  `0x7FD271 = 0x803042 >> 5` (u8, 128 = 1.0).
+* `FUN_004362d4` (0x4362D4-0x436453) turns 0x803042 into the additive angle
+  **0x800004** (s8) — exactly 0 when the efficiency demand is 1.0
+  (`if (0x803042 == 0x1000) cVar2 = 0`).
+* `FUN_004310c8` (0x4310C8) adds a second term **0x7FD313** =
+  `KF(nmot8, 0x7FD271)` from the 8 x 12 s8 map at **0x5C76D5**
+  (y 0x5C76C1 = 8 nmot points at 40 rpm/LSB; x 0x5C76C9 = 12 efficiency
+  points 83…154, i.e. 0.65…1.20), values +11 … -1 counts.
+* Both land in `zwgru_build` (0x41D38C) as the `0x800004` and `0x7FD313`
+  terms B7 already listed.
+
+So a flex-fuel ignition change during warm-up is covered by B7's additive hook
+at 0x41D40C; no separate warm-up map exists to shift.
