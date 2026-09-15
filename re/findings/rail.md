@@ -922,3 +922,51 @@ guarantees the fit and the runtime net is switched off.
 * The §12.3 recommendation is unchanged and now better motivated: if we want a
   torque limit that follows the *window* rather than a *fault*, we have to add
   it, and 0x0C7CF8 is still the clean place.
+
+---
+
+## 15. Verification: the Python model — VERIFIED-DYNAMIC
+
+`emu/models/window.py` is a bit-exact model of the angle-synchronous half of
+`%AWEA`, reading every calibration value out of the image rather than
+hard-coding it (so it follows a re-calibrated binary):
+
+```bash
+./.venv/bin/python -m emu.models.window            # the window terms and a sweep
+./.venv/bin/python -m emu.models.window --verify   # compare against the ECU code
+./.venv/bin/python -m unittest tests.test_window_model -v
+```
+
+`--verify` runs the real `awea_ti_to_angle` (0x41B9C0) and the `k_nmot` block
+(0x41B9A4) in the A5 Unicorn harness over 7 engine speeds x 11 start angles x
+13 injection times, plus the `k_nmot` edge cases, and compares `dwi`
+(0x803088) and the resulting start-of-injection angle (0x80307E) bit for bit:
+
+```
+all 1011 cases match
+```
+
+The dynamic-correction block that precedes the check is made deterministic by
+setting `0x80306A = 0`: `|0| < u16 @ 0x5C713E` (= 427) makes `0x7FEA46` true,
+which clears the latch `0x7FEA45`, so the start angle passes through unchanged
+and only the window clamp is exercised.
+
+The sweep it prints is the §9.5 table computed rather than estimated —
+`max_ti`, the injection time at which the clamp engages:
+
+```
+  rpm   wbho1s     max ti
+ 2000    330.0    23314 us
+ 4000    330.0    11657 us
+ 6000    330.0     7770 us      <- the high-speed, high-load corner of KFWBHO1SW
+ 6000    270.0     6104 us
+ 6000    210.0     4437 us      <- KFWBHO1SW's minimum, but those cells are at
+                                   low speed and low load, where ti is small
+```
+
+`tests/test_window_model.py` additionally asserts, straight from the dump,
+that both window curves are flat (67 and 200 counts), that the six
+per-cylinder references 0x409CA0 are spaced exactly 120 degCA (§14.1), that
+`dwi = (ti * k_nmot) >> 13` reproduces `angle = t * rpm * 6e-6` to better than
+0.1 % when `ti` is 1 us, that the clamp leaves the start angle untouched below
+the trigger, and that it never writes past the 360.0 degCA cap.
