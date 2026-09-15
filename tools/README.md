@@ -15,6 +15,7 @@ document and `med9lib.py` together.
 | `measuring_vars.py` | Measuring-variable (TKMWL) table: find the dispatcher, walk all 2200 handlers, report each variable's RAM address/width and VAG display formula; `--groups` dumps the measuring-block group table. |
 | `bindiff.py` | Diff two dumps and classify every changed byte as *patch* (listed in a `patch.json`), *descriptor* (a checksum sum/~sum word) or **unexpected**. Exit 1 on anything unexpected. |
 | `logcmp.py` | Compare a baseline and a candidate log over their common variables with per-variable tolerances. Format and tolerance file: `logging/README.md`. |
+| `draft_to_xdf.py` | `re/calibration_draft.csv` -> a TunerPro `.xdf`. Maps CPU addresses to **file offsets** through `med9lib`, emits big-endian row-major tables, and validates the result structurally (`--validate`, `--self-test`). No scaling is applied: every value is raw counts. |
 | `blobdis.py` | Disassemble a raw big-endian PowerPC blob at a chosen CPU address; `--check-sda` fails if patch code touches r2/r13. |
 
 Quick checks:
@@ -26,6 +27,9 @@ python3 tools/find_abs_refs.py data/passat_azx_ori.bin --target 0x6FC100   # BR0
 python3 tools/ethanol_frame_decode.py "0EC#322A320500000100"   # -> E 50 %, 2 C, OK
 python3 tools/measuring_vars.py data/passat_azx_ori.bin --csv re/measuring_vars.csv
 python3 tools/measuring_vars.py data/passat_azx_ori.bin --groups
+python3 tools/draft_to_xdf.py re/calibration_draft.csv -o re/med9_draft.xdf \
+        --min-confidence hypothesis            # 1,066 tables
+python3 tools/draft_to_xdf.py --validate re/med9_draft.xdf
 ```
 
 Regression checks before a file goes anywhere near the car
@@ -51,7 +55,8 @@ pip install -r requirements.txt
 python3 -m unittest discover -s tests -v      # 31 tests, needs data/passat_azx_ori.bin
 ```
 
-`tests/` contains `test_bindiff.py` (builds a patched copy in a temp directory
+`tests/` contains `test_draft_to_xdf.py` (the XDF skeleton, the file-offset
+mapping and the `val[iy*nx+ix]` layout), `test_bindiff.py` (builds a patched copy in a temp directory
 and checks that only the edits and their descriptors moved), `test_logcmp.py`
 (the synthetic logs in `logging/samples/`) and `test_emu.py` (the Unicorn
 harness, `emu/README.md`). Every test that loads the dump asserts its SHA-256
