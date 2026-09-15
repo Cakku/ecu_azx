@@ -11,6 +11,7 @@ document and `med9lib.py` together.
 | `checksum.py` | `verify` / `fix` the 65 Bosch block checksums (sum of 16-bit words, stored as sum/~sum). Run `verify` on every file before it goes anywhere near the car. |
 | `layout_report.py` | Structural overview of a dump: fill/entropy map, `5A5A5A5A` block markers, ID strings, boot register setup, checksum tables. |
 | `find_abs_refs.py` | Resolve `lis`+offset absolute references; find who touches an address, or histogram address usage. |
+| `measuring_vars.py` | Measuring-variable (TKMWL) table: find the dispatcher, walk all 2200 handlers, report each variable's RAM address/width and VAG display formula; `--groups` dumps the measuring-block group table. |
 
 Quick checks:
 
@@ -18,6 +19,8 @@ Quick checks:
 python3 tools/checksum.py verify -q data/passat_azx_ori.bin      # expect: ALL OK (65 blocks)
 python3 tools/layout_report.py data/passat_azx_ori.bin
 python3 tools/find_abs_refs.py data/passat_azx_ori.bin --target 0x6FC100   # BR0 writers
+python3 tools/measuring_vars.py data/passat_azx_ori.bin --csv re/measuring_vars.csv
+python3 tools/measuring_vars.py data/passat_azx_ori.bin --groups
 ```
 
 `checksum.py fix` rewrites descriptors in place semantics-preserving; running
