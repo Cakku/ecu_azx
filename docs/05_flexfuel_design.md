@@ -228,6 +228,50 @@ warm-up enrichment by `f_st(E, tmot)` (2D, small) with generous values at low
 `tmot`; this is the hardest part to calibrate (reports agree), so it comes
 after the fuel factor is proven warm.
 
+#### Added 2026-09-15 (brief B8, issue #16) — the start path is resolved, and the "afterstart / warm-up enrichment" of this section does not exist as a fuel factor
+
+Full derivation and evidence: `re/findings/start.md`. Model and bit-exact
+emulator check: `emu/start_model.py`, `tests/test_start_model.py` (14 tests).
+
+* **Cranking (VERIFIED-DYNAMIC).** `%ESSTT` is `FUN_0041a268` (0x41A268) with
+  the high-pressure twin `FUN_0041a690`. It publishes **`ksta * kstaa` at RAM
+  0x80302C, u16 with 1024 = 1.0**, which `gk_rk` (0x41AA48) multiplies at
+  0x41AA88 while the start has not ended; outside the start the module forces
+  it to exactly 0x400. Maps: **`KFKSTT` 0x5C6E24** (12 `tmst` x 2 `prist`,
+  u16, 24.8x at -32 °C down to 1.85x at +100 °C), **`KFWKSTT` 0x5C6C7C**
+  (12 `tmst` x 14 injections-since-start, u8 128 = 1.0 — this *is* the
+  after-start decay, and it is over injections, not seconds), **`KFWKSTN`
+  0x5C6C50** (off, all 255).
+  **Insertion point S1 for `f_st(E, tmst)`: the `sth` at 0x41A680 and
+  0x41A808**, Q10, saturate 0xFFFF; 0x400 = 1.0 is bit-identical at E0.
+* **`tmst` is RAM 0x8021F6**, the coolant temperature latched at start;
+  `tmot` is RAM 0x8021EF (A3's `cand_mw_tmot`, confirmed) and `tmot_w`
+  0x802228. **Scaling for both: 0.75 °C per LSB, offset -48 °C**, proved by
+  the start-map axes. So the `tmot` axis of the new 2-D `f_st(E, tmst)` map
+  should reuse the `KFWKSTT` breakpoints
+  (-30, -24.75, -20.25, -15, -6.75, 0, 15, 20.25, 27.75, 39.75, 60, 90 °C).
+* **Correction to this section: there is no separate after-start (`fnsk`) or
+  warm-up (`fwlk`) factor on the fuel path.** Every multiplicative term on
+  `rk` is accounted for (`re/findings/start.md` §4.1); once the start has
+  ended the mixture comes from the torque/λ cascade (0x803020, Q12) and the
+  ECU holds λ = 1 instead of enriching, heating the catalyst with ignition
+  retard. So "scale the start quantity *and* the afterstart / warm-up
+  enrichment" becomes: scale the start quantity at S1, and — if a warm-running
+  ethanol correction is still wanted — use B6's `rk` hook at 0x42247C gated on
+  `tmst`, not a second enrichment map.
+* **Start ignition (VERIFIED-DYNAMIC).** While `B_stend` is clear the whole
+  per-bank angle is replaced by **`zwstt` at RAM 0x802096** (s8, 0.75 °CA per
+  LSB) in `zwbas_per_bank` (0x41D10C) — `zwgru`, the bank offsets *and the
+  knock retard* are bypassed. `zwstt` is built by **`FUN_00431294`
+  (0x431294)** from **`KFZWSTT` 0x5C7B64** (8 ignitions-since-start x 8
+  `tmst`). **Insertion point Z1: the `stb` at 0x431384.** Because knock
+  control is inactive here, keep any ethanol advance small (+2…+4 °, i.e.
+  +3…+5 counts) and restrict it to `tmst` below about 40 °C.
+* The engine-state variables the patch needs: `B_st` 0x7FE91D, start end
+  0x7FE920, **`B_stend` 0x7FE921** (and its segment-task copy 0x7FECCA),
+  "engine not running" 0x7FEAD0, after-start timer 0x8011D8 (u16),
+  injections-since-start 0x7FD269, ignitions-since-start 0x7FCE14.
+
 ### 3.6 Rail pressure and injection window
 E85 lengthens `ti` by 35-50 % at equal rail pressure. Raise the rail
 pressure setpoint maps at high load by a blend on E% (within the HPFP's
