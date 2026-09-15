@@ -1,0 +1,558 @@
+# SPI EEPROM, the EEP_CONF block layer, and the external SRAM
+
+Agent B4, brief `docs/agent_briefs/B4_variant_byte_and_eeprom.md`, issue #18.
+Date: 2026-09-15. Dump: `data/passat_azx_ori.bin`
+(SHA-256 `b155…09b3`, unmodified; `tools/checksum.py verify -q` = `ALL OK (65 blocks)`
+before and after this work).
+
+All addresses are **CPU** addresses unless prefixed `file`. In the external
+flash region CPU == file offset, so most addresses below are both.
+
+Reproduce the block table and the client map with
+
+```bash
+python3 tools/eeprom_map.py data/passat_azx_ori.bin            # EEP_CONF table + occupancy
+python3 tools/eeprom_map.py data/passat_azx_ori.bin --clients  # who uses which block byte
+python3 tools/eeprom_map.py data/passat_azx_ori.bin --check dumped_eeprom.bin  # verify a real 2 KB read
+```
+
+---
+
+## 0. Summary
+
+| Question from the brief | Answer |
+|---|---|
+| SPI driver | QSMCM/QSPI at 0x705000; **three** driver instances (boot 0x017838/0x0178DC, application 0x085888/0x085920, second application copy 0x09D800/0x09D894). VERIFIED-STATIC |
+| EEPROM device | ST M95xxx-class, **16-bit address**, **32-byte page**, **2048 bytes**, on **PCS0**, SPI mode 0, 8 bits/transfer, SCK ≈ 1.25 MHz. VERIFIED-STATIC |
+| Block table (EEP_CONF) | **file 0xB2FF0, 32 records × 12 bytes**, fully decoded below. VERIFIED-STATIC |
+| Per-block checksum | **16-bit sum of the first (len-2) bytes, stored bit-complemented as a big-endian u16 at offset len-2**. Generator `FUN_00061A48`/`FUN_00061AC4`, verifier `FUN_000619AC`. VERIFIED-STATIC |
+| RAM mirror | one contiguous mirror at **0x7F9E80-0x7FA47F (0x600 bytes)**, base pointer in flash at file 0xB3184. VERIFIED-STATIC |
+| Read at start-up / write at key-off | `FUN_00062280` (read-all + verify) and `FUN_00062740` (write-all + regenerate checksums); queue pump `FUN_00060A68` runs from the background task (`FUN_001205A0`, `FUN_004328E4`). VERIFIED-STATIC for the code, HYPOTHESIS for the exact trigger points |
+| Spare block / spare bytes | **No spare block.** The 32 records cover 0x000-0x7FF with no gap. There *are* unused payload bytes inside several blocks — see §5. VERIFIED-STATIC |
+| External SRAM battery-backed? | The firmware **behaves as if it is**: the boot-time sizing probe saves and restores every word it disturbs, and neither start-up clears 0x800000-0x807FFF. Electrical confirmation still needed. VERIFIED-STATIC (code) + HYPOTHESIS (hardware) |
+
+---
+
+## 1. The QSPI hardware layer
+
+### 1.1 The 49 QSMCM references, sorted
+
+`tools/find_abs_refs.py data/passat_azx_ori.bin --range 0x705000 0x7051DF`
+gives 49 sites. Following each `lis 0x70 / addi 0x5000` base register forward
+through its D-form accesses (scratch script, method recorded here) splits them:
+
+| Sites | Registers touched | Function |
+|---|---|---|
+| 0x015674-0x0159A8, 0x084648-0x085260, 0x0BA084-0x0BB690, 0x09545C-0x095688, 0x0BBDB0, 0x1435B0-0x1437DC | SCC1R0/1, SC1SR, SC1DR, QSCI1CR/SR, SCC2R1, SCTQ, PORTQS | **SCI / QSCI** (K-line and the second serial), not EEPROM |
+| **0x017838, 0x0178DC-0x0179E8, 0x017AB0, 0x017B40, 0x017CFC** | PQSPAR, DDRQS, PORTQS, SPCR0-3, SPSR, TXRAM, RXRAM, CMDRAM | **QSPI driver, boot module** (r2 = 0x017FF0) |
+| **0x085888/0x08589C, 0x085920/0x08598C** | same set | **QSPI driver, application** |
+| **0x09D800/0x09D818, 0x09D894/0x09D8FC** | same set | **QSPI driver, second application copy** |
+| 0x0133E8, 0x064CFC, 0x01B238 | SPSR only / none | helpers |
+
+### 1.2 Correction to `re/findings/mpc5xx_registers.md` §7
+
+§7 lists the QSPI RAMs as "16 × 16-bit". **They are 32 entries**, and the
+firmware uses all 32:
+
+* the address ranges themselves are 0x40 bytes of RX (0x705140-0x70517F) and
+  0x40 bytes of TX (0x705180-0x7051BF) = 32 × u16, plus 0x20 bytes of command
+  RAM (0x7051C0-0x7051DF) = 32 × u8;
+* `FUN_000178DC` rejects a queue longer than 0x20 entries
+  (`if ((param_2 & 0xff) < 0x21)`);
+* it writes ENDQP as a **5-bit** field: `SPCR2 &= 0xE0FF; SPCR2 |= ((n-1)<<8) & 0x1F00`
+  (file 0x017954/0x01796C). A 16-entry queue would use a 4-bit field.
+
+VERIFIED-STATIC, evidence: disassembly at file 0x0178DC-0x0179E8 and the
+decompilation of `FUN_000178DC`.
+
+### 1.3 The generic QSPI transfer primitive
+
+```
+FUN_00017838(cfg)          boot  |  FUN_00085888()      application
+FUN_000178DC(q,n,rx,wait)  boot  |  FUN_00085920(q,n,rx) application
+```
+
+`q` is an array of `n` 3-byte entries `{ u16 data; u8 command }`.
+`FUN_000178DC` copies `data[i]` to TXRAM[i] (0x705180 + 2*i) and `command[i]`
+to CMDRAM[i] (0x7051C0 + i), programs ENDQP = n-1 in SPCR2, sets SPE
+(SPCR1 |= 0x8000), spins on SPSR.SPIF, clears it, and copies RXRAM[i]
+(0x705140 + 2*i) into `rx`.
+
+Command-RAM byte = `CONT(0x80) | BITSE(0x40) | DT(0x20) | DSCK(0x10) | PCS[3:0]`.
+The PCS nibble holds the **levels** driven on PCS3..PCS0 during the transfer.
+
+### 1.4 Port and mode setup
+
+`FUN_00017838` (boot) and `FUN_00085888` (application) both write
+
+```
+QSMCMMCR = 0x0080
+QSPI_IL  = 0x00            (polled, no interrupt)
+PORTQS   = ...|0x78        PCS0..PCS3 idle HIGH  -> chip selects are active low
+PQSPAR   = 0x7B            MISO, MOSI, PCS0..PCS3 assigned to the QSPI
+DDRQS    = 0x7E            MOSI, SCK, PCS0..PCS3 outputs; MISO input
+```
+
+`FUN_00085888` additionally sets
+
+```
+SPCR0 = 0xA000 | (f_sys[MHz] * 1e6 / 2.5e6)
+        MSTR=1, WOMQ=0, BITS=1000b (8 bits), CPOL=0, CPHA=0  -> SPI mode 0
+        SPBR = f_sys / 2.5 MHz  =>  SCK = f_sys / (2*SPBR) = 1.25 MHz
+SPCR1 = 0x0019   (SPE off, DTL = 0x19)
+SPCR2 = SPCR3 = SPSR = 0
+```
+
+The boot driver takes the same five numbers from a per-device configuration
+record instead (see §1.5).
+
+### 1.5 The boot-level SPI device table
+
+`FUN_00017E14` selects one of six device tables by hardware variant
+(IMMR PARTNUM == 0x35, a nibble of RAM 0x7F800C, RAM 0x7F8014, two magic words
+at 0x005FE0) and stores three pointers:
+
+| RAM | Meaning |
+|---|---|
+| 0x7F83A0 | pointer to the SPI **device table**: `DAT_00[01]02EA` = 4 records × 15 bytes |
+| 0x7F83A4 | pointer to the 7-entry **EEPROM WREN/WRDI test queue** |
+| 0x7F83A8 | pointer to the command-byte template used by the bulk EEPROM read |
+
+**These functions run under the boot small-data base r2 = 0x017FF0, not the
+application r2 = 0x5C9FF0.** Ghidra resolves the operands with the application
+base and therefore labels them `DAT_005C2xxx`; the real addresses are
+0x0102EA + the same displacement. `docs/02_memory_map.md` §4 already warns
+about this; it is the single most misleading thing in this module.
+
+Device table, file 0x0102EB, 4 records of 15 bytes
+(`record[0] = deviceId | 0x80` when the device is **enabled**):
+
+| Rec | file | byte0 | 5-byte QSPI config (SPCR0hi, SPBRnum, DSCKL, DTL, SPCR2flags) |
+|---|---|---|---|
+| 0 | 0x0102EB | `0x80` (dev 0, enabled) | 03 21 14 00 19 |
+| 1 | 0x0102FA | `0x01` (dev 1, **disabled**) | 06 21 14 00 19 |
+| 2 | 0x010309 | `0x02` (dev 2, **disabled**) | 04 21 14 00 19 |
+| 3 | 0x010318 | `0x83` (dev 3, enabled) | 02 20 14 00 19 |
+
+`FUN_00017A10(id, &idxOut, start)` walks this table looking for
+`record[0] == (id | 0x80)`; the device count is the byte at file 0x0102EA = **4**
+and the EEPROM's device id is the byte at file 0x0102E9 = **3**.
+
+### 1.6 Two EEPROM self-tests in the boot module
+
+`FUN_00017CF0` — **QSPI loopback test**: configures from a 5-byte record,
+sets `SPCR3 |= 0x04` (LOOPQ), transfers a 5-entry pattern queue and compares
+RX with TX. Error codes 1 (QSPI stuck busy), 2 (short transfer), 3 (data
+mismatch).
+
+`FUN_00017A84` — **EEPROM write-enable-latch test**, the decisive proof that
+the device is an M95xxx-class SPI EEPROM. It sends the 7-entry queue at
+`*(0x7F83A4)`:
+
+```
+{0x04,0x20} WRDI   {0x05,0x80} RDSR(CONT)  {0x00,0x20} dummy
+{0x06,0x20} WREN   {0x05,0x80} RDSR(CONT)  {0x00,0x20} dummy
+{0x04,0x20} WRDI
+```
+
+and returns 1 only if `(rx[2] & 2) == 0 && (rx[5] & 2) != 0`, i.e. the status
+register's **WEL** bit is clear after WRDI and set after WREN. Opcodes 0x04 /
+0x05 / 0x06 and the WEL bit position are the ST M95xxx instruction set.
+
+`FUN_00017B34` is a **bulk dump/probe**: it reads `param_1` bytes twice, once
+with a 1-byte address and once with a 2-byte address, into two different
+buffers — a device-width probe. Its address is stored in the pointer table at
+file 0x0105F0 (`0x017838, 0x0179EC, 0x017A10, 0x017B34`).
+
+---
+
+## 2. The application byte/block primitives (M95160)
+
+| Address | Name | Behaviour |
+|---|---|---|
+| 0x085888 | `eeprom_spi_config` | the SPCR setup of §1.4 |
+| 0x085920 | `eeprom_qspi_xfer` | the generic transfer of §1.3 |
+| **0x085A8C** | `eeprom_write_byte(addr, data)` | queue `{0x06,0x0E} WREN`, `{0x02,0x8E} WRITE`, `{addr>>8,0x8E}`, `{addr&0xFF,0x8E}`, `{data,0x8E}`; then poll `{0x05,0x8E} RDSR`, `{0x00,0x8E}` until **WIP (status bit 0) clears** |
+| **0x085B54** | `eeprom_write_bytes(addr, n, src)` | byte-at-a-time loop over `eeprom_write_byte`, with `FUN_0008437C()` (watchdog/delay) between bytes |
+| **0x085BC0** | `eeprom_read_bytes(addr, n, dst)` | chunks of ≤ 0x1D bytes: `{0x03,0x8E} READ`, `{addr>>8,0x8E}`, `{addr&0xFF,0x8E}` + up to 29 dummies = 32 queue entries; error count accumulated in 0x7FD150 |
+| 0x09D800 / 0x09D894 / 0x09D9EC | second copy of config / xfer / read | same code, error count in 0x7FAAD0; only caller 0x09DADC |
+
+**The EEPROM is on PCS0.** Every command byte is 0x0E or 0x8E; `0x0E & 0x0F = 0b1110`
+drives PCS3..PCS1 high and **PCS0 low**, and 0x8E is the same with CONT set so
+the chip select stays asserted across the opcode/address/data entries of one
+command.
+
+**16-bit addressing** (`addr>>8` then `addr & 0xFF`) rules out M95040 and
+smaller; the EEP_CONF table in §3 ends at 0x7FF, which fixes the part at
+**2 KB = M95160**.
+
+Direct clients of these primitives (all in the immobiliser / adaptation
+module, bypassing the block manager of §3 and keeping their own mirror at
+0x7FD2CC/0x7FD2EC):
+
+| Function | EEPROM bytes |
+|---|---|
+| 0x085CB8 | read 0x042, 6 B -> 0x7FD32B |
+| 0x085DEC | read 0x142, 11 B -> 0x7FD346 -> 0x7FD30D |
+| 0x085D44 / 0x085E54 | read 0x260, 32 B -> 0x7FD2EC |
+| 0x085EF4 | read 0x288, 1 B |
+| 0x085F44 | read 0x280, 32 B -> 0x7FD2CC |
+| 0x087494 | writes 0x288/0x28A/0x28B/0x294/0x296/0x297 and the same at +0x20 (0x2A8/0x2AA/0x2AB/0x2B4/0x2B6/0x2B7), plus 0x274 (2 B); then reads back 0x280 and 0x2A0 and compares against the mirror |
+| 0x087C44 / 0x08808C | write 0x28C/0x298/0x2AC/0x2B8 (2 B each) |
+| 0x0894A0 | write then read-back-verify a whole 32-byte block at 0x280 **or** 0x2A0 |
+
+Note the redundancy scheme this module uses: the same byte is stored **four
+times** — twice inside the block (data at +0x08, its **bitwise complement** at
++0x14, e.g. `DAT_007FD2E2 = ~DAT_007FD488` at 0x087494) and again in the
+duplicate block at 0x2A0. That is *on top of* the block manager's own
+checksum, and it is why block 11's payload looks sparse in §5.
+
+---
+
+## 3. EEP_CONF: the block manager
+
+### 3.1 API
+
+```
+FUN_0006131C(blockIdx, offset, len, mode, bufPtr, handlePtr)
+```
+
+It is **not called with `bl`** — every caller builds the address with
+`lis/addi`, does `mtlr`, and calls `blrl`
+(`tools/find_abs_refs.py … --target 0x6131c` finds 60+ sites).
+
+The stock write sequence, from the KWP coding handler `FUN_000A2938`:
+
+```c
+FUN_0006131C(7, 0x08, 1, 0, &src1, 0);    /* returns 2: field staged in the mirror */
+FUN_0006131C(7, 0x02, 6, 0, &src2, 0);    /* returns 2                              */
+FUN_0006131C(7, 0x00, 0, 0, 0, &handle);  /* returns 1: block queued for the device */
+```
+
+i.e. **stage one or more fields into the RAM mirror, then commit the whole
+block with `len = 0`, `bufPtr = 0` and a non-null handle.** The commit path
+regenerates the checksum and writes every copy; the caller polls `handle`.
+
+Supporting data, all in flash next to the table:
+
+| file | Content |
+|---|---|
+| 0xB2FF0 | the 32 × 12-byte block table (§3.2) |
+| 0xB3184 | pointer to the **RAM mirror base = 0x7F9E80** |
+| 0xB318C | pointer to the **default/init value table = file 0xB3238** |
+| 0xB3190 | pointer to the scratch/page buffer |
+| 0xB3195 | request-queue length (4) |
+| **0xB3196** | **EEPROM page size = 0x20** |
+| 0xB3197 | retry count (2) |
+| 0xB3228 | -> `FUN_000619AC`, checksum **verify** |
+| 0xB322C | -> `FUN_00061A48`, checksum **generate in place** |
+| 0xB3230 | -> `FUN_00061AC4`, checksum **generate while copying** |
+
+The device itself is reached through function pointers in RAM,
+`(*0x7FAB70)(eepAddr, len, buf, &status)` for read and the pointer at
+0x7FAB74 for write (`FUN_0005FCC8` / `FUN_00060524`). Nothing writes
+0x7FAB6C-0x7FAB7C with a statically resolvable instruction, so the binding of
+these pointers to the §2 primitives is **HYPOTHESIS** (it is the only SPI
+EEPROM driver in the image, and the signature matches, but the assignment
+was not observed).
+
+### 3.2 Record layout
+
+Derived from `FUN_0006131C`, `FUN_0005FB64` and `FUN_00061AC4`:
+
+| Off | Type | Meaning |
+|---|---|---|
+| +0 | u16 | RAM mirror offset from 0x7F9E80; `0xFFFF` = no mirror |
+| +2 | u16 | **EEPROM byte address of copy 0** |
+| +4 | u16 | 0xFFFF in every record except block 7 (0x0000) — unused by the code paths read |
+| +6 | u16 | offset into the flash default-value table at 0xB3238 |
+| +8 | u16 | flags (bit2 = has mirror, bit5 = verify on read, bit6 = re-init from defaults on failure, bit7 = preload defaults, bits0-1 = the "ReplV" byte at payload offset len-3 is managed) |
+| +10 | u8 | **block length in bytes, including the trailing 2-byte checksum** |
+| +11 | u8 | 0 in every record |
+
+`FUN_0005FB64(blk, copy)` returns
+`eepAddr + copy * ceil(len / 0x20) * 0x20`, so **copy *n* starts on a page
+boundary**.
+
+### 3.3 The table
+
+| blk | EEPROM | len | copies | span | mirror | flags |
+|---:|---|---:|---:|---|---|---|
+| 0 | 0x000 | 0x40 | 1 | 0x000-0x03F | — | 0xC000 |
+| 1 | 0x040 | 0x20 | 2 | 0x040-0x07F | 0x7F9E80 | 0xC1A5 |
+| 2 | 0x080 | 0x40 | 2 | 0x080-0x0FF | 0x7F9EA0 | 0xC1A5 |
+| 3 | 0x100 | 0x20 | 1 | 0x100-0x11F | 0x7F9EE0 | 0xC1E4 |
+| 4 | 0x120 | 0x20 | 1 | 0x120-0x13F | 0x7F9F00 | 0xC0F4 |
+| 5 | 0x140 | 0x20 | 1 | 0x140-0x15F | 0x7F9F20 | 0x02F4 |
+| 6 | 0x160 | 0x20 | 1 | 0x160-0x17F | 0x7F9F40 | 0x03F4 |
+| 7 | 0x180 | 0x20 | 2 | 0x180-0x1BF | 0x7F9F60 | 0x01F5 |
+| 8 | 0x1C0 | 0x20 | 2 | 0x1C0-0x1FF | 0x7F9F80 | 0x03F5 |
+| 9 | 0x200 | 0x60 | 1 | 0x200-0x25F | 0x7F9FA0 | 0x03F4 |
+| 10 | 0x260 | 0x20 | 1 | 0x260-0x27F | 0x7FA000 | 0x03F4 |
+| 11 | 0x280 | 0x20 | 2 | 0x280-0x2BF | 0x7FA020 | 0x03F5 |
+| 12 | 0x2C0 | 0x20 | 1 | 0x2C0-0x2DF | 0x7FA040 | 0x03F4 |
+| 13 | 0x2E0 | 0x20 | 1 | 0x2E0-0x2FF | 0x7FA060 | 0x03F4 |
+| 14 | 0x300 | 0x20 | 1 | 0x300-0x31F | 0x7FA080 | 0x03F4 |
+| 15 | 0x320 | 0x20 | 1 | 0x320-0x33F | 0x7FA0A0 | 0x03F4 |
+| 16 | 0x340 | 0x20 | 1 | 0x340-0x35F | 0x7FA0C0 | 0x03F4 |
+| 17 | 0x360 | 0x20 | 1 | 0x360-0x37F | 0x7FA0E0 | 0x03F4 |
+| 18 | 0x380 | 0x20 | 1 | 0x380-0x39F | 0x7FA100 | 0x03F4 |
+| 19 | 0x3A0 | 0x20 | 1 | 0x3A0-0x3BF | 0x7FA120 | 0x03F4 |
+| 20 | 0x3C0 | 0x20 | 1 | 0x3C0-0x3DF | 0x7FA140 | 0x03F4 |
+| 21 | 0x3E0 | 0x20 | 1 | 0x3E0-0x3FF | 0x7FA160 | 0x03F4 |
+| 22 | 0x400 | 0xFE | 2 | 0x400-0x5FF | 0x7FA180 | 0x03F5 |
+| 23 | 0x600 | 0x20 | 1 | 0x600-0x61F | 0x7FA280 | 0x03F4 |
+| 24 | 0x620 | 0xFF | 1 | 0x620-0x71F | 0x7FA2A0 | 0x03F4 |
+| 25 | 0x720 | 0x20 | 1 | 0x720-0x73F | 0x7FA3A0 | 0x03F4 |
+| 26 | 0x740 | 0x20 | 1 | 0x740-0x75F | 0x7FA3C0 | 0x03F4 |
+| 27 | 0x760 | 0x20 | 1 | 0x760-0x77F | 0x7FA3E0 | 0x03F4 |
+| 28 | 0x780 | 0x20 | 1 | 0x780-0x79F | 0x7FA400 | 0x03F4 |
+| 29 | 0x7A0 | 0x20 | 1 | 0x7A0-0x7BF | 0x7FA420 | 0x03F4 |
+| 30 | 0x7C0 | 0x20 | 1 | 0x7C0-0x7DF | 0x7FA440 | 0x03F4 |
+| 31 | 0x7E0 | 0x20 | 1 | 0x7E0-0x7FF | 0x7FA460 | 0x03F4 |
+
+* **The 2 KB device is fully allocated. 0x7E0 + 0x20 = 0x800 exactly.**
+  There is no free block and no gap between blocks.
+* Block 0 has no mirror and flag bit 2 clear, so the manager refuses every
+  operation on it (`FUN_000619AC` also returns `true` unconditionally for
+  block 0). This is the factory-data block the FR calls `BlockFD`
+  (`re/findings/fr_index.md` §8).
+* Block 11 at 0x280 with its duplicate at 0x2A0 is exactly the block the
+  immobiliser code of §2 reads and writes directly. Two independent code
+  paths therefore touch the same 32 bytes.
+* Page padding that belongs to no block's payload: **4 bytes** in block 22
+  (0x4FE-0x4FF and 0x5FE-0x5FF) and **1 byte** in block 24 (0x71F). They are
+  outside every `len`, so the manager neither writes nor checksums them.
+
+### 3.4 The checksum, exactly
+
+`FUN_00061A48(blk, buf)` (generate in place) and `FUN_00061AC4(blk, src, dst)`
+(generate while copying):
+
+```c
+u16 sum = 0;
+for (i = 0; i < len - 2; i++) sum += (u8)buf[i];   /* 16-bit wrap */
+*(u16 *)&buf[len - 2] = (u16)(-(sum + 1));          /* == ~sum */
+```
+
+`FUN_000619AC(blk, buf)` (verify) recomputes the same sum and returns
+
+```c
+return (u16)(sum + *(u16 *)&buf[len - 2]) == 0xFFFF;
+```
+
+So: **plain 16-bit sum of the payload, stored as its bitwise complement, big
+endian, in the last two bytes of the block.** Block 0 is exempt. This is a
+*different* algorithm from the flash block checksums in
+`docs/02_memory_map.md` §6 (which sum 16-bit *words* and store both the sum
+and its complement) — do not reuse `tools/checksum.py` for EEPROM blocks.
+
+### 3.5 When blocks move
+
+| Function | Role |
+|---|---|
+| `FUN_00062280` | walk all blocks, read each from the device, **verify**, fall back to the second copy / the flash defaults on failure. The start-up read (FR `EEPINIKW`). |
+| `FUN_00062740` | walk all blocks, **generate** the checksum, write each copy to the device. The write-back. |
+| `FUN_00060A68` | the request-queue state machine (`DAT_007FADAB`), states 0x20-0x27 |
+| `FUN_0005FCC8` / `FUN_00060524` | per-block device read / write state machines (`DAT_007FADAC`), 2 retries, second copy on failure |
+| `FUN_00061944` | thin wrapper that pumps `FUN_00060A68`; called from the **background task** at `FUN_001205A0` (external flash) and `FUN_004328E4` (on-chip flash) |
+
+`FUN_0006131C` itself also pumps the queue inline (`while (DAT_007FADAB != 0x21) FUN_00060A68();`)
+when `DAT_007FCD68 == 2`, i.e. it can run synchronously during shutdown.
+
+`FUN_00062280` and `FUN_00062740` have no statically resolvable callers; like
+the device primitives they are reached through pointers. The *exact* key-off
+trigger is therefore **HYPOTHESIS**; that a write-all-blocks routine exists and
+what it does is VERIFIED-STATIC.
+
+---
+
+## 4. Who uses which block
+
+Recovered by resolving the constant `r3/r4/r5` at all 60+ `blrl` call sites of
+`FUN_0006131C` (`tools/eeprom_map.py --clients`). Sites where the block index
+is computed at run time (0x038C04, 0x038C44, 0x038C84, 0x038D20, 0x038DF0,
+0x038E2C, 0x0A35F8, 0x12E4A4) are not attributed.
+
+| blk | EEPROM | Payload bytes actually used | Notable clients |
+|---|---|---|---|
+| 1 | 0x040 | +8..+19, +22..+25 | 0x05C664, 0x05C8D8, 0x05CA88, 0x0A1B58-0x0A1D50 (KWP read), 0x11B934/0x11B98C/0x11B9E4. The 7-byte item at +13 is the best candidate for the VW coding word. |
+| 2 | 0x080 | +5..+53 | 0x0A1DF8 (17 B @ +5), 0x0A1EA0 (14 B @ +0x16), 0x0A1F48 (17 B @ +0x24), 0x0A1FF0 — identification strings read over KWP |
+| 3 | 0x100 | +2..+8 | 0x0A18B0 (4 B @ +2), 0x0A1958, 0x0A1A00, 0x0A1AA8 |
+| 5 | 0x140 | +2..+17 | 0x1343F0 (11 B @ +2), 0x134430 (3 B @ +13), 0x134470 (2 B @ +16) |
+| 6 | 0x160 | +2..+21 | 0x0FF95C, 0x0FF984, 0x11F134-0x11F284 and 0x245F10-0x246028 (eight u16 at +2,+4,…,+16) |
+| 7 | 0x180 | +2..+8, +12..+13 | 0x0A274C, 0x0A284C, 0x0A287C (6 B @ +2, from KWP **SID 0x3B local id 0xBC**), 0x115994/0x115A58/0x115A8C, 0x134284/0x134314, 0x236150/0x236178 |
+| 8 | 0x1C0 | **only +14** | 0x134380 (1 byte) |
+| 10 | 0x260 | +2..+21 | 0x036DC4-0x036EDC (12 B @ +2, 4 B @ +14, 1 B @ +18, 1 B @ +19, 2 B @ +20) |
+| 11 | 0x280 | +11..+13 | 0x0364B8, 0x036650, 0x036B34 (2 B @ +12), 0x0D1110 (1 B @ +11) — plus the direct SPI path of §2 |
+| 12 | 0x2C0 | +4..+9, +19 | 0x120878, 0x1208A8, 0x121760, 0x121790, 0x1217C0, 0x125C7C, 0x12EA5C, 0x24B030 |
+| 24 | 0x620 | **only +2**, plus a 61-byte access at a computed offset (0x11FC0C, 0x12F238) | 0x11FB74, 0x035378, 0x0353BC |
+| 4, 9, 13-23, 25-31 | | **no constant block index resolved** — either unused in this dataset or only reached through the indirect sites above |
+
+---
+
+## 5. Spare space, and where to put one byte
+
+**There is no spare block.** Every one of the 2048 bytes is inside a record's
+span (§3.3). The only bytes outside every payload are the 5 page-padding bytes
+at 0x4FE, 0x4FF, 0x5FE, 0x5FF and 0x71F; the manager cannot address them and
+they are not covered by any checksum, so using them would mean a raw SPI write
+and no integrity protection. **Do not use them.**
+
+What *is* available is unused payload inside existing blocks. Two caveats
+before reading the table below:
+
+1. The last payload byte, offset `len-3`, is managed by the block manager
+   itself when `flags & 3 != 0` (`FUN_0006131C` copies
+   `buf[len-3]` around in cases 1 and 4). For a 0x20 block that is offset 29.
+   Blocks with `flags & 3 == 0` (0x03F4, 0x02F4, 0xC0F4) do not use it.
+2. "Unused" here means *no code path with a constant offset touches it in this
+   firmware image*. It does **not** prove the factory leaves it at 0xFF; a
+   bench read of a real ECU's EEPROM must confirm it before anything is
+   written there.
+
+| blk | EEPROM | flags&3 | free payload offsets | contiguous free |
+|---|---|---|---|---|
+| **8** | 0x1C0 (+ copy 0x1E0) | 1 | +0..+13, +15..+28 | **14 + 14 bytes** |
+| 11 | 0x280 (+ copy 0x2A0) | 1 | +0..+10, +14..+28 | 11 + 15 bytes, but the immobiliser writes this block behind the manager's back — avoid |
+| 12 | 0x2C0 | 0 | +0..+3, +10..+18, +20..+29 | 4 + 9 + 10 bytes |
+| 3 | 0x100 | 0 | +0..+1, +9..+29 | 21 bytes |
+| 7 | 0x180 (+ copy 0x1A0) | 1 | +0..+1, +9..+11, +14..+28 | 15 bytes, but this is the coding block a tester rewrites |
+| **24** | 0x620 | 0 | +0..+1, +3..+252 | **252 bytes**, single copy, 255-byte block (8 pages per write) |
+
+### Recommendation for a one-byte ethanol store
+
+**Block 8, payload offset +0, one byte.** Reasons:
+
+* Block 8 is **duplicated** (copies at 0x1C0 and 0x1E0), so the manager's own
+  fallback-to-second-copy logic protects the value for free.
+* It is a 32-byte block = **one page**, so a commit is a single page write
+  (~5 ms) — cheap enough to do at key-off, or even periodically.
+* Only one stock client uses it (1 byte at +14), so a mistake there cannot
+  corrupt anything the engine depends on.
+* `flags = 0x03F5`: bit 2 (mirror) set, bit 5 (verify on read) set, bits 0-1
+  = 1 so the manager keeps its own byte at +29 — leave +29 alone.
+
+Write path, using only stock code:
+
+```c
+u8 e_pct = <0..100>;                       /* or 0..255 for 0.5 % resolution */
+FUN_0006131C(8, 0, 1, 0, &e_pct, 0);       /* stage into mirror 0x7F9F80    */
+FUN_0006131C(8, 0, 0, 0, 0, &handle);      /* commit: checksum + both copies */
+/* poll handle until != 0 */
+```
+
+Read path at start-up: the block is already in the mirror after
+`FUN_00062280`, so `FUN_0006131C(8, 0, 1, 0, &dst, 0)` returns it, or read
+**0x7F9F80** directly.
+
+**Checksum implications: none that the patch has to handle.** The commit path
+calls `FUN_00061A48`/`FUN_00061AC4`, which recomputes the 16-bit sum over
+bytes +0..+29 and rewrites the complement at +30..+31 before the device write.
+A patch must *not* write the EEPROM through the raw SPI primitives of §2, or it
+would have to replicate that itself and would race the manager's mirror.
+
+Fallback if block 8 turns out to be occupied on a real ECU: **block 24 offset
++3**, which has 250 unused payload bytes, at the cost of an 8-page (~40 ms)
+write per commit — acceptable at key-off, not in a cyclic task.
+
+Second fallback, and the one to prefer during bench development: keep the byte
+in the external SRAM (§6) and only mirror it to the EEPROM at key-off.
+
+---
+
+## 6. Is the external SRAM battery-backed?
+
+`docs/02_memory_map.md` §3: external SRAM 32 KB at 0x800000 on CS1, BR1 =
+0x800403 (8-bit port), OR1 mask 0xFFFC0000 (a 256 KB window, so the device is
+aliased). The brief asks whether 0x800000-0x807FFF is cleared at every start.
+
+**Evidence that it is not, and that the firmware expects retention:**
+
+1. **The boot-time sizing probe preserves the memory it tests.**
+   `FUN_00011898`, file 0x011898-0x011918, reached from the memory-controller
+   init at file 0x012130:
+
+   ```
+   r9 = 0x800000
+   r8 = lwz 0(r9)                 ; SAVE the word at 0x800000
+        stw 0x5AA53CC3 -> 0(r9)
+        if (lwz 0(r9) != 0x5AA53CC3) -> not present, restore r8, reprogram BR1
+   r3 = lwzx r9,0x8000            ; SAVE the word at 0x808000
+        stwx 0xA55AC33C -> 0x808000
+        if (0x800000 still 0x5AA53CC3 && 0x808000 == 0xA55AC33C)
+              RAM 0x7F8012 = 0x44          ; >= 64 KB, no aliasing
+        else  RAM 0x7F8012 = 0x41          ; 32 KB (0x808000 aliases 0x800000)
+        stwx r3 -> 0x808000                ; RESTORE
+        stw  r8 -> 0(r9)                   ; RESTORE
+   ```
+
+   A routine that carefully restores two words it only needed for a presence
+   test is a routine written for memory whose contents matter across a reset.
+   (It also means the **SRAM size is detected at run time** and reported in
+   RAM byte 0x7F8012 — 0x41 = 32 KB, 0x44 = 64 KB. Which one our hardware
+   reports cannot be decided from the dump.)
+
+2. **Neither application start-up clears it.** `FUN_0009E3B4` (file 0x09E3B4)
+   is the C run-time start-up: it zeroes 0x7F802C-0x7F807B and
+   0x7F8080-0x7F80E7 — both **internal** SRAM — and then runs the `.data`
+   copy loop with `src = dst = 0x800000`, i.e. **zero bytes**, so the external
+   SRAM has no initialised-data image at all. File 0x08A1AC repeats the same
+   empty copy in the second start-up copy.
+
+3. The only large write into external SRAM found is `FUN_0008A12C`, which
+   copies flash 0x081A00-0x085887 to **0x804800** — and its callers are
+   0x086A28, 0x087494 and 0x088828, all KWP/flash-programming entry points,
+   not the cold start. So 0x804800-0x808687 is scratch **during a programming
+   session only**.
+
+**Verdict:** VERIFIED-STATIC that the firmware never clears 0x800000-0x807FFF
+on a normal start and takes care to preserve it while probing;
+**HYPOTHESIS** that the SRAM is on a permanent (KL30) supply, because that is
+an electrical fact the dump cannot settle. It must be measured on the bench
+before any flex-fuel state is trusted to it across a key cycle. If it is
+*not* backed, the probe's care is simply defensive coding and nothing is lost.
+
+A note on the "RAM init table at 0x5C2E78" the brief points at: the words
+there are
+
+```
+0x5C2E78: 00800000 00800000      0x5C2E80: 00800004 00807FF8
+0x5C2E88: 007FE588 007FEFDC
+```
+
+preceded by three more start/end pair lists at 0x5C2E14, 0x5C2E24 and
+0x5C2E50 that name **internal** RAM ranges (0x7F8104-0x7F8233,
+0x7F8104-0x7F8368, 0x7FAAD0-0x7FE0BC, 0x7FF770-0x7FFFEC, 0x7F8490-0x7FAAC0)
+and the patterns 0xAAAAAAAA / 0x55555555 — an `URRAM`-style memory-test
+descriptor set. **No instruction in the image references 0x5C2E78**, by
+absolute `lis/addi`, by r2-relative displacement (with either
+r2 = 0x5C9FF0 or r2 = 0x017FF0) or by a stored 32-bit pointer
+(`tools/find_abs_refs.py --range`, an SDA scan, and a byte search for
+`005C2E78`/`001C2E78` all come back empty). So the pair
+`{0x800004, 0x807FF8}` is **not** evidence that the external SRAM is cleared
+or tested at start-up; treat the table as data whose consumer has not been
+found. This is a **correction to the reading implied in
+`docs/02_memory_map.md` §3**, which cites it as "RAM init table … gives
+0x800000..0x807FF8".
+
+---
+
+## 7. Open questions
+
+1. Which concrete driver is bound to the device function pointers at
+   0x7FAB70/0x7FAB74. Needs either a dynamic trace or a careful look at the
+   module that fills the structure they live in.
+2. The PCS encoding used by the **boot** driver (command bytes 0x20/0x80,
+   PCS field = 0b0000, i.e. all four chip selects driven low) contradicts the
+   application driver's clean PCS0-only encoding (0x0E/0x8E). Either the boot
+   hardware variant wires only PCS0, or a variant table other than the last
+   `else` branch applies. Does not affect the proposal, which uses the
+   application path.
+3. Whether the factory really leaves block 8 offsets +0..+13 at 0xFF. Read a
+   real EEPROM on the bench (see §5 caveat 2).
+4. The exact identity of blocks 4, 9, 13-23, 25-31 — plausibly the fault-path
+   (`DFPMEEP`) and IUMPR blocks the FR lists, reached only through the
+   run-time-indexed call sites.
+5. Whether the external SRAM is 32 KB or 64 KB on our hardware (RAM 0x7F8012
+   at run time answers it).

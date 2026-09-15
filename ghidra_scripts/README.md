@@ -14,6 +14,7 @@ what reproduce it.
 | `annotate.py` | Bulk-apply a `address,name,kind,comment` CSV of names and plate comments, so a headless session's findings can be exported by `export_symbols.py`. |
 | `med9_symbols.py` | Shared CSV/address helpers. Not a Ghidra script; imported by the two above. |
 | `enumerate_maps.py` | Walks the 44 Bosch interpolation helpers in the on-chip flash, resolves the constant arguments at every call site, and writes `re/calibration_draft.csv`, `re/findings/calibration_call_sites.csv` and `re/findings/calibration_coverage.md`. Names the helpers in the program so `export_symbols.py` carries them into `re/symbols.csv` (issue #19). |
+| `b4_eeprom_symbols.py` | Applies agent B4's names and plate comments for the QSPI driver, the M95160 EEPROM primitives, the EEP_CONF block manager and the KWP variant-coding path (issue #18). Run it before `export_symbols.py`. |
 
 ## Prerequisites
 

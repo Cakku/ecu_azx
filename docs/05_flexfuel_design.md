@@ -211,6 +211,71 @@ battery-backed RAM if the external SRAM is permanently powered (to be
 verified), so a cold start after a battery disconnect uses the right cranking
 fuel.
 
+> **2026-09-15 — agent B4, issue #18: the persistence route is decided.**
+> Evidence and full derivation: `re/findings/eeprom.md`. Reproduce the layout
+> with `python3 tools/eeprom_map.py data/passat_azx_ori.bin --clients`.
+>
+> **Primary route — EEP_CONF block 8, payload offset +0, one byte.
+> VERIFIED-STATIC for everything except the factory contents of that byte.**
+>
+> * The SPI EEPROM is a 2 KB **M95160-class** part on **PCS0** of the QSMCM
+>   QSPI (0x705000), SPI mode 0, 8 bits per transfer, SCK ≈ 1.25 MHz
+>   (`eeprom_spi_config` 0x085888, `eeprom_write_byte` 0x085A8C,
+>   `eeprom_read_bytes` 0x085BC0).
+> * Its layout is a **32-record table at file 0xB2FF0** (`tbl_eep_conf`), 12
+>   bytes per record, driven by the block manager `nvm_block_request`
+>   (0x06131C). The table covers 0x000-0x7FF with **no gap and no spare
+>   block**, so a 33rd block is not an option.
+> * **Block 8** lives at EEPROM 0x1C0 with a **duplicate copy at 0x1E0**, is
+>   32 bytes (one page, so a commit is a single ~5 ms page write), mirrors to
+>   RAM **0x7F9F80**, and has exactly one stock client — a single byte at
+>   payload offset +14 (call site file 0x134380). Payload offsets **+0..+13**
+>   and **+15..+28** are untouched by any constant-offset code path;
+>   offset +29 belongs to the manager (`flags = 0x03F5`, bits 0-1 set) and
+>   offsets +30..+31 are the checksum.
+> * **Write path — use stock code only:**
+>   ```c
+>   u8 e_pct;                                  /* 0..100, or 0..255 for 0.5 % */
+>   nvm_block_request(8, 0, 1, 0, &e_pct, 0);  /* stage into the mirror; returns 2 */
+>   nvm_block_request(8, 0, 0, 0, 0, &handle); /* commit; returns 1, then poll handle */
+>   ```
+>   Read back with `nvm_block_request(8, 0, 1, 0, &dst, 0)`, or simply read
+>   RAM 0x7F9F80 — `nvm_read_all_blocks` (0x062280) has already filled the
+>   mirror and verified the checksum by the time the application runs.
+> * **Checksum implications: none for the patch.** The commit path calls
+>   `nvm_checksum_generate` (0x061A48), which recomputes the block checksum —
+>   the **16-bit sum of payload bytes [0, len-2), stored bit-complemented as a
+>   big-endian u16 at offset len-2** — and writes both copies. This is *not*
+>   the flash block algorithm of `docs/02_memory_map.md` §6; do not point
+>   `tools/checksum.py` at EEPROM images. `tools/eeprom_map.py --check` does
+>   the EEPROM variant.
+>   The corollary is the one hard rule: **never write the EEPROM through the
+>   raw SPI primitives** (`eeprom_write_byte`/`eeprom_write_bytes`), or the
+>   patch has to maintain the checksum itself and will race the manager's
+>   mirror.
+> * **Write frequency.** One page write per commit; M95160 endurance is
+>   ~1e6 cycles (COMMUNITY, ST datasheet). Commit at key-off (or on a change
+>   of more than the calibratable hysteresis), never cyclically.
+>
+> **Fallback A — EEP_CONF block 24** (EEPROM 0x620, 255 bytes, mirror
+> 0x7FA2A0): 252 unused payload bytes, but a single copy and an 8-page
+> (~40 ms) write. Use only if a bench read shows block 8 is occupied.
+>
+> **Fallback B / bench development — external SRAM.** The firmware treats
+> 0x800000-0x807FFF as **retained across reset**: the boot sizing probe
+> `ext_sram_probe` (0x011898) saves and restores every word it disturbs, and
+> neither start-up copy clears the region (the `.data` image for it is empty,
+> `src == dst == 0x800000` at 0x09E438 and 0x08A1AC). VERIFIED-STATIC for the
+> code; **HYPOTHESIS** that the SRAM sits on KL30 — that is an electrical fact
+> and must be measured before any state is trusted to it across a key cycle.
+> Note also that a KWP flash-programming session copies code to 0x804800
+> (`FUN_0008A12C`), so keep flex-fuel state below that.
+>
+> **Not applicable:** the `vkKraQu` fuel-quality variant byte the 1K8907115F/L
+> community patches manipulate **does not exist in this software**
+> (`re/findings/variants.md`). There is no stock variant byte to reuse for a
+> map-set switch and no coding bit the fuelling path reads.
+
 ## 4. New calibration data
 
 All new parameters live in one block inside 0x5E2510-0x5EFFFF (all 0xFF
