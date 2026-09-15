@@ -82,7 +82,8 @@ def file_to_cpu(off: int, prefer_high: bool = False) -> int:
 
 
 def load_dump(path: str) -> bytearray:
-    data = bytearray(open(path, "rb").read())
+    with open(path, "rb") as fh:
+        data = bytearray(fh.read())
     if len(data) != DUMP_SIZE:
         raise ValueError(f"{path}: expected {DUMP_SIZE:#x} bytes, got {len(data):#x}")
     return data

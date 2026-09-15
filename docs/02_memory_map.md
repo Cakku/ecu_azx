@@ -67,10 +67,10 @@ uses the unrelocated addresses and is therefore wrong for this ECU.
 | 0x400000-0x47FFFF | On-chip flash (512 KB). Holds the KWP/flash-programming services and a second copy of the application start-up. | section 2 |
 | **0x480000-0x5FFFFF** | Alias of external flash offset 0x080000-0x1FFFFF. The firmware uses it only for **calibration: 7,055 absolute references into 0x5C0000-0x5E2FFF**, 3 into the rest. | `find_abs_refs.py --hist` |
 | 0x600000-0x6F7FFF | Flash alias, unused. | |
-| 0x6F8000-0x6F87FF | DECRAM (2 KB on-chip RAM). Boot copies a 0x238-byte routine from file 0x11118 here and runs it to reprogram the flash chip select (file 0x120C8-0x120FC). | disassembly |
-| 0x6FC000-0x6FC3FF | USIU (SIUMCR, memory controller BR0-3/OR0-3, DMBR/DMOR, PLL, timers). | 145 refs |
+| 0x6F8000-0x6F87FF | DECRAM (2 KB on-chip RAM). Boot copies **two** routines here in turn and runs each: 0xE4 bytes from file 0x10FEC (loop 0x11FAC-0x11FC8, called at 0x11FCC) and 0x238 bytes from file 0x11118 (loop 0x120D8-0x120F4, called at 0x120FC), to reprogram the flash chip select. The second also uses 0x6F8620+ as a scratch counter array during the TPU scan at 0x14604. | disassembly; second routine emulated 2026-09-15 (`tests/test_emu.py::TestDecramRoutine`) |
+| 0x6FC000-0x6FC3FF | USIU (SIUMCR, memory controller BR0-3/OR0-3, DMBR/DMOR, PLL, timers). Confirmed by emulating the boot, 2026-09-15: SIUMCR 0x6FC000, SIPEND 0x6FC010, BR0-OR3 0x6FC100-0x6FC11C, DMBR/DMOR 0x6FC140/0x6FC144, SCCR 0x6FC280, **PLPRCR 0x6FC284**, RSR 0x6FC288 (VERIFIED-DYNAMIC, `emu/boot_trace.py`). | 145 refs |
 | 0x6FC800 | UC3F flash control | 5 refs |
-| 0x700000-0x70FFFF | IMB modules: TPU3 A/B 0x704000/0x704400, QADC A/B 0x704800/0x704C00, QSMCM 0x705000 (49 refs), MIOS14 0x706000, **TouCAN A/B/C 0x707080/0x707480/0x707880**, UIMB 0x707F80. | table of the three CAN bases at file 0x2BC38 |
+| 0x700000-0x70FFFF | IMB modules: TPU3 A/B 0x704000/0x704400, QADC A/B 0x704800/0x704C00, QSMCM 0x705000 (49 refs), MIOS14 0x706000, **TouCAN A/B/C 0x707080/0x707480/0x707880**, UIMB 0x707F80. The boot also copies **0x800 bytes from file 0x10624-0x10E23 to 0x702000-0x7027FF** (loop 0x18098-0x180A0, word count 0x200 read from file 0x10E24). The content (`3FFFFFFE 7FFFFEFE BFFF07FC ...`) looks like TPU3 microcode (HYPOTHESIS: TPU3 code RAM). | table of the three CAN bases at file 0x2BC38; 0x702000 from `emu/boot_trace.py` and disassembly, 2026-09-15 |
 | 0x780000 | CALRAM control | 1 ref |
 | 0x7F8000-0x7FFFFF | On-chip SRAM 32 KB. Stack top 0x7FEFFC. | r1 set at file 0x10DC |
 | 0x800000-0x807FFF | External SRAM 32 KB (CS1). RAM init table at file 0x1C2E78 gives 0x800000..0x807FF8; highest static reference 0x805784. | BR1 base 0x800000 at 0x12118 |
@@ -165,7 +165,7 @@ EEPROM (ST M95160-class, 2 KB, on the SPI bus) has its own block checksums
 | 0xA5658 | **TKMWL measuring-variable table**, 2200 x 4 B handler pointers (0xA5658-0xA78B7) | Indexed by the dispatcher at 0x45768 (`lis r12,0xA; addi r12,r12,0x5658; lwzx r31,r12,id*4; mtlr; blrl`), which 360trev/MED9inf finds by signature. 665 ids are implemented, 1535 point at the "not available" stub 0x38EC4. Each handler leaves a VAG (formula, A, B) triple in RAM 0x7FD06F-0x7FD071 through the helper at 0x38EB4. Reached only from the KWP SID 0x21 route (0x35F6C -> 0xA2CC4 -> 0x3583C -> 0x3574C -> 0x45768) and from 0x357E0, which the on-chip flash calls. `tools/measuring_vars.py`, `re/measuring_vars.csv`, `re/findings/measuring_vars.md`. |
 | 0x1C5518 / **0x5C5518** | **Measuring-block group table**, 4 fields x 255 groups of u16 variable ids | `entry(field, group) = 0x5C5518 + field*0x1FE + group*2`; `addi r29,r2,-0x4AD8` at 0x35760 and 0x357F8 with the application r2 = 0x5C9FF0. Full listing in `re/findings/measuring_groups.txt`. |
 | 0x12004-0x121D8 | memory controller init (BR/OR from clock-mode tables at file 0x10020-0x1009C) | |
-| 0x11E44 | OR value adjust (clears a bit when RAM byte 0x7FE9E8 == 1) | |
+| 0x11E44 | `boot_or_adjust`: OR value adjust | `rlwinm r3,r3,0,24,22` (0x5463062C) = `r3 &= 0xFFFFFEFF`, i.e. **clears bit 0x100 (bit 23)**, and only when RAM byte 0x7FE9E8 is exactly 1. Called from the nine sites in 0x11F08-0x121B4; the result is stored to OR0/OR1/OR2/OR3 (0x6FC104/0x10C/0x114/0x11C), so bit 0x100 is the OR-register burst-inhibit field (field name COMMUNITY, MPC5xx UM; bit position VERIFIED-STATIC). Emulated both ways, 2026-09-15 (VERIFIED-DYNAMIC, `emu/`, `tests/test_emu.py`). Note the table entry 0xFF800650 already has that bit clear, so it is returned unchanged. |
 
 ## 8. Corrections to `med9_re/old_work`
 
@@ -200,3 +200,9 @@ EEPROM (ST M95160-class, 2 KB, on the SPI bus) has its own block checksums
   unrelated flag routine that ends with its own `blr` at 0x38EB0.
 - Both candidates were HYPOTHESIS and were never used for a decision; they are
   now VERIFIED-STATIC at the corrected addresses.
+- "Crash at 0x6F80B8" (again): re-run in the new harness on 2026-09-15, the
+  DECRAM routine executes 0x6F8000-0x6F8234 and returns cleanly for every value
+  of the flash-type nibble at RAM 0x7F800C, with no access to 0x900000 on any
+  of those paths. Whatever the old emulator was doing at 0x6F80B8
+  (`cmpwi r11, 4`) it was not following this code.  Evidence:
+  `tests/test_emu.py::TestDecramRoutine` (VERIFIED-DYNAMIC).

@@ -133,6 +133,38 @@ QEMU has no MPC5xx machine and is not useful here. The old
 ISB=0 addresses and lacked DECRAM and CS2; its register values (r1, r13, boot
 r2) were right.
 
+### 5.1 The Unicorn harness (`emu/`, 2026-09-15, issue #21)
+
+Built and documented in `emu/README.md`; tests in `tests/test_emu.py`
+(`python3 -m unittest discover -s tests`). `python3 -m emu.boot_trace` prints
+the boot-from-reset report. `capstone 5.0.1280` and `unicorn 2.1.4` install and
+work on the Homebrew Python 3.14 here (x86_64 under Rosetta); no 3.13 venv was
+needed. The Ghidra `EmulatorHelper` half of #21 is still open and waits for the
+Ghidra project from brief A1.
+
+Limitations found in practice, all **VERIFIED-DYNAMIC** by that harness:
+
+| Limitation | Consequence |
+|---|---|
+| Unicorn runs a QEMU **603e**; MPC5xx SPRs do not exist | `mfspr` returns 0 and `mtspr` is swallowed, **without trapping**. SPR 638 (IMMR) is among them, so the ISB=1 relocation at file 0x1004 does nothing and the harness has to hard-code the relocated map. Also seen unmodelled: 560 (IC_CST), 158, 568, 792, 824. SPR 528-543 *do* exist on a 603e as IBAT/DBAT but are MPC5xx region/control registers here, so those writes land in the wrong model. `Med9Emu(watch_spr=True)` reports every one. |
+| No peripheral model at all | USIU, TPU3, QADC, QSMCM, MIOS, TouCAN, CS2/CS3 are zero-filled pages. Anything polled has to be stubbed. Two blockers are known: **PLPRCR (0x6FC284) bit 0x8000**, the PLL lock-status bit the boot sets at 0x116FC and polls at 0x11704; and the **TPU3_A parameter-RAM scan at 0x14604-0x146C4**, which is where the boot stops once the PLL is stubbed. The SIPEND poll at 0x1048-0x1054 needs nothing: 0 already means "nothing pending". |
+| No memory controller | BR/OR writes are recorded but change nothing; chip-select sizes, write protection and CS aliasing are not modelled. The RAM probe at 0x118E0 reads 0x808000, one word past the external SRAM, which aliases on the real part. |
+| FP only because `MSR[FP]` is preset | The harness sets MSR = 0x3942 for every call; FPSCR exception behaviour is the 603e's. |
+| MSR[IP]=1 vectors not modelled | 0xFFF00000 is mirrored to the first 64 KB of flash as a HYPOTHESIS (`02_memory_map.md` section 3); any exception stops the run. |
+| No timing | `max_insns` is the only budget; `bdnz` delay loops cost real instructions. |
+| Instruction counting / tracing / SPR watching run through `UC_HOOK_CODE` | roughly an order of magnitude slower; `trace` and `watch_spr` are opt-in. |
+
+For exact PowerPC semantics (FP rounding, agreement with the decompiler) use
+the Ghidra `EmulatorHelper` path instead, once A1 has produced the project.
+
+### 5.2 Regression tooling (`tools/bindiff.py`, `tools/logcmp.py`, issue #24)
+
+`bindiff.py` classifies every changed byte between two dumps as *patch*
+(listed in the `patch.json` of `06_patch_pipeline.md` section 1), *descriptor*
+(a checksum sum/~sum word) or **unexpected**, and exits 1 on anything
+unexpected. `logcmp.py` compares two logs in the format defined in
+`logging/README.md`. Both are covered by `python3 -m unittest discover -s tests`.
+
 ## 6. CAN and diagnostics
 
 - Mac has no SocketCAN. Options: **slcan** adapter (CANable) via

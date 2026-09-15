@@ -1,0 +1,21 @@
+{
+  "_comment": [
+    "Tolerances for tools/logcmp.py. 'default' applies to every common variable;",
+    "'vars' overrides it per variable. Keys: max_abs (absolute deviation limit),",
+    "mean_abs (limit on the mean absolute deviation), rel (limit as a fraction of",
+    "the largest absolute baseline value of that variable; the effective max_abs is",
+    "the larger of the two), interp ('linear' or 'hold').",
+    "These numbers are for the synthetic bench logs in this directory; real bench",
+    "tolerances belong next to the patch in patches/<name>/test/."
+  ],
+  "default": { "max_abs": 1.0, "mean_abs": 0.5, "interp": "linear" },
+  "vars": {
+    "nmot_w":    { "max_abs": 60.0, "mean_abs": 20.0 },
+    "rl_w":      { "max_abs": 4.0,  "mean_abs": 1.0 },
+    "ti_1_w":    { "max_abs": 0.08, "mean_abs": 0.02 },
+    "lamsoni_w": { "max_abs": 0.02, "mean_abs": 0.01 },
+    "wkr_w":     { "max_abs": 1.0,  "mean_abs": 0.3 },
+    "tmot_w":    { "max_abs": 1.0,  "mean_abs": 0.4 },
+    "B_stend":   { "max_abs": 0.0,  "interp": "hold" }
+  }
+}

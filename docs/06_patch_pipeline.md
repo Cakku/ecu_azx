@@ -86,12 +86,22 @@ r2, r13, r14-r31 unless saved; no FP registers.
 ## 5. Verification steps for every build
 
 1. `checksum.py verify -q` -> `ALL OK (65 blocks)`.
-2. `cmp -l stock.bin patched.bin` -> only the ranges in `patch.json` plus the
-   descriptor `sum/~sum` words of the affected blocks.
+2. `python3 tools/bindiff.py stock.bin patched.bin -p patches/<name>/patch.json`
+   -> exit 0, i.e. every changed byte is either a change listed in
+   `patch.json` or a descriptor `sum/~sum` word of an affected block. Anything
+   else is reported as **unexpected** and the exit status is 1. Add
+   `--json work/diff.json` to keep the report with the build. (Added
+   2026-09-15, issue #24; it replaces the manual `cmp -l` reading and also
+   checks the `old`/`new` bytes and `base_sha256` from `patch.json`.)
 3. Identification block 0x1CEE20-0x1CEE6F unchanged.
-4. Emulator unit test of the patch code passes.
+4. Emulator unit test of the patch code passes (`emu/`, `emu/README.md`).
 5. Disassembly of every hook site shows the intended instruction and target.
 6. For bench: expected log lines written down before flashing.
+
+The apply step itself (`patches/` and its driver, issue #5 / #23) does not
+exist yet. When it does, it must call `bindiff.diff(stock, patched, patch_json)`
+and refuse to write a file whose report has `ok == False`; the function returns
+`(ranges, report)` so the report can be stored next to the build.
 
 ## 6. Flash and roll back
 
@@ -107,3 +117,15 @@ a check we do not know about). Roll back by writing the original read.
 Each patch keeps a baseline log (stock) and a patched log over the same bench
 scenario; a script compares the common variables and flags deviations. The E0
 equivalence test in `05_flexfuel_design.md` is the same mechanism.
+
+The script is `tools/logcmp.py` (2026-09-15, issue #24); the log CSV format and
+the tolerance-file format are defined in `logging/README.md`. Per patch:
+
+```bash
+python3 tools/logcmp.py patches/<name>/test/baseline.csv work/run.csv \
+        -t patches/<name>/test/tolerance.json --json work/logcmp.json
+```
+
+Exit status 1 means a variable moved outside its tolerance. Keep the tolerance
+file with the patch, not with the tool: it encodes what that patch is allowed
+to change.
