@@ -55,7 +55,7 @@ MPC5xx datasheet address **+ 0x400000**.
 | 0x000000-0x1FFFFF | flash | external flash, file 0x000000-0x1FFFFF |
 | 0x400000-0x403FFF | absent | protected sector KESSv2 does not read; zero, logged |
 | 0x404000-0x47FFFF | flash | on-chip flash, file 0x200000-0x27BFFF |
-| 0x480000-0x5FFFFF | flash | high alias of file 0x080000-0x1FFFFF (calibration at 0x5C0000+) |
+| 0x5C0000-0x5FFFFF | flash | DMBR/DMOR dual-mapped window onto file 0x1C0000-0x1FFFFF (calibration); 0x480000-0x5BFFFF is unbacked |
 | 0x6F8000-0x6F8FFF | ram | DECRAM (only the first 2 KB is real) |
 | 0x6FC000-0x6FCFFF | periph | USIU (page also holds UC3F flash control at 0x6FC800) |
 | 0x700000-0x70FFFF | periph | IMB3: TPU3 A/B, QADC A/B, QSMCM, MIOS14, TouCAN A/B/C, UIMB |

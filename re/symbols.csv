@@ -41,8 +41,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x03574C,0x03574C,ext_flash,func,measuring_group_read4,0x70,"addi r29,r2,-0x4AD8; loop 4x lhzx from tbl_measuring_groups; bl 0x045768; copies the triple to the response",static,dump,entry 0x035748 sets up r11; KWP SID 0x21 route
 0x0357E0,0x0357E0,ext_flash,func,measuring_field_read,0x5C,"same group table, one field: r3=out buf, r4=field, r5=group; bl 0x045768",static,dump,called 4x from 0x439F8C-0x439FE0 in on-chip flash
 0x03583C,0x03583C,ext_flash,func,kwp21_group_request,0x90,lbz from request; stb 0x7FD05E; range check; bl 0x035748 (or 0x046338),static,dump,called from 0x0A2CC4
-0x035F6C,0x035F6C,ext_flash,func,kwp_sid21_handler,0xB8,tbl_kwp_services entry file 0x2B884 handler field,static,dump,"local id ranges: 0x01-0x7F/0xA0-0xEF -> 0x0A2CC4, 0x80-0x9F -> 0x035728, 0xF0-0xF9 -> 0x034F48"
-0x035F6C,0x035F6C,ext_flash,func,kwp_sid_21_h1,0xB8,ghidra passat_azx_ori.bin 2026-09-15 @035F6C,static,ghidra,"KWP2000/OBD service 0x21 handler (h1), tbl_kwp_services[1]"
+0x035F6C,0x035F6C,ext_flash,func,kwp_sid_21_h1,0xB8,ghidra passat_azx_ori.bin 2026-09-15 @035F6C; tbl_kwp_services entry file 0x2B884,static,ghidra,"KWP2000/OBD service 0x21 handler (h1), tbl_kwp_services[1]; local id ranges: 0x01-0x7F/0xA0-0xEF -> 0x0A2CC4, 0x80-0x9F -> 0x035728, 0xF0-0xF9 -> 0x034F48 (A3, re/findings/measuring_vars.md)"
 0x036024,0x036024,ext_flash,func,kwp_sid_17_h1,0x8C,ghidra passat_azx_ori.bin 2026-09-15 @036024,static,ghidra,"KWP2000/OBD service 0x17 handler (h1), tbl_kwp_services[5]"
 0x0360B0,0x0360B0,ext_flash,func,kwp_sid_37_h1,0x14,ghidra passat_azx_ori.bin 2026-09-15 @0360B0,static,ghidra,"KWP2000/OBD service 0x37 handler (h1), tbl_kwp_services[12]"
 0x0360C4,0x0360C4,ext_flash,func,kwp_sid_35_h1,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0360C4,static,ghidra,"KWP2000/OBD service 0x35 handler (h1), tbl_kwp_services[10]"
@@ -96,9 +95,9 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x6F8000,,periph,region,decram_code_copy,0x238,boot copies 0x11118.. here and calls it,static,dump,
 0x6F8620,,periph,var,decram_tpu_scan_counters,,"stwu r31,4(r6) with r6=0x6F8620 in cand_tpu_param_scan",dynamic,emu,scratch use of DECRAM after the flash routine has finished
 0x6FC000,,periph,var,usiu_siumcr,4,MPC561RM Table 5-1 p.5-3,static,manual,bit 1 IP = initial MSR[IP]
-0x6FC010,,periph,var,usiu_sipend,4,polled once at 0x104C with andis. 0x8000,static,dump,"SIPEND; 0 means nothing pending, so it is not an emulation blocker"
-0x6FC100,,periph,var,usiu_br0,4,|=0x100 at 0x1020; cleared/restored by the DECRAM routine at 0x6F8098/0x6F81F4,static,dump,bit 0x100 = write protect (COMMUNITY)
-0x6FC104,,periph,var,usiu_or0,4,boot_or_adjust result stored at 0x12180/0x12428,static,dump,
+0x6FC010,,periph,var,usiu_sipend,4,MPC561RM Table 5-1; dump disassembly (A5 emulation 2026-09-15),static,manual+dump,"polled once at 0x104C with andis. 0x8000 (lis 0x70 / lwz -0x3FF0); 0 means nothing pending, so it is not an emulation blocker"
+0x6FC100,,periph,var,usiu_br0,4,MPC561RM Table 10-6 p.10-31 (0x2FC100 + ISB base); dump disassembly (A5 emulation 2026-09-15),static,manual+dump,written at file 0x12010/0x12034/0x12064 with 0x000103 / 0x00090B; |=0x100 at 0x1020; cleared/restored by the DECRAM routine at 0x6F8098/0x6F81F4; bit 0x100 = WP (write protect)
+0x6FC104,,periph,var,usiu_or0,4,MPC561RM Table 10-6; dump disassembly (A5 emulation 2026-09-15),static,manual+dump,8 MB region: AM=0xFF800000 in every clock mode; boot_or_adjust result stored at 0x12180/0x12428
 0x6FC108,,periph,var,usiu_br1,4,MPC561RM Table 10-6,static,manual,"0x800403: base 0x800000, 8-bit port"
 0x6FC10C,,periph,var,usiu_or1,4,MPC561RM Table 10-6,static,manual,0xFFFC01x0: 256 KB region 0x800000-0x83FFFF
 0x6FC110,,periph,var,usiu_br2,4,MPC561RM Table 10-6,static,manual,"0x900823: base 0x900000, 16-bit port, byte enables"

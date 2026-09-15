@@ -274,9 +274,9 @@ EEPROM (ST M95160-class, 2 KB, on the SPI bus) has its own block checksums
   checksummed 64 KB blocks; every write there needs `tools/checksum.py fix`.
 - Function-size based guesses about "fueling functions" are unverified.
 
-## 9. Corrections to earlier revisions of this document
+## 9. Corrections to this document
 
-2026-09-15, brief A3 (issue #10), evidence in `re/findings/measuring_vars.md`:
+### 2026-09-15 — agent A3, issue #10 (evidence: `re/findings/measuring_vars.md`) and agent A5, issues #21/#24 (evidence: `tests/test_emu.py`)
 
 - Section 7 said *"0xA5654 TKMWL measuring-variable table (candidate,
   MED9Toolchain signature `blr 00 03`)"*. **The table starts at 0xA5658.**
@@ -296,7 +296,6 @@ EEPROM (ST M95160-class, 2 KB, on the SPI bus) has its own block checksums
   of those paths. Whatever the old emulator was doing at 0x6F80B8
   (`cmpwi r11, 4`) it was not following this code.  Evidence:
   `tests/test_emu.py::TestDecramRoutine` (VERIFIED-DYNAMIC).
-## 9. Corrections to this document
 
 ### 2026-09-15 — agent A2, issue #6 (MPC561/MPC563 Reference Manual Rev. 1.2)
 

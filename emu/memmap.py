@@ -70,9 +70,10 @@ REGIONS: tuple[MemRegion, ...] = (
     MemRegion("int_flash", m.INT_FLASH_BASE, 0x7C000, KIND_FLASH,
               file_start=m.INT_FLASH_FILE_OFFSET, file_size=0x7C000,
               note="on-chip flash 0x404000-0x47FFFF: KWP services + 2nd copy of the start-up"),
-    MemRegion("ext_flash_alias", 0x480000, 0x180000, KIND_FLASH,
-              file_start=0x080000, file_size=0x180000,
-              note="high alias of external flash 0x080000-0x1FFFFF; calibration lives at 0x5C0000+"),
+    MemRegion("cal_dual_mapped", 0x5C0000, 0x40000, KIND_FLASH,
+              file_start=0x1C0000, file_size=0x40000,
+              note="DMBR/DMOR dual-mapping window onto external flash 0x1C0000-0x1FFFFF (calibration); "
+                   "0x480000-0x5BFFFF and 0x600000-0x6F7FFF are unbacked (MPC561RM sec. 10.8, agent A2)"),
     MemRegion("decram", 0x6F8000, PAGE, KIND_RAM, real_end=0x6F8800,
               note="2 KB on-chip DECRAM; boot copies a 0x238-byte routine from file 0x11118 here"),
     MemRegion("usiu", 0x6FC000, PAGE, KIND_PERIPH, real_end=0x6FC400,
@@ -87,16 +88,16 @@ REGIONS: tuple[MemRegion, ...] = (
               note="0x7F8000-0x7FFFFF on-chip SRAM (stack top 0x7FEFFC, r13 SDA 0x7FFFF0) + "
                    "0x800000-0x807FFF external SRAM on CS1"),
     MemRegion("cs2_device", 0x900000, 0x40000, KIND_PERIPH,
-              note="unknown CS2 device; the DECRAM routine talks to it (old emulator died here)"),
+              note="unknown CS2 device (BR2, 16-bit); not touched on any emulated DECRAM path so far"),
     MemRegion("cs3_device", 0xA00000, 0x8000, KIND_PERIPH,
               note="unknown CS3 device, 2 static references"),
 )
 
-# MSR[IP]=1 fetches exception vectors from 0xFFF00000.  docs/02 section 3 lists
-# this as a HYPOTHESIS ("address bits above the external bus width are ignored,
-# so 0xFFF00xxx hits CS0").  We model it as a read-only mirror of the first
-# 64 KB of external flash so that a stray exception lands on the real vector
-# table instead of an unmapped fetch; it is optional and off the critical path.
+# MSR[IP]=1 vector fetches are rewritten by the BBC exception-table relocation
+# to 0x400000+offset on the real part (docs/02 section 3, agent A2), which the
+# 603e model does not do.  The optional read-only mirror of the first 64 KB of
+# external flash at 0xFFF00000 only keeps a stray exception from becoming an
+# unmapped fetch in the emulator; it is off the critical path.
 HIGH_VECTOR_BASE = 0xFFF00000
 HIGH_VECTOR_SIZE = 0x10000
 
