@@ -1001,18 +1001,18 @@ addr,kind,x_axis_addr,y_axis_addr,x_n,y_n,elem_size,signed,consumer_func,name_or
 0x5C752F,scalar,,,1,,1,0,FUN_00430ea0@0x430EA0,,static,enumerate_maps.py; direct load; 1 call site(s): 0x431040,,,,1
 0x5C7530,scalar,,,1,,1,0,FUN_00430ea0@0x430EA0,,static,enumerate_maps.py; direct load; 1 call site(s): 0x430F0C,,,,1
 0x5C7532,axis,0x5C7532,,8,,1,0,FUN_00430ea0@0x430EA0,,static,enumerate_maps.py; axis_search_u8; 1 call site(s): 0x430F40; struct 0x5C7531,u8,,0x5C7531,1
-0x5C753A,scalar,,,1,,1,0,FUN_0041d10c@0x41D10C,,static,enumerate_maps.py; direct load; 1 call site(s): 0x41D234,,,,1
-0x5C753C,scalar,,,1,,1,0,FUN_0041d38c@0x41D38C,,static,enumerate_maps.py; direct load; 1 call site(s): 0x41D3B4,,,,1
-0x5C753D,scalar,,,1,,1,0,FUN_0041d280@0x41D280,,static,enumerate_maps.py; direct load; 1 call site(s): 0x41D300,,,,1
-0x5C753E,map_2d_data,,,12,16,1,1,FUN_0041d280@0x41D280,,hypothesis,enumerate_maps.py; interp_2d_s8; 1 call site(s): 0x41D2D8; row count inferred from the 192 bytes before the next detected object,,,,1
-0x5C75FE,map_2d_data,0x5C775A,0x5C7738,12,16,1,1,FUN_0041d334@0x41D334,,hypothesis,enumerate_maps.py; interp_2d_s8; 1 call site(s): 0x41D378; axes matched positionally to the axis searches in the same function,u16,u16,,1
+0x5C753A,scalar,,,1,,1,0,FUN_0041d10c@0x41D10C,cand_DZW_BANK_OFFSET,hypothesis,"enumerate_maps.py; direct load; 1 call site(s): 0x41D234; B7 #15: s8 calibration offset added to EVERY bank final ignition angle in zwbas_per_bank 0x41D10C, after the knock retard",,,,1
+0x5C753C,scalar,,,1,,1,0,FUN_0041d38c@0x41D38C,cand_CWZWGRU,hypothesis,enumerate_maps.py; direct load; 1 call site(s): 0x41D3B4; B7 #15: codeword; bit 7 clear enables the 0x800006-0x800007 tester-adaptation term in zwgru_build 0x41D38C,,,,1
+0x5C753D,scalar,,,1,,1,0,FUN_0041d280@0x41D280,cand_DZWKG_MAX,hypothesis,enumerate_maps.py; direct load; 1 call site(s): 0x41D300; B7 #15: s8 upper clamp on the zwgru_dzw_kg delta (0x41D280),,,,1
+0x5C753E,map_2d_data,,,12,16,1,1,FUN_0041d280@0x41D280,cand_KFDZWKG,hypothesis,"enumerate_maps.py; interp_2d_s8; 1 call site(s): 0x41D2D8; row count inferred from the 192 bytes before the next detected object; B7 #15: 16x12 s8 delta on the KFZW axes, read by zwgru_dzw_kg 0x41D280, weighted 1.15 and clamped by 0x5C753D; zero except a -50..-10 deg island at 2000-3000 rpm / 41-73 % load",,,,1
+0x5C75FE,map_2d_data,0x5C775A,0x5C7738,12,16,1,1,FUN_0041d334@0x41D334,KFZW,static,"enumerate_maps.py; interp_2d_s8; 1 call site(s): 0x41D378; axes matched positionally to the axis searches in the same function; B7 #15: base ignition map, 16 nmot rows x 12 rl cols, s8, 0.75 deg CA/LSB; only consumer zwgru_kfzw_lookup 0x41D334; FR ZWGRU p3085-3094 (SNM16ZUUW x SRL12ZUUW); re/findings/ignition.md s2",u16,u16,,1
 0x5C76BE,scalar,,,1,,1,0,FUN_004310c8@0x4310C8,,static,enumerate_maps.py; direct load; 1 call site(s): 0x4310D8,,,,1
 0x5C76BF,scalar,,,1,,1,0,FUN_004310c8@0x4310C8,,static,enumerate_maps.py; direct load; 1 call site(s): 0x431110,,,,1
 0x5C76C0,scalar,,,1,,1,0,FUN_004310c8@0x4310C8,,static,enumerate_maps.py; direct load; 1 call site(s): 0x43110C,,,,1
 0x5C76D5,map_2d_shared,0x5C76C9,0x5C76C1,12,8,1,1,FUN_004310c8@0x4310C8,,static,enumerate_maps.py; lookup_2d_g_u8_u8_s8; 1 call site(s): 0x431128,u8,u8,,1
-0x5C7738,axis,0x5C7738,,16,,2,0,FUN_0041d334@0x41D334,,static,enumerate_maps.py; axis_search_u16_hint; 1 call site(s): 0x41D34C; struct 0x5C7736,u16,,0x5C7736,1
+0x5C7738,axis,0x5C7738,,16,,2,0,FUN_0041d334@0x41D334,SNM16ZUUW,static,"enumerate_maps.py; axis_search_u16_hint; 1 call site(s): 0x41D34C; struct 0x5C7736; B7 #15: KFZW nmot axis, 16 u16 at 0.25 rpm/LSB = 520..6520 rpm; struct 0x5C7736",u16,,0x5C7736,1
 0x5C7758,scalar,,,1,,2,0,FUN_0041d280@0x41D280 FUN_0041d334@0x41D334,,static,enumerate_maps.py; direct load; 2 call site(s): 0x41D2CC 0x41D36C,,,,2
-0x5C775A,axis,0x5C775A,,12,,2,0,FUN_0041d334@0x41D334,,static,enumerate_maps.py; axis_search_u16_hint; 1 call site(s): 0x41D360; struct 0x5C7758,u16,,0x5C7758,1
+0x5C775A,axis,0x5C775A,,12,,2,0,FUN_0041d334@0x41D334,SRL12ZUUW,static,"enumerate_maps.py; axis_search_u16_hint; 1 call site(s): 0x41D360; struct 0x5C7758; B7 #15: KFZW rl axis, 12 u16 at 100%/4096 per LSB = 10.2..103.9 %; struct 0x5C7758",u16,,0x5C7758,1
 0x5C7772,map_2d_data,,,12,16,1,1,FUN_00431140@0x431140,,hypothesis,enumerate_maps.py; interp_2d_s8; 1 call site(s): 0x4311BC; row count inferred from the 192 bytes before the next detected object,,,,1
 0x5C7832,map_2d_data,,,8,8,1,1,FUN_00431140@0x431140,,hypothesis,enumerate_maps.py; interp_2d_s8; 1 call site(s): 0x431174; row count inferred from the 64 bytes before the next detected object,,,,1
 0x5C7872,map_2d_data,,,8,8,1,1,FUN_00431140@0x431140,,hypothesis,"enumerate_maps.py; interp_2d_s8; 1 call site(s): 0x4311A4; row count taken from the identically shaped map at 0x5C7832, which ends exactly here",,,,1
@@ -1108,7 +1108,7 @@ addr,kind,x_axis_addr,y_axis_addr,x_n,y_n,elem_size,signed,consumer_func,name_or
 0x5C83F1,scalar,,,1,,1,0,FUN_004163e0@0x4163E0,,static,enumerate_maps.py; direct load; 1 call site(s): 0x416618,,,,1
 0x5C8400,scalar,,,1,,1,0,FUN_00416d6c@0x416D6C,,static,enumerate_maps.py; direct load; 1 call site(s): 0x416E0C,,,,1
 0x5C8401,scalar,,,1,,1,0,FUN_00416d6c@0x416D6C,,static,enumerate_maps.py; direct load; 1 call site(s): 0x416E08,,,,1
-0x5C8416,map_2d_shared,0x5C8412,0x5C8402,4,16,1,1,FUN_00416d6c@0x416D6C,,static,enumerate_maps.py; lookup_2d_g_u8_u8_s8; 1 call site(s): 0x416E24,u8,u8,,1
+0x5C8416,map_2d_shared,0x5C8412,0x5C8402,4,16,1,1,FUN_00416d6c@0x416D6C,cand_krreg_map,hypothesis,enumerate_maps.py; lookup_2d_g_u8_u8_s8; 1 call site(s): 0x416E24; B7 #15: 16x4 s8 map read by krreg_knock_retard 0x416D6C with nmot and 0x7FCE4C; result goes to the per-cylinder array 0x7FCE61,u8,u8,,1
 0x5C845D,curve_1d,0x5C8457,,6,,1,0,FUN_004435f4@0x4435F4,,static,enumerate_maps.py; lookup_1d_u8; 1 call site(s): 0x443608; struct 0x5C8456,u8,,0x5C8456,1
 0x5C8463,scalar,,,1,,1,0,FUN_004435f4@0x4435F4,,static,enumerate_maps.py; direct load; 1 call site(s): 0x4436A4,,,,1
 0x5C8464,scalar,,,1,,2,0,FUN_004330b0@0x4330B0 FUN_004435f4@0x4435F4,,static,enumerate_maps.py; direct load; 2 call site(s): 0x433334 0x44365C,,,,2
@@ -1610,10 +1610,10 @@ addr,kind,x_axis_addr,y_axis_addr,x_n,y_n,elem_size,signed,consumer_func,name_or
 0x5C9AC2,scalar,,,1,,1,0,FUN_00435b78@0x435B78,,static,enumerate_maps.py; direct load; 1 call site(s): 0x435CB0,,,,1
 0x5C9E08,scalar,,,1,,1,0,FUN_0043621c@0x43621C,,static,enumerate_maps.py; direct load; 1 call site(s): 0x436244,,,,1
 0x5C9E09,scalar,,,1,,1,0,FUN_0043621c@0x43621C,,static,enumerate_maps.py; direct load; 1 call site(s): 0x436240,,,,1
-0x5C9E25,map_2d_shared,0x5C9E1A,0x5C9E0A,11,16,1,1,FUN_0043621c@0x43621C,,static,enumerate_maps.py; lookup_2d_g_u8_u8_s8; 1 call site(s): 0x43625C,u8,u8,,1
+0x5C9E25,map_2d_shared,0x5C9E1A,0x5C9E0A,11,16,1,1,FUN_0043621c@0x43621C,cand_KFZWOP_delta_a,hypothesis,"enumerate_maps.py; lookup_2d_g_u8_u8_s8; 1 call site(s): 0x43625C; B7 #15: 16x11 s8 delta on KFZWOP, read by zwopt_delta_maps 0x43621C when 0x7FD305 bit 7 set; all zeros in this dataset",u8,u8,,1
 0x5C9ED5,scalar,,,1,,1,0,FUN_0043621c@0x43621C,,static,enumerate_maps.py; direct load; 1 call site(s): 0x436280,,,,1
 0x5C9ED6,scalar,,,1,,1,0,FUN_0043621c@0x43621C,,static,enumerate_maps.py; direct load; 1 call site(s): 0x43627C,,,,1
-0x5C9EF2,map_2d_shared,0x5C9EE7,0x5C9ED7,11,16,1,1,FUN_0043621c@0x43621C,,static,enumerate_maps.py; lookup_2d_g_u8_u8_s8; 1 call site(s): 0x436298,u8,u8,,1
+0x5C9EF2,map_2d_shared,0x5C9EE7,0x5C9ED7,11,16,1,1,FUN_0043621c@0x43621C,cand_KFZWOP_delta_b,hypothesis,"enumerate_maps.py; lookup_2d_g_u8_u8_s8; 1 call site(s): 0x436298; B7 #15: 16x11 s8 delta on KFZWOP, read by zwopt_delta_maps 0x43621C when 0x7FD305 bit 6 set; all zeros in this dataset",u8,u8,,1
 0x5C9FA8,curve_1d,0x5C9FA3,,5,,1,0,FUN_0043621c@0x43621C,,static,enumerate_maps.py; lookup_1d_u8; 1 call site(s): 0x4362A8; struct 0x5C9FA2,u8,,0x5C9FA2,1
 0x5C9FAE,scalar,,,1,,2,0,FUN_004362d4@0x4362D4,,static,enumerate_maps.py; direct load; 1 call site(s): 0x436408,,,,1
 0x5C9FC4,curve_1d_shared,0x5C9FB0,,10,,1,1,FUN_004362d4@0x4362D4,,static,enumerate_maps.py; lookup_1d_g_u16_s8; 1 call site(s): 0x43641C,u16,,,1
@@ -1637,7 +1637,7 @@ addr,kind,x_axis_addr,y_axis_addr,x_n,y_n,elem_size,signed,consumer_func,name_or
 0x5CA3C6,curve_1d_shared,0x5CA3B8,,7,,2,0,FUN_004459b0@0x4459B0,,static,enumerate_maps.py; lookup_1d_g_s16_u16; 1 call site(s): 0x4459F0,s16,,,1
 0x5CA3D4,scalar,,,1,,1,0,FUN_00436b90@0x436B90,,static,enumerate_maps.py; direct load; 1 call site(s): 0x436BA0,,,,1
 0x5CA3D5,scalar,,,1,,1,0,FUN_00436b90@0x436B90,,static,enumerate_maps.py; direct load; 1 call site(s): 0x436B9C,,,,1
-0x5CA3F1,map_2d_shared,0x5CA3E6,0x5CA3D6,11,16,1,1,FUN_00436b90@0x436B90,,static,enumerate_maps.py; lookup_2d_g_u8_u8_s8; 1 call site(s): 0x436BB8,u8,u8,,1
+0x5CA3F1,map_2d_shared,0x5CA3E6,0x5CA3D6,11,16,1,1,FUN_00436b90@0x436B90,KFZWOP,static,"enumerate_maps.py; lookup_2d_g_u8_u8_s8; 1 call site(s): 0x436BB8; B7 #15: torque-model optimum ignition map, 16 nmot rows x 11 rl cols, s8, 0.75 deg CA/LSB (15..45 deg BTDC); read by kfzwop_lookup 0x436B90 into 0x802666, summed to zwopt 0x802665 by zwopt_build 0x423344; FR MDBAS p736 (SNM16OPUW x SRL11OPUW). DO NOT SHIFT for flex fuel",u8,u8,,1
 0x5CA4A2,scalar,,,1,,2,0,FUN_0011e004@0x11E004,,static,enumerate_maps.py; direct load; 2 call site(s): 0x11E028 0x11E30C,,,,2
 0x5CA528,scalar,,,1,,1,0,FUN_00413534@0x413534 FUN_004149cc@0x4149CC FUN_00436bd0@0x436BD0,,static,enumerate_maps.py; direct load; 7 call site(s): 0x413F90 0x4147D8 0x41485C 0x4153C8 0x41550C 0x4155DC ...,,,,7
 0x5CA529,scalar,,,1,,1,0,FUN_001350ec@0x1350EC FUN_00412dbc@0x412DBC FUN_00413534@0x413534 FUN_004149cc@0x4149CC ...,,static,enumerate_maps.py; direct load; 14 call site(s): 0x135498 0x412E20 0x4136F4 0x413794 0x413830 0x413848 ...,,,,14
@@ -5159,9 +5159,9 @@ addr,kind,x_axis_addr,y_axis_addr,x_n,y_n,elem_size,signed,consumer_func,name_or
 0x5D58FB,scalar,,,1,,1,0,FUN_000f4290@0x0F4290,,static,enumerate_maps.py; direct load; 1 call site(s): 0x0F42B8,,,,1
 0x5D58FC,scalar,,,1,,1,0,FUN_000f4290@0x0F4290,,static,enumerate_maps.py; direct load; 1 call site(s): 0x0F42C8,,,,1
 0x5D58FE,map_2d_data,0x5C7532,,8,8,2,0,FUN_00430ea0@0x430EA0,,hypothesis,enumerate_maps.py; interp_2d_u16; 1 call site(s): 0x430F68; axes matched positionally to the axis searches in the same function; row count inferred from the 128 bytes before the next detected object,u8,,,1
-0x5D597E,map_2d_data,,,12,16,1,1,FUN_000f436c@0x0F436C,,hypothesis,enumerate_maps.py; interp_2d_s8; 1 call site(s): 0x0F44B8; row count inferred from the 192 bytes before the next detected object,,,,1
-0x5D5A3E,map_2d_data,,,12,16,1,1,FUN_000f436c@0x0F436C,,hypothesis,"enumerate_maps.py; interp_2d_s8; 1 call site(s): 0x0F4398; row count taken from the identically shaped map at 0x5D597E, which ends exactly here",,,,1
-0x5D5AFE,map_2d_data,,,12,16,1,1,FUN_000f436c@0x0F436C,,hypothesis,"enumerate_maps.py; interp_2d_s8; 1 call site(s): 0x0F440C; row count taken from the identically shaped map at 0x5D5A3E, which ends exactly here",,,,1
+0x5D597E,map_2d_data,,,12,16,1,1,FUN_000f436c@0x0F436C,cand_KFDZK,hypothesis,"enumerate_maps.py; interp_2d_s8; 1 call site(s): 0x0F44B8; row count inferred from the 192 bytes before the next detected object; B7 #15: ignition retard applied while the low-octane-fuel latch is set; zwgru_low_octane_detect 0x0F436C writes the result to 0x80208E, which zwbas_per_bank adds. FR ZWGRU p3090 KFDZK",,,,1
+0x5D5A3E,map_2d_data,,,12,16,1,1,FUN_000f436c@0x0F436C,cand_KFSWKFZK,hypothesis,"enumerate_maps.py; interp_2d_s8; 1 call site(s): 0x0F4398; row count taken from the identically shaped map at 0x5D597E, which ends exactly here; B7 #15: switch-on threshold compared with the mean knock retard 0x7FCE76 in zwgru_low_octane_detect 0x0F436C. FR ZWGRU p3090 KFSWKFZK",,,,1
+0x5D5AFE,map_2d_data,,,12,16,1,1,FUN_000f436c@0x0F436C,cand_KFSWKFZKR,hypothesis,"enumerate_maps.py; interp_2d_s8; 1 call site(s): 0x0F440C; row count taken from the identically shaped map at 0x5D5A3E, which ends exactly here; B7 #15: switch-back threshold of the low-octane-fuel latch, zwgru_low_octane_detect 0x0F436C. FR ZWGRU p3090 KFSWKFZKR",,,,1
 0x5D5BBE,scalar,,,1,,1,0,FUN_000f436c@0x0F436C,,static,enumerate_maps.py; direct load; 1 call site(s): 0x0F43B4,,,,1
 0x5D5BBF,scalar,,,1,,1,0,FUN_000f436c@0x0F436C,,static,enumerate_maps.py; direct load; 1 call site(s): 0x0F4434,,,,1
 0x5D5BC0,scalar,,,1,,1,0,FUN_000c61fc@0x0C61FC,,static,enumerate_maps.py; direct load; 1 call site(s): 0x0C62E4,,,,1
