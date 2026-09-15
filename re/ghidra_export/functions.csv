@@ -1,19 +1,23 @@
 cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
-0x000100,0x000100,ext_flash,thunk,vector_100,0x4,ghidra passat_azx_ori.bin 2026-09-15 @000100,static,ghidra,"VERIFIED-STATIC -- ghidra_scripts/med9_setup.py, from docs/02_memory_map.md"
-0x00049C,0x00049C,ext_flash,thunk,boot_trampoline,0x4,ghidra passat_azx_ori.bin 2026-09-15 @00049C,static,ghidra,"VERIFIED-STATIC -- ghidra_scripts/med9_setup.py, from docs/02_memory_map.md"
-0x001004,0x001004,ext_flash,func,boot_start,0xF4,ghidra passat_azx_ori.bin 2026-09-15 @001004,static,ghidra,"VERIFIED-STATIC -- ghidra_scripts/med9_setup.py, from docs/02_memory_map.md"
-0x0010F8,0x0010F8,ext_flash,func,FUN_000010f8,0xE0,ghidra passat_azx_ori.bin 2026-09-15 @0010F8,hypothesis,ghidra,
+0x000100,0x000100,ext_flash,thunk,reset_vector,0x4,ghidra passat_azx_ori.bin 2026-09-15 @000100,static,ghidra,"classic 0x100-spaced layout, used only when RCW[IP]=0; that layout is incomplete (file 0x500, the external-interrupt vector, is zero) - the live table is the ETR one at 0x0"
+0x00049C,0x00049C,ext_flash,thunk,boot_trampoline,0x4,ghidra passat_azx_ori.bin 2026-09-15 @00049C,static,ghidra,VERIFIED-STATIC -- evidence: b 0x1004 (source: dump)
+0x001004,0x001004,ext_flash,func,boot_start,0xF4,ghidra passat_azx_ori.bin 2026-09-15 @001004,static,ghidra,r1=0x7FEFFC r13=0x7FFFF0 r2=0x17FF0
+0x0010F8,0x0010F8,ext_flash,func,FUN_000010f8,0x20,ghidra passat_azx_ori.bin 2026-09-15 @0010F8,hypothesis,ghidra,
+0x001118,0x001118,ext_flash,func,boot_bbcmcr_setup,0xC0,ghidra passat_azx_ori.bin 2026-09-15 @001118,static,ghidra,BBCMCR: only DCAE set; ETRE/OERC left at reset-configuration-word values
 0x0011D8,0x0011D8,ext_flash,func,FUN_000011d8,0x30,ghidra passat_azx_ori.bin 2026-09-15 @0011D8,hypothesis,ghidra,
 0x001228,0x001228,ext_flash,func,FUN_00001228,0x60,ghidra passat_azx_ori.bin 2026-09-15 @001228,hypothesis,ghidra,
 0x010EF8,0x010EF8,ext_flash,func,FUN_00010ef8,0xF4,ghidra passat_azx_ori.bin 2026-09-15 @010EF8,hypothesis,ghidra,
-0x010FEC,0x010FEC,ext_flash,func,FUN_00010fec,0xE4,ghidra passat_azx_ori.bin 2026-09-15 @010FEC,hypothesis,ghidra,
+0x010FEC,0x010FEC,ext_flash,func,decram_routine_a_src,0xE4,ghidra passat_azx_ori.bin 2026-09-15 @010FEC,static,ghidra,first of the two DECRAM-resident routines
 0x0110D0,0x0110D0,ext_flash,func,FUN_000110d0,0x20,ghidra passat_azx_ori.bin 2026-09-15 @0110D0,hypothesis,ghidra,
-0x0110F0,0x0110F0,ext_flash,func,fatal_exception_handler,0x28,ghidra passat_azx_ori.bin 2026-09-15 @0110F0,static,ghidra,"VERIFIED-STATIC -- ghidra_scripts/med9_setup.py, from docs/02_memory_map.md"
-0x011118,0x011118,ext_flash,func,decram_flashcs_routine_src,0x238,ghidra passat_azx_ori.bin 2026-09-15 @011118,static,ghidra,"VERIFIED-STATIC -- ghidra_scripts/med9_setup.py, from docs/02_memory_map.md"
+0x0110F0,0x0110F0,ext_flash,func,fatal_exception_handler,0x28,ghidra passat_azx_ori.bin 2026-09-15 @0110F0,static,ghidra,target of unused exception vectors
+0x011118,0x011118,ext_flash,func,decram_flashcs_routine_src,0x238,ghidra passat_azx_ori.bin 2026-09-15 @011118,static,ghidra,accesses CS2 device 0x900000
 0x011350,0x011350,ext_flash,func,FUN_00011350,0x1D4,ghidra passat_azx_ori.bin 2026-09-15 @011350,hypothesis,ghidra,
-0x011524,0x011524,ext_flash,func,FUN_00011524,0x2E4,ghidra passat_azx_ori.bin 2026-09-15 @011524,hypothesis,ghidra,
+0x011524,0x011524,ext_flash,func,FUN_00011524,0xB8,ghidra passat_azx_ori.bin 2026-09-15 @011524,hypothesis,ghidra,
+0x0115DC,0x0115DC,ext_flash,func,boot_pll_setup,0x120,ghidra passat_azx_ori.bin 2026-09-15 @0115DC,static,ghidra,emulated 2026-09-15: stalls here without a PLPRCR stub
+0x0116FC,0x0116FC,ext_flash,func,boot_pll_lock_wait,0x10C,ghidra passat_azx_ori.bin 2026-09-15 @0116FC,dynamic,ghidra,first unmodelled peripheral value in the boot path (emu/boot_trace.py)
 0x011808,0x011808,ext_flash,func,FUN_00011808,0x90,ghidra passat_azx_ori.bin 2026-09-15 @011808,hypothesis,ghidra,
-0x011898,0x011898,ext_flash,func,FUN_00011898,0xE8,ghidra passat_azx_ori.bin 2026-09-15 @011898,hypothesis,ghidra,
+0x011898,0x011898,ext_flash,func,FUN_00011898,0x28,ghidra passat_azx_ori.bin 2026-09-15 @011898,hypothesis,ghidra,
+0x0118C0,0x0118C0,ext_flash,func,boot_ram_probe,0xC0,ghidra passat_azx_ori.bin 2026-09-15 @0118C0,static,ghidra,external SRAM size/alias probe; the emulator reports 0x808000 as unmapped
 0x011980,0x011980,ext_flash,func,FUN_00011980,0x80,ghidra passat_azx_ori.bin 2026-09-15 @011980,hypothesis,ghidra,
 0x011A00,0x011A00,ext_flash,func,FUN_00011a00,0xE0,ghidra passat_azx_ori.bin 2026-09-15 @011A00,hypothesis,ghidra,
 0x011AE0,0x011AE0,ext_flash,func,FUN_00011ae0,0x1D4,ghidra passat_azx_ori.bin 2026-09-15 @011AE0,hypothesis,ghidra,
@@ -21,15 +25,15 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x011D58,0x011D58,ext_flash,func,FUN_00011d58,0x78,ghidra passat_azx_ori.bin 2026-09-15 @011D58,hypothesis,ghidra,
 0x011DD0,0x011DD0,ext_flash,func,FUN_00011dd0,0x44,ghidra passat_azx_ori.bin 2026-09-15 @011DD0,hypothesis,ghidra,
 0x011E14,0x011E14,ext_flash,func,FUN_00011e14,0x30,ghidra passat_azx_ori.bin 2026-09-15 @011E14,hypothesis,ghidra,
-0x011E44,0x011E44,ext_flash,func,boot_or_adjust,0x14,ghidra passat_azx_ori.bin 2026-09-15 @011E44,static,ghidra,"VERIFIED-STATIC -- ghidra_scripts/med9_setup.py, from docs/02_memory_map.md"
+0x011E44,0x011E44,ext_flash,func,boot_or_adjust,0x14,ghidra passat_azx_ori.bin 2026-09-15 @011E44,static,ghidra,VERIFIED-STATIC -- evidence: lbz 0x7FE9E8(r13-0x1608); rlwinm clears bit 8 of OR value (source: dump)
 0x011E58,0x011E58,ext_flash,func,FUN_00011e58,0x110,ghidra passat_azx_ori.bin 2026-09-15 @011E58,hypothesis,ghidra,
 0x011F68,0x011F68,ext_flash,func,FUN_00011f68,0x12C,ghidra passat_azx_ori.bin 2026-09-15 @011F68,hypothesis,ghidra,
-0x012004,0x012004,ext_flash,func,boot_memctrl_init,0x148,ghidra passat_azx_ori.bin 2026-09-15 @012004,static,ghidra,"VERIFIED-STATIC -- ghidra_scripts/med9_setup.py, from docs/02_memory_map.md"
+0x012004,0x012004,ext_flash,func,boot_memctrl_init,0x148,ghidra passat_azx_ori.bin 2026-09-15 @012004,static,ghidra,BR0=0x000000|0x103/0x90B; BR1=0x800000|0x403; BR2=0x900000|0x823; BR3=0xA00000|3; OR tables at file 0x10020-0x1009C
 0x0121DC,0x0121DC,ext_flash,func,FUN_000121dc,0x30,ghidra passat_azx_ori.bin 2026-09-15 @0121DC,hypothesis,ghidra,
 0x01220C,0x01220C,ext_flash,func,FUN_0001220c,0x48,ghidra passat_azx_ori.bin 2026-09-15 @01220C,hypothesis,ghidra,
 0x012254,0x012254,ext_flash,func,FUN_00012254,0x5C,ghidra passat_azx_ori.bin 2026-09-15 @012254,hypothesis,ghidra,
 0x0122B0,0x0122B0,ext_flash,func,FUN_000122b0,0x78,ghidra passat_azx_ori.bin 2026-09-15 @0122B0,hypothesis,ghidra,
-0x012328,0x012328,ext_flash,func,boot_main_init,0x2B0,ghidra passat_azx_ori.bin 2026-09-15 @012328,static,ghidra,"VERIFIED-STATIC -- ghidra_scripts/med9_setup.py, from docs/02_memory_map.md"
+0x012328,0x012328,ext_flash,func,boot_main_init,0x2B0,ghidra passat_azx_ori.bin 2026-09-15 @012328,static,ghidra,VERIFIED-STATIC -- evidence: called from boot_start; checks IMMR PARTNUM==0x35 (source: dump)
 0x0125D8,0x0125D8,ext_flash,func,FUN_000125d8,0x80,ghidra passat_azx_ori.bin 2026-09-15 @0125D8,hypothesis,ghidra,
 0x012658,0x012658,ext_flash,func,FUN_00012658,0xB4,ghidra passat_azx_ori.bin 2026-09-15 @012658,hypothesis,ghidra,
 0x01270C,0x01270C,ext_flash,func,FUN_0001270c,0x74,ghidra passat_azx_ori.bin 2026-09-15 @01270C,hypothesis,ghidra,
@@ -62,7 +66,8 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x013D64,0x013D64,ext_flash,func,FUN_00013d64,0x6B0,ghidra passat_azx_ori.bin 2026-09-15 @013D64,hypothesis,ghidra,
 0x014414,0x014414,ext_flash,func,FUN_00014414,0xB0,ghidra passat_azx_ori.bin 2026-09-15 @014414,hypothesis,ghidra,
 0x0144C4,0x0144C4,ext_flash,func,FUN_000144c4,0x134,ghidra passat_azx_ori.bin 2026-09-15 @0144C4,hypothesis,ghidra,
-0x0145F8,0x0145F8,ext_flash,func,FUN_000145f8,0x4E0,ghidra passat_azx_ori.bin 2026-09-15 @0145F8,hypothesis,ghidra,
+0x0145F8,0x0145F8,ext_flash,func,FUN_000145f8,0xC,ghidra passat_azx_ori.bin 2026-09-15 @0145F8,hypothesis,ghidra,
+0x014604,0x014604,ext_flash,func,cand_tpu_param_scan,0x4D4,ghidra passat_azx_ori.bin 2026-09-15 @014604,dynamic,ghidra,second boot stall; HYPOTHESIS that it is a TPU self-test
 0x014AD8,0x014AD8,ext_flash,func,FUN_00014ad8,0x240,ghidra passat_azx_ori.bin 2026-09-15 @014AD8,hypothesis,ghidra,
 0x014D18,0x014D18,ext_flash,func,FUN_00014d18,0x350,ghidra passat_azx_ori.bin 2026-09-15 @014D18,hypothesis,ghidra,
 0x015068,0x015068,ext_flash,func,FUN_00015068,0x170,ghidra passat_azx_ori.bin 2026-09-15 @015068,hypothesis,ghidra,
@@ -108,7 +113,8 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x017CF0,0x017CF0,ext_flash,func,FUN_00017cf0,0x124,ghidra passat_azx_ori.bin 2026-09-15 @017CF0,hypothesis,ghidra,
 0x017E14,0x017E14,ext_flash,func,FUN_00017e14,0x1CC,ghidra passat_azx_ori.bin 2026-09-15 @017E14,hypothesis,ghidra,
 0x017FE0,0x017FE0,ext_flash,func,FUN_00017fe0,0x48,ghidra passat_azx_ori.bin 2026-09-15 @017FE0,hypothesis,ghidra,
-0x018028,0x018028,ext_flash,func,FUN_00018028,0xE4,ghidra passat_azx_ori.bin 2026-09-15 @018028,hypothesis,ghidra,
+0x018028,0x018028,ext_flash,func,FUN_00018028,0x38,ghidra passat_azx_ori.bin 2026-09-15 @018028,hypothesis,ghidra,
+0x018060,0x018060,ext_flash,func,boot_tpu_code_load,0xAC,ghidra passat_azx_ori.bin 2026-09-15 @018060,static,ghidra,VERIFIED-STATIC -- evidence: sth 0xFFA0 to 0x700004 then copies 0x200 words from file 0x10624 to 0x702000 (source: dump)
 0x01814C,0x01814C,ext_flash,func,FUN_0001814c,0xC,ghidra passat_azx_ori.bin 2026-09-15 @01814C,hypothesis,ghidra,
 0x018158,0x018158,ext_flash,thunk,fatal_exception_handler,0x4,ghidra passat_azx_ori.bin 2026-09-15 @018158,hypothesis,ghidra,
 0x01815C,0x01815C,ext_flash,func,FUN_0001815c,0xCC,ghidra passat_azx_ori.bin 2026-09-15 @01815C,hypothesis,ghidra,
@@ -265,7 +271,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x01E370,0x01E370,ext_flash,func,FUN_0001e370,0x11C,ghidra passat_azx_ori.bin 2026-09-15 @01E370,hypothesis,ghidra,
 0x01E828,0x01E828,ext_flash,func,FUN_0001e828,0x20,ghidra passat_azx_ori.bin 2026-09-15 @01E828,hypothesis,ghidra,
 0x01E848,0x01E848,ext_flash,func,FUN_0001e848,0x24,ghidra passat_azx_ori.bin 2026-09-15 @01E848,hypothesis,ghidra,
-0x020004,0x020004,ext_flash,func,romcheck_result_set,0x1C,ghidra passat_azx_ori.bin 2026-09-15 @020004,static,ghidra,"VERIFIED-STATIC -- ghidra_scripts/med9_setup.py, from docs/02_memory_map.md"
+0x020004,0x020004,ext_flash,func,romcheck_result_set,0x1C,ghidra passat_azx_ori.bin 2026-09-15 @020004,static,ghidra,community crc_check patch site (constants 0x55/0xAA)
 0x020020,0x020020,ext_flash,func,FUN_00020020,0xC,ghidra passat_azx_ori.bin 2026-09-15 @020020,hypothesis,ghidra,
 0x02002C,0x02002C,ext_flash,func,FUN_0002002c,0x74,ghidra passat_azx_ori.bin 2026-09-15 @02002C,hypothesis,ghidra,
 0x0200A0,0x0200A0,ext_flash,func,FUN_000200a0,0x48,ghidra passat_azx_ori.bin 2026-09-15 @0200A0,hypothesis,ghidra,
@@ -425,10 +431,10 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x035414,0x035414,ext_flash,func,FUN_00035414,0x314,ghidra passat_azx_ori.bin 2026-09-15 @035414,hypothesis,ghidra,
 0x035728,0x035728,ext_flash,func,FUN_00035728,0x20,ghidra passat_azx_ori.bin 2026-09-15 @035728,hypothesis,ghidra,
 0x035748,0x035748,ext_flash,func,FUN_00035748,0x4,ghidra passat_azx_ori.bin 2026-09-15 @035748,hypothesis,ghidra,
-0x03574C,0x03574C,ext_flash,func,FUN_0003574c,0x70,ghidra passat_azx_ori.bin 2026-09-15 @03574C,hypothesis,ghidra,
+0x03574C,0x03574C,ext_flash,func,measuring_group_read4,0x70,ghidra passat_azx_ori.bin 2026-09-15 @03574C,static,ghidra,entry 0x035748 sets up r11; KWP SID 0x21 route
 0x0357BC,0x0357BC,ext_flash,func,FUN_000357bc,0x24,ghidra passat_azx_ori.bin 2026-09-15 @0357BC,hypothesis,ghidra,
-0x0357E0,0x0357E0,ext_flash,func,FUN_000357e0,0x5C,ghidra passat_azx_ori.bin 2026-09-15 @0357E0,hypothesis,ghidra,
-0x03583C,0x03583C,ext_flash,func,FUN_0003583c,0xA4,ghidra passat_azx_ori.bin 2026-09-15 @03583C,hypothesis,ghidra,
+0x0357E0,0x0357E0,ext_flash,func,measuring_field_read,0x5C,ghidra passat_azx_ori.bin 2026-09-15 @0357E0,static,ghidra,called 4x from 0x439F8C-0x439FE0 in on-chip flash
+0x03583C,0x03583C,ext_flash,func,kwp21_group_request,0xA4,ghidra passat_azx_ori.bin 2026-09-15 @03583C,static,ghidra,called from 0x0A2CC4
 0x0358E0,0x0358E0,ext_flash,func,FUN_000358e0,0xC,ghidra passat_azx_ori.bin 2026-09-15 @0358E0,hypothesis,ghidra,
 0x0358EC,0x0358EC,ext_flash,func,FUN_000358ec,0xF0,ghidra passat_azx_ori.bin 2026-09-15 @0358EC,hypothesis,ghidra,
 0x0359DC,0x0359DC,ext_flash,func,FUN_000359dc,0xF0,ghidra passat_azx_ori.bin 2026-09-15 @0359DC,hypothesis,ghidra,
@@ -436,7 +442,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x035B78,0x035B78,ext_flash,func,FUN_00035b78,0x60,ghidra passat_azx_ori.bin 2026-09-15 @035B78,hypothesis,ghidra,
 0x035BD8,0x035BD8,ext_flash,func,FUN_00035bd8,0x44,ghidra passat_azx_ori.bin 2026-09-15 @035BD8,hypothesis,ghidra,
 0x035C20,0x035C20,ext_flash,func,FUN_00035c20,0x34C,ghidra passat_azx_ori.bin 2026-09-15 @035C20,hypothesis,ghidra,
-0x035F6C,0x035F6C,ext_flash,func,kwp_sid_21_h1,0xB8,ghidra passat_azx_ori.bin 2026-09-15 @035F6C,static,ghidra,"KWP2000/OBD service 0x21 handler (h1), tbl_kwp_services[1]"
+0x035F6C,0x035F6C,ext_flash,func,kwp_sid_21_h1,0xB8,ghidra passat_azx_ori.bin 2026-09-15 @035F6C,static,ghidra,"KWP2000/OBD service 0x21 handler (h1), tbl_kwp_services[1]; local id ranges: 0x01-0x7F/0xA0-0xEF -> 0x0A2CC4, 0x80-0x9F -> 0x035728, 0xF0-0xF9 -> 0x034F48 (A3, re/findings/measuring_vars.md)"
 0x036024,0x036024,ext_flash,func,kwp_sid_17_h1,0x8C,ghidra passat_azx_ori.bin 2026-09-15 @036024,static,ghidra,"KWP2000/OBD service 0x17 handler (h1), tbl_kwp_services[5]"
 0x0360B0,0x0360B0,ext_flash,func,kwp_sid_37_h1,0x14,ghidra passat_azx_ori.bin 2026-09-15 @0360B0,static,ghidra,"KWP2000/OBD service 0x37 handler (h1), tbl_kwp_services[12]"
 0x0360C4,0x0360C4,ext_flash,func,kwp_sid_35_h1,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0360C4,static,ghidra,"KWP2000/OBD service 0x35 handler (h1), tbl_kwp_services[10]"
@@ -471,7 +477,8 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x038E38,0x038E38,ext_flash,func,FUN_00038e38,0x54,ghidra passat_azx_ori.bin 2026-09-15 @038E38,hypothesis,ghidra,
 0x038E8C,0x038E8C,ext_flash,func,FUN_00038e8c,0x10,ghidra passat_azx_ori.bin 2026-09-15 @038E8C,hypothesis,ghidra,
 0x038E9C,0x038E9C,ext_flash,func,FUN_00038e9c,0x18,ghidra passat_azx_ori.bin 2026-09-15 @038E9C,hypothesis,ghidra,
-0x038EB4,0x038EB4,ext_flash,func,FUN_00038eb4,0x10,ghidra passat_azx_ori.bin 2026-09-15 @038EB4,hypothesis,ghidra,
+0x038EB4,0x038EB4,ext_flash,func,measuring_result_emit,0x10,ghidra passat_azx_ori.bin 2026-09-15 @038EB4,static,ghidra,corrects the earlier cand_kwp_measblock_return at 0x038EA8 (12 bytes short); see re/findings/measuring_vars.md
+0x038EC4,0x038EC4,ext_flash,func,measuring_var_not_available,0x10,ghidra passat_azx_ori.bin 2026-09-15 @038EC4,static,ghidra,handler of 1535 of the 2200 ids
 0x038F18,0x038F18,ext_flash,func,FUN_00038f18,0x78,ghidra passat_azx_ori.bin 2026-09-15 @038F18,hypothesis,ghidra,
 0x038FDC,0x038FDC,ext_flash,func,FUN_00038fdc,0x90,ghidra passat_azx_ori.bin 2026-09-15 @038FDC,hypothesis,ghidra,
 0x03A0D8,0x03A0D8,ext_flash,func,FUN_0003a0d8,0x74,ghidra passat_azx_ori.bin 2026-09-15 @03A0D8,hypothesis,ghidra,
@@ -546,7 +553,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x0456BC,0x0456BC,ext_flash,func,FUN_000456bc,0x30,ghidra passat_azx_ori.bin 2026-09-15 @0456BC,hypothesis,ghidra,
 0x0456EC,0x0456EC,ext_flash,func,FUN_000456ec,0x30,ghidra passat_azx_ori.bin 2026-09-15 @0456EC,hypothesis,ghidra,
 0x04571C,0x04571C,ext_flash,func,FUN_0004571c,0x30,ghidra passat_azx_ori.bin 2026-09-15 @04571C,hypothesis,ghidra,
-0x045768,0x045768,ext_flash,func,FUN_00045768,0x64,ghidra passat_azx_ori.bin 2026-09-15 @045768,hypothesis,ghidra,
+0x045768,0x045768,ext_flash,func,measuring_var_dispatch,0x64,ghidra passat_azx_ori.bin 2026-09-15 @045768,static,ghidra,r3 = measuring-variable id 0..2199; result left in 0x7FD06F-0x7FD071
 0x0457CC,0x0457CC,ext_flash,func,FUN_000457cc,0x50,ghidra passat_azx_ori.bin 2026-09-15 @0457CC,hypothesis,ghidra,
 0x045838,0x045838,ext_flash,func,FUN_00045838,0x40,ghidra passat_azx_ori.bin 2026-09-15 @045838,hypothesis,ghidra,
 0x045878,0x045878,ext_flash,func,FUN_00045878,0x78,ghidra passat_azx_ori.bin 2026-09-15 @045878,hypothesis,ghidra,
@@ -1469,7 +1476,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x098608,0x098608,ext_flash,func,FUN_00098608,0x18,ghidra passat_azx_ori.bin 2026-09-15 @098608,hypothesis,ghidra,
 0x098620,0x098620,ext_flash,thunk,thunk_FUN_0009c420,0x4,ghidra passat_azx_ori.bin 2026-09-15 @098620,hypothesis,ghidra,
 0x098624,0x098624,ext_flash,func,FUN_00098624,0x88,ghidra passat_azx_ori.bin 2026-09-15 @098624,hypothesis,ghidra,
-0x0986AC,0x0986AC,ext_flash,func,app_sda_setup_a,0xD0,ghidra passat_azx_ori.bin 2026-09-15 @0986AC,static,ghidra,"VERIFIED-STATIC -- ghidra_scripts/med9_setup.py, from docs/02_memory_map.md"
+0x0986AC,0x0986AC,ext_flash,func,app_sda_setup_a,0xD0,ghidra passat_azx_ori.bin 2026-09-15 @0986AC,static,ghidra,VERIFIED-STATIC -- evidence: lis/addi r13=0x7FFFF0 r2=0x5C9FF0 (source: dump)
 0x099480,0x099480,ext_flash,func,FUN_00099480,0x60,ghidra passat_azx_ori.bin 2026-09-15 @099480,hypothesis,ghidra,
 0x0994E0,0x0994E0,ext_flash,func,FUN_000994e0,0xAC,ghidra passat_azx_ori.bin 2026-09-15 @0994E0,hypothesis,ghidra,
 0x09958C,0x09958C,ext_flash,func,FUN_0009958c,0x35C,ghidra passat_azx_ori.bin 2026-09-15 @09958C,hypothesis,ghidra,
@@ -1547,7 +1554,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x09E1F0,0x09E1F0,ext_flash,func,FUN_0009e1f0,0x184,ghidra passat_azx_ori.bin 2026-09-15 @09E1F0,hypothesis,ghidra,
 0x09E374,0x09E374,ext_flash,func,FUN_0009e374,0x40,ghidra passat_azx_ori.bin 2026-09-15 @09E374,hypothesis,ghidra,
 0x09E3B4,0x09E3B4,ext_flash,func,FUN_0009e3b4,0x2C,ghidra passat_azx_ori.bin 2026-09-15 @09E3B4,hypothesis,ghidra,
-0x09E3E0,0x09E3E0,ext_flash,func,app_sda_setup_b,0x11C,ghidra passat_azx_ori.bin 2026-09-15 @09E3E0,static,ghidra,"VERIFIED-STATIC -- ghidra_scripts/med9_setup.py, from docs/02_memory_map.md"
+0x09E3E0,0x09E3E0,ext_flash,func,app_sda_setup_b,0x11C,ghidra passat_azx_ori.bin 2026-09-15 @09E3E0,static,ghidra,VERIFIED-STATIC -- evidence: lis/addi r13=0x7FFFF0 r2=0x5C9FF0 (source: dump)
 0x0A0360,0x0A0360,ext_flash,func,FUN_000a0360,0x30,ghidra passat_azx_ori.bin 2026-09-15 @0A0360,hypothesis,ghidra,
 0x0A03F0,0x0A03F0,ext_flash,func,FUN_000a03f0,0xB4,ghidra passat_azx_ori.bin 2026-09-15 @0A03F0,hypothesis,ghidra,
 0x0A04A4,0x0A04A4,ext_flash,func,FUN_000a04a4,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0A04A4,hypothesis,ghidra,
@@ -1586,7 +1593,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x0A25A8,0x0A25A8,ext_flash,func,FUN_000a25a8,0x390,ghidra passat_azx_ori.bin 2026-09-15 @0A25A8,hypothesis,ghidra,
 0x0A2938,0x0A2938,ext_flash,func,FUN_000a2938,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0A2938,hypothesis,ghidra,
 0x0A293C,0x0A293C,ext_flash,func,FUN_000a293c,0x360,ghidra passat_azx_ori.bin 2026-09-15 @0A293C,hypothesis,ghidra,
-0x0A2CC4,0x0A2CC4,ext_flash,func,FUN_000a2cc4,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0A2CC4,hypothesis,ghidra,
+0x0A2CC4,0x0A2CC4,ext_flash,func,kwp21_measuring_block_route,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0A2CC4,static,ghidra,reached from kwp_sid21_handler for local ids 0x01-0x7F and 0xA0-0xEF
 0x0A2CC8,0x0A2CC8,ext_flash,func,FUN_000a2cc8,0x1C4,ghidra passat_azx_ori.bin 2026-09-15 @0A2CC8,hypothesis,ghidra,
 0x0A2E8C,0x0A2E8C,ext_flash,func,FUN_000a2e8c,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0A2E8C,hypothesis,ghidra,
 0x0A2E90,0x0A2E90,ext_flash,func,FUN_000a2e90,0x2D0,ghidra passat_azx_ori.bin 2026-09-15 @0A2E90,hypothesis,ghidra,
@@ -2551,7 +2558,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x12E1D8,0x12E1D8,ext_flash,func,FUN_0012e1d8,0x7C,ghidra passat_azx_ori.bin 2026-09-15 @12E1D8,hypothesis,ghidra,
 0x12E3F8,0x12E3F8,ext_flash,func,FUN_0012e3f8,0xC8,ghidra passat_azx_ori.bin 2026-09-15 @12E3F8,hypothesis,ghidra,
 0x12E4C0,0x12E4C0,ext_flash,func,FUN_0012e4c0,0xB0,ghidra passat_azx_ori.bin 2026-09-15 @12E4C0,hypothesis,ghidra,
-0x12E570,0x12E570,ext_flash,func,FUN_0012e570,0x60,ghidra passat_azx_ori.bin 2026-09-15 @12E570,hypothesis,ghidra,
+0x12E570,0x12E570,ext_flash,func,can_rx_arm_all,0x60,ghidra passat_azx_ori.bin 2026-09-15 @12E570,static,ghidra,"VERIFIED-STATIC: calls can_init_mb once for each of the 17 used RX table slots (0x12E708..0x12E8C8 thunks, each ""li r3,idx; b can_init_mb""). Reached through the init pointer table at 0x0B1B18. -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
 0x12E5D0,0x12E5D0,ext_flash,func,FUN_0012e5d0,0x4,ghidra passat_azx_ori.bin 2026-09-15 @12E5D0,hypothesis,ghidra,
 0x12E5D4,0x12E5D4,ext_flash,func,FUN_0012e5d4,0x134,ghidra passat_azx_ori.bin 2026-09-15 @12E5D4,hypothesis,ghidra,
 0x12E708,0x12E708,ext_flash,func,FUN_0012e708,0x8,ghidra passat_azx_ori.bin 2026-09-15 @12E708,hypothesis,ghidra,
@@ -2628,7 +2635,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x134348,0x134348,ext_flash,func,FUN_00134348,0x6C,ghidra passat_azx_ori.bin 2026-09-15 @134348,hypothesis,ghidra,
 0x1343B4,0x1343B4,ext_flash,func,FUN_001343b4,0xF0,ghidra passat_azx_ori.bin 2026-09-15 @1343B4,hypothesis,ghidra,
 0x1344C0,0x1344C0,ext_flash,func,FUN_001344c0,0xE8,ghidra passat_azx_ori.bin 2026-09-15 @1344C0,hypothesis,ghidra,
-0x1345A8,0x1345A8,ext_flash,func,FUN_001345a8,0x68,ghidra passat_azx_ori.bin 2026-09-15 @1345A8,hypothesis,ghidra,
+0x1345A8,0x1345A8,ext_flash,func,can_tx_register_all,0x68,ghidra passat_azx_ori.bin 2026-09-15 @1345A8,static,ghidra,"VERIFIED-STATIC: can_obj_register(&objs, 1, module 0, 1 buffer, first buffer 1, 0, tbl_can_tx) then (.., 20 objects, module 1, 3 buffers, first buffer 0x0B, 1, tbl_can_tx). So all application TX runs on TouCAN_B message buffers 0x0B-0x0D. -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
 0x134618,0x134618,ext_flash,func,FUN_00134618,0x1C,ghidra passat_azx_ori.bin 2026-09-15 @134618,hypothesis,ghidra,
 0x134634,0x134634,ext_flash,func,FUN_00134634,0x44,ghidra passat_azx_ori.bin 2026-09-15 @134634,hypothesis,ghidra,
 0x134678,0x134678,ext_flash,func,FUN_00134678,0x48,ghidra passat_azx_ori.bin 2026-09-15 @134678,hypothesis,ghidra,
@@ -2645,8 +2652,8 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x134E5C,0x134E5C,ext_flash,func,FUN_00134e5c,0x30,ghidra passat_azx_ori.bin 2026-09-15 @134E5C,hypothesis,ghidra,
 0x1350C0,0x1350C0,ext_flash,func,FUN_001350c0,0x28,ghidra passat_azx_ori.bin 2026-09-15 @1350C0,hypothesis,ghidra,
 0x1350EC,0x1350EC,ext_flash,func,FUN_001350ec,0x53C,ghidra passat_azx_ori.bin 2026-09-15 @1350EC,hypothesis,ghidra,
-0x135628,0x135628,ext_flash,func,FUN_00135628,0x128,ghidra passat_azx_ori.bin 2026-09-15 @135628,hypothesis,ghidra,
-0x135750,0x135750,ext_flash,func,FUN_00135750,0x78,ghidra passat_azx_ori.bin 2026-09-15 @135750,hypothesis,ghidra,
+0x135628,0x135628,ext_flash,func,can_obj_register,0x128,ghidra passat_azx_ori.bin 2026-09-15 @135628,static,ghidra,"VERIFIED-STATIC: (obj_array, count, module, n_buffers, first_buffer, flag, table). Tail loop at 0x1356E0 clears CODE (ctrl &= 0xFF0F) of n_buffers message buffers starting at first_buffer. -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
+0x135750,0x135750,ext_flash,func,can_init_mb,0x78,ghidra passat_azx_ori.bin 2026-09-15 @135750,static,ghidra,"VERIFIED-STATIC: can_init_mb(rx_idx). base = tbl_toucan_bases[rx[i].cfg>>16 & 0xFF]; mb = base + (cfg>>8 & 0xFF)*0x10; stores rx[i].can_id to can_rx_shadow[i]; ctrl(mb+0x80) &= 0xFF0F (CODE=NOT ACTIVE); id(mb+0x82) = can_id << 5; ctrl |= 0x40 (CODE=0100 EMPTY, buffer armed). -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
 0x1357C8,0x1357C8,ext_flash,func,FUN_001357c8,0x4C,ghidra passat_azx_ori.bin 2026-09-15 @1357C8,hypothesis,ghidra,
 0x135814,0x135814,ext_flash,func,FUN_00135814,0x28,ghidra passat_azx_ori.bin 2026-09-15 @135814,hypothesis,ghidra,
 0x13583C,0x13583C,ext_flash,func,FUN_0013583c,0x38,ghidra passat_azx_ori.bin 2026-09-15 @13583C,hypothesis,ghidra,
@@ -2662,14 +2669,15 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x136188,0x136188,ext_flash,func,FUN_00136188,0x180,ghidra passat_azx_ori.bin 2026-09-15 @136188,hypothesis,ghidra,
 0x13630C,0x13630C,ext_flash,func,FUN_0013630c,0x2D0,ghidra passat_azx_ori.bin 2026-09-15 @13630C,hypothesis,ghidra,
 0x1365DC,0x1365DC,ext_flash,func,FUN_001365dc,0x48,ghidra passat_azx_ori.bin 2026-09-15 @1365DC,hypothesis,ghidra,
-0x136624,0x136624,ext_flash,func,FUN_00136624,0x44,ghidra passat_azx_ori.bin 2026-09-15 @136624,hypothesis,ghidra,
+0x136624,0x136624,ext_flash,func,can_poll_iflag_a,0x44,ghidra passat_azx_ori.bin 2026-09-15 @136624,static,ghidra,"VERIFIED-STATIC: if IFLAG(0x7070A4) != 0 call can_rx_isr(0x707080, module 0). -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
 0x136668,0x136668,ext_flash,func,FUN_00136668,0x20,ghidra passat_azx_ori.bin 2026-09-15 @136668,hypothesis,ghidra,
-0x136688,0x136688,ext_flash,func,FUN_00136688,0x44,ghidra passat_azx_ori.bin 2026-09-15 @136688,hypothesis,ghidra,
+0x136688,0x136688,ext_flash,func,can_poll_iflag_b,0x44,ghidra passat_azx_ori.bin 2026-09-15 @136688,static,ghidra,"VERIFIED-STATIC: if IFLAG(0x7074A4) != 0 call can_rx_isr(0x707480, module 1). -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
 0x1366CC,0x1366CC,ext_flash,func,FUN_001366cc,0x20,ghidra passat_azx_ori.bin 2026-09-15 @1366CC,hypothesis,ghidra,
-0x1366EC,0x1366EC,ext_flash,func,FUN_001366ec,0x4C,ghidra passat_azx_ori.bin 2026-09-15 @1366EC,hypothesis,ghidra,
+0x1366EC,0x1366EC,ext_flash,func,can_poll_iflag_c,0x4C,ghidra passat_azx_ori.bin 2026-09-15 @1366EC,static,ghidra,"VERIFIED-STATIC: if IFLAG(0x7078A4) != 0 call can_rx_isr(0x707880, module 2). -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
 0x136738,0x136738,ext_flash,func,FUN_00136738,0x20,ghidra passat_azx_ori.bin 2026-09-15 @136738,hypothesis,ghidra,
-0x136758,0x136758,ext_flash,func,FUN_00136758,0x124,ghidra passat_azx_ori.bin 2026-09-15 @136758,hypothesis,ghidra,
-0x1368D0,0x1368D0,ext_flash,func,FUN_001368d0,0xD8,ghidra passat_azx_ori.bin 2026-09-15 @1368D0,hypothesis,ghidra,
+0x136758,0x136758,ext_flash,func,can_mb_abort,0x124,ghidra passat_azx_ori.bin 2026-09-15 @136758,static,ghidra,"VERIFIED-STATIC: deactivates one message buffer (CODE=0, or CODE=1000 when descriptor byte+7 bit0 set) and clears its IFLAG bit. vtable[4]. -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
+0x1368D0,0x1368D0,ext_flash,func,can_enter_freeze,0xD8,ghidra passat_azx_ori.bin 2026-09-15 @1368D0,static,ghidra,"VERIFIED-STATIC: CANMCR |= 0x4000 (FRZ), |= 0x1000 (HALT), IMASK(+0x22)=0, then polls CANMCR & 0x100 (NOTRDY) up to 250 times. vtable[8]. -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
+0x1369A8,0x1369A8,ext_flash,func,can_mb_status,0x64,ghidra passat_azx_ori.bin 2026-09-15 @1369A8,static,ghidra,"VERIFIED-STATIC: reads the control word of message buffer *(tbl+idx*4) and maps CODE to 0x40/0x20/0. vtable[6]. -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
 0x136AF4,0x136AF4,ext_flash,func,FUN_00136af4,0x150,ghidra passat_azx_ori.bin 2026-09-15 @136AF4,hypothesis,ghidra,
 0x136C44,0x136C44,ext_flash,func,FUN_00136c44,0xC8,ghidra passat_azx_ori.bin 2026-09-15 @136C44,hypothesis,ghidra,
 0x136D0C,0x136D0C,ext_flash,func,FUN_00136d0c,0x100,ghidra passat_azx_ori.bin 2026-09-15 @136D0C,hypothesis,ghidra,
@@ -2683,7 +2691,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x13765C,0x13765C,ext_flash,func,FUN_0013765c,0xB8,ghidra passat_azx_ori.bin 2026-09-15 @13765C,hypothesis,ghidra,
 0x137714,0x137714,ext_flash,func,FUN_00137714,0xC0,ghidra passat_azx_ori.bin 2026-09-15 @137714,hypothesis,ghidra,
 0x1377D4,0x1377D4,ext_flash,func,FUN_001377d4,0x4,ghidra passat_azx_ori.bin 2026-09-15 @1377D4,hypothesis,ghidra,
-0x1377D8,0x1377D8,ext_flash,func,FUN_001377d8,0x454,ghidra passat_azx_ori.bin 2026-09-15 @1377D8,hypothesis,ghidra,
+0x1377D8,0x1377D8,ext_flash,func,can_tx_config_apply,0x454,ghidra passat_azx_ori.bin 2026-09-15 @1377D8,static,ghidra,"VERIFIED-STATIC: swaps the active TX object set - clears the old objects from can_mb_owner_map and from can_imask_rx/can_imask_tx, then takes the new object array from ptr_can_config[1] and re-registers each object. -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
 0x137C2C,0x137C2C,ext_flash,func,FUN_00137c2c,0x14,ghidra passat_azx_ori.bin 2026-09-15 @137C2C,hypothesis,ghidra,
 0x137C54,0x137C54,ext_flash,func,FUN_00137c54,0x6C,ghidra passat_azx_ori.bin 2026-09-15 @137C54,hypothesis,ghidra,
 0x137CC0,0x137CC0,ext_flash,func,FUN_00137cc0,0x4,ghidra passat_azx_ori.bin 2026-09-15 @137CC0,hypothesis,ghidra,
@@ -2744,12 +2752,12 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x13B2D8,0x13B2D8,ext_flash,func,FUN_0013b2d8,0x108,ghidra passat_azx_ori.bin 2026-09-15 @13B2D8,hypothesis,ghidra,
 0x13B3E0,0x13B3E0,ext_flash,func,FUN_0013b3e0,0xC,ghidra passat_azx_ori.bin 2026-09-15 @13B3E0,hypothesis,ghidra,
 0x13B3EC,0x13B3EC,ext_flash,func,FUN_0013b3ec,0xE4,ghidra passat_azx_ori.bin 2026-09-15 @13B3EC,hypothesis,ghidra,
-0x13B4D0,0x13B4D0,ext_flash,func,FUN_0013b4d0,0x178,ghidra passat_azx_ori.bin 2026-09-15 @13B4D0,hypothesis,ghidra,
-0x13B648,0x13B648,ext_flash,func,FUN_0013b648,0x48,ghidra passat_azx_ori.bin 2026-09-15 @13B648,hypothesis,ghidra,
-0x13B690,0x13B690,ext_flash,func,FUN_0013b690,0x18,ghidra passat_azx_ori.bin 2026-09-15 @13B690,hypothesis,ghidra,
+0x13B4D0,0x13B4D0,ext_flash,func,can_module_configure,0x178,ghidra passat_azx_ori.bin 2026-09-15 @13B4D0,static,ghidra,"VERIFIED-STATIC: (module, cfg_block). Fills the register shadows from the 32-byte block: 3 x can_id_to_mask -> RXGMSK/RX14MSK/RX15MSK shadows, CANICR, CANCTRL0/1 (PROPSEG = byte+0x19 - 1) and PRESDIV/CANCTRL2 (PRESDIV = byte+0x18 - 1, RJW, PSEG1, PSEG2). vtable[1]. -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
+0x13B648,0x13B648,ext_flash,func,can_id_to_mask,0x48,ghidra passat_azx_ori.bin 2026-09-15 @13B648,static,ghidra,"VERIFIED-STATIC: (id, ide). For a standard id (ide bit0 set) returns id << 21, i.e. the 11 mask bits in RXGMSKHI bits 15..5, same alignment as the buffer id field. -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
+0x13B690,0x13B690,ext_flash,func,can_icr_encode,0x18,ghidra passat_azx_ori.bin 2026-09-15 @13B690,static,ghidra,"VERIFIED-STATIC: (v) -> (v & 7) << 8 | (v & 0x18) << 3, the CANICR interrupt-level encoding. -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
 0x13B6A8,0x13B6A8,ext_flash,func,FUN_0013b6a8,0x4,ghidra passat_azx_ori.bin 2026-09-15 @13B6A8,hypothesis,ghidra,
 0x13B6AC,0x13B6AC,ext_flash,func,FUN_0013b6ac,0x134,ghidra passat_azx_ori.bin 2026-09-15 @13B6AC,hypothesis,ghidra,
-0x13B7E0,0x13B7E0,ext_flash,func,FUN_0013b7e0,0x4,ghidra passat_azx_ori.bin 2026-09-15 @13B7E0,hypothesis,ghidra,
+0x13B7E0,0x13B7E0,ext_flash,func,can_module_start,0x4,ghidra passat_azx_ori.bin 2026-09-15 @13B7E0,static,ghidra,"VERIFIED-STATIC: (module). CANMCR = 0, FRZ, HALT, wait NOTRDY (timeout from 0x2BC44 + module*2), set CANMCR bit 0x80, CANCTRL0/1(+0x06), PRESDIV/CANCTRL2(+0x08), clear all 16 buffer control words, write RXGMSK(+0x10), RX14MSK(+0x14), RX15MSK(+0x18), CANICR(+0x04), IMASK(+0x22) = can_imask_rx|can_imask_tx, clear ESTAT/IFLAG/err ctrs, then leave HALT and FRZ. vtable[2]. -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
 0x13B7E4,0x13B7E4,ext_flash,func,FUN_0013b7e4,0x22C,ghidra passat_azx_ori.bin 2026-09-15 @13B7E4,hypothesis,ghidra,
 0x13BA10,0x13BA10,ext_flash,func,FUN_0013ba10,0xFC,ghidra passat_azx_ori.bin 2026-09-15 @13BA10,hypothesis,ghidra,
 0x13BB0C,0x13BB0C,ext_flash,func,FUN_0013bb0c,0xE8,ghidra passat_azx_ori.bin 2026-09-15 @13BB0C,hypothesis,ghidra,
@@ -2930,7 +2938,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x404000,0x200000,int_flash,func,int_flash_entry,0x4,ghidra passat_azx_ori.bin 2026-09-15 @404000,static,ghidra,"VERIFIED-STATIC -- ghidra_scripts/med9_setup.py, from docs/02_memory_map.md"
 0x404004,0x200004,int_flash,func,FUN_00404004,0x318,ghidra passat_azx_ori.bin 2026-09-15 @404004,hypothesis,ghidra,
 0x405500,0x201500,int_flash,func,FUN_00405500,0x88,ghidra passat_azx_ori.bin 2026-09-15 @405500,hypothesis,ghidra,
-0x405588,0x201588,int_flash,func,app_sda_setup_int,0xD0,ghidra passat_azx_ori.bin 2026-09-15 @405588,static,ghidra,"VERIFIED-STATIC -- ghidra_scripts/med9_setup.py, from docs/02_memory_map.md"
+0x405588,0x201588,int_flash,func,app_sda_setup_int,0xD0,ghidra passat_azx_ori.bin 2026-09-15 @405588,static,ghidra,VERIFIED-STATIC -- evidence: lis/addi r13=0x7FFFF0 r2=0x5C9FF0 (source: dump)
 0x40635C,0x20235C,int_flash,func,FUN_0040635c,0x1C,ghidra passat_azx_ori.bin 2026-09-15 @40635C,hypothesis,ghidra,
 0x406378,0x202378,int_flash,func,FUN_00406378,0x38,ghidra passat_azx_ori.bin 2026-09-15 @406378,hypothesis,ghidra,
 0x4063B0,0x2023B0,int_flash,func,FUN_004063b0,0x4,ghidra passat_azx_ori.bin 2026-09-15 @4063B0,hypothesis,ghidra,
@@ -3357,7 +3365,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x427F0C,0x223F0C,int_flash,func,FUN_00427f0c,0xE4,ghidra passat_azx_ori.bin 2026-09-15 @427F0C,hypothesis,ghidra,
 0x427FF0,0x223FF0,int_flash,func,FUN_00427ff0,0x68,ghidra passat_azx_ori.bin 2026-09-15 @427FF0,hypothesis,ghidra,
 0x428058,0x224058,int_flash,func,FUN_00428058,0x7C,ghidra passat_azx_ori.bin 2026-09-15 @428058,hypothesis,ghidra,
-0x4280D4,0x2240D4,int_flash,func,FUN_004280d4,0x758,ghidra passat_azx_ori.bin 2026-09-15 @4280D4,hypothesis,ghidra,
+0x4280D4,0x2240D4,int_flash,func,can_rx_eval_bremse,0x758,ghidra passat_azx_ori.bin 2026-09-15 @4280D4,static,ghidra,"HYPOTHESIS: receive supervision + signal extraction for RX slots 1 (0x1A0), 2 (0x5A0), 3 (0x4A0) and 17 (0x2A0). Per slot: enable bit from calibration -> state bit0; can_rx_poll(idx); DLC == 8 and !(byte 0x7FD0CC & 0x10) -> state bit1 ""new data""; then timeout/counter supervision (0x429D44) and status derivation (0x42A0A0); status bit2 = timeout -> substitute values. The slot->function mapping is VERIFIED-STATIC, the Bremse_1/2/3 naming is from the community id list. -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
 0x42882C,0x22482C,int_flash,func,FUN_0042882c,0x7C,ghidra passat_azx_ori.bin 2026-09-15 @42882C,hypothesis,ghidra,
 0x4288A8,0x2248A8,int_flash,func,FUN_004288a8,0xC8,ghidra passat_azx_ori.bin 2026-09-15 @4288A8,hypothesis,ghidra,
 0x428970,0x224970,int_flash,func,FUN_00428970,0x65C,ghidra passat_azx_ori.bin 2026-09-15 @428970,hypothesis,ghidra,
@@ -3370,9 +3378,9 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x429AE0,0x225AE0,int_flash,func,FUN_00429ae0,0x118,ghidra passat_azx_ori.bin 2026-09-15 @429AE0,hypothesis,ghidra,
 0x429BF8,0x225BF8,int_flash,func,FUN_00429bf8,0x4,ghidra passat_azx_ori.bin 2026-09-15 @429BF8,hypothesis,ghidra,
 0x429BFC,0x225BFC,int_flash,func,FUN_00429bfc,0x114,ghidra passat_azx_ori.bin 2026-09-15 @429BFC,hypothesis,ghidra,
-0x429D44,0x225D44,int_flash,func,FUN_00429d44,0x4,ghidra passat_azx_ori.bin 2026-09-15 @429D44,hypothesis,ghidra,
+0x429D44,0x225D44,int_flash,func,can_rx_supervise,0x4,ghidra passat_azx_ori.bin 2026-09-15 @429D44,static,ghidra,"VERIFIED-STATIC: common receive supervision called once per RX slot with (&state, period_cal, &counter, timeout_cal, &timer, 0,0,0,0, &msgcnt, &msgcnt_prev, ...). Sets the timeout/alive-counter bits of the state word. -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
 0x429D48,0x225D48,int_flash,func,FUN_00429d48,0x358,ghidra passat_azx_ori.bin 2026-09-15 @429D48,hypothesis,ghidra,
-0x42A0A0,0x2260A0,int_flash,func,FUN_0042a0a0,0x1B8,ghidra passat_azx_ori.bin 2026-09-15 @42A0A0,hypothesis,ghidra,
+0x42A0A0,0x2260A0,int_flash,func,can_rx_status,0x1B8,ghidra passat_azx_ori.bin 2026-09-15 @42A0A0,static,ghidra,"VERIFIED-STATIC: (&state, &status) -> derives the u16 status word from the supervision state. bit0 = fresh data, bit2 = timeout/fault, bits 5 and 6 also gate the consumers. -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
 0x42A258,0x226258,int_flash,func,FUN_0042a258,0x1FC,ghidra passat_azx_ori.bin 2026-09-15 @42A258,hypothesis,ghidra,
 0x42A454,0x226454,int_flash,func,FUN_0042a454,0x7C,ghidra passat_azx_ori.bin 2026-09-15 @42A454,hypothesis,ghidra,
 0x42A4D0,0x2264D0,int_flash,func,FUN_0042a4d0,0x198,ghidra passat_azx_ori.bin 2026-09-15 @42A4D0,hypothesis,ghidra,
@@ -3479,9 +3487,9 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x436BD0,0x232BD0,int_flash,func,FUN_00436bd0,0xCA0,ghidra passat_azx_ori.bin 2026-09-15 @436BD0,hypothesis,ghidra,
 0x4378D8,0x2338D8,int_flash,func,FUN_004378d8,0x28,ghidra passat_azx_ori.bin 2026-09-15 @4378D8,hypothesis,ghidra,
 0x437964,0x233964,int_flash,func,FUN_00437964,0x2C,ghidra passat_azx_ori.bin 2026-09-15 @437964,hypothesis,ghidra,
-0x4379C8,0x2339C8,int_flash,func,FUN_004379c8,0x4,ghidra passat_azx_ori.bin 2026-09-15 @4379C8,hypothesis,ghidra,
+0x4379C8,0x2339C8,int_flash,func,can_rx_poll,0x4,ghidra passat_azx_ori.bin 2026-09-15 @4379C8,static,ghidra,"VERIFIED-STATIC: can_rx_poll(rx_idx) -> DLC of a newly received frame, or 0x40 if the IFLAG bit for that buffer is clear. base = tbl_toucan_bases[module]; mb = base + buffer*0x10; waits out BUSY (ctrl & 0x10), copies mb+0x86 and mb+0x8A (the 8 data bytes) to can_rx_shadow[i].data, clears the IFLAG bit, returns ctrl & 0x0F. Byte-swaps both words when tbl_can_rx[i] word2 == 2. Called once per used slot from the receive supervision tasks. -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
 0x4379CC,0x2339CC,int_flash,func,FUN_004379cc,0x1A0,ghidra passat_azx_ori.bin 2026-09-15 @4379CC,hypothesis,ghidra,
-0x437B6C,0x233B6C,int_flash,func,FUN_00437b6c,0xE0,ghidra passat_azx_ori.bin 2026-09-15 @437B6C,hypothesis,ghidra,
+0x437B6C,0x233B6C,int_flash,func,can_rx_ack,0xE0,ghidra passat_azx_ori.bin 2026-09-15 @437B6C,static,ghidra,"VERIFIED-STATIC: clears the IFLAG bit of tbl_can_rx[i] without copying data. No caller in this image (unused driver API). -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
 0x437C4C,0x233C4C,int_flash,func,FUN_00437c4c,0x724,ghidra passat_azx_ori.bin 2026-09-15 @437C4C,hypothesis,ghidra,
 0x438370,0x234370,int_flash,func,FUN_00438370,0xD8,ghidra passat_azx_ori.bin 2026-09-15 @438370,hypothesis,ghidra,
 0x43844C,0x23444C,int_flash,func,FUN_0043844c,0x28C,ghidra passat_azx_ori.bin 2026-09-15 @43844C,hypothesis,ghidra,
@@ -4050,7 +4058,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x4784B0,0x2744B0,int_flash,func,FUN_004784b0,0x20,ghidra passat_azx_ori.bin 2026-09-15 @4784B0,hypothesis,ghidra,
 0x4784D0,0x2744D0,int_flash,func,FUN_004784d0,0x4,ghidra passat_azx_ori.bin 2026-09-15 @4784D0,hypothesis,ghidra,
 0x4784D4,0x2744D4,int_flash,func,FUN_004784d4,0x114,ghidra passat_azx_ori.bin 2026-09-15 @4784D4,hypothesis,ghidra,
-0x6F8000,,periph,func,decram_code_copy,0x1,ghidra passat_azx_ori.bin 2026-09-15 @6F8000,static,ghidra,"VERIFIED-STATIC -- ghidra_scripts/med9_setup.py, from docs/02_memory_map.md"
+0x6F8000,,periph,func,decram_code_copy,0x1,ghidra passat_azx_ori.bin 2026-09-15 @6F8000,static,ghidra,VERIFIED-STATIC -- evidence: boot copies 0x11118.. here and calls it (source: dump)
 0x7F8728,,sram_int,func,FUN_007f8728,0x1,ghidra passat_azx_ori.bin 2026-09-15 @7F8728,hypothesis,ghidra,
 0x7F89C0,,sram_int,func,FUN_007f89c0,0x1,ghidra passat_azx_ori.bin 2026-09-15 @7F89C0,hypothesis,ghidra,
 0x804A18,,sram_ext,func,FUN_00804a18,0x1,ghidra passat_azx_ori.bin 2026-09-15 @804A18,hypothesis,ghidra,
