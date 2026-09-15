@@ -16,6 +16,7 @@ document and `med9lib.py` together.
 | `bindiff.py` | Diff two dumps and classify every changed byte as *patch* (listed in a `patch.json`), *descriptor* (a checksum sum/~sum word) or **unexpected**. Exit 1 on anything unexpected. |
 | `logcmp.py` | Compare a baseline and a candidate log over their common variables with per-variable tolerances. Format and tolerance file: `logging/README.md`. |
 | `blobdis.py` | Disassemble a raw big-endian PowerPC blob at a chosen CPU address; `--check-sda` fails if patch code touches r2/r13. |
+| `eeprom_map.py` | Decode the SPI EEPROM block layout (EEP_CONF, file 0xB2FF0): block table, copies, RAM mirror, free space; `--clients` maps which block bytes the firmware actually uses; `--check` verifies the block checksums of a real 2 KB EEPROM read. `re/findings/eeprom.md`. |
 
 Quick checks:
 

@@ -11,6 +11,7 @@ what reproduce it.
 | `export_symbols.py` | Ghidra → `re/ghidra_export/functions.csv` (all functions) and merge of the named symbols into `re/symbols.csv`. |
 | `import_symbols.py` | `re/symbols.csv` → names, functions and plate comments in a fresh project. |
 | `med9_symbols.py` | Shared CSV/address helpers. Not a Ghidra script; imported by the two above. |
+| `b4_eeprom_symbols.py` | Applies agent B4's names and plate comments for the QSPI driver, the M95160 EEPROM primitives, the EEP_CONF block manager and the KWP variant-coding path (issue #18). Run it before `export_symbols.py`. |
 
 ## Prerequisites
 
