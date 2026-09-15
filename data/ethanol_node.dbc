@@ -1,0 +1,69 @@
+VERSION "ecu_azx flex-fuel node, frame fragment, see docs/05_flexfuel_design.md section 2"
+
+
+NS_ :
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	CAT_DEF_
+	CAT_
+	FILTER
+	BA_DEF_DEF_
+	EV_DATA_
+	ENVVAR_DATA_
+	SGTYPE_
+	SGTYPE_VAL_
+	BA_DEF_SGTYPE_
+	BA_SGTYPE_
+	SIG_TYPE_REF_
+	VAL_TABLE_
+	SIG_GROUP_
+	SIG_VALTYPE_
+	SIGTYPE_VALTYPE_
+	BO_TX_BU_
+	BA_DEF_REL_
+	BA_REL_
+	BA_DEF_DEF_REL_
+	BU_SG_REL_
+	BU_EV_REL_
+	BU_BO_REL_
+	SG_MUL_VAL_
+
+BS_:
+
+BU_: FlexFuelNode MED9
+
+
+BO_ 236 FF_Ethanol: 8 FlexFuelNode
+ SG_ FF_EthanolPct : 0|8@1+ (1,0) [0|100] "%" MED9
+ SG_ FF_FuelTemp : 8|8@1+ (1,-40) [-40|215] "degC" MED9
+ SG_ FF_FreqRaw : 16|8@1+ (2,0) [0|510] "Hz" MED9
+ SG_ FF_Counter : 24|8@1+ (1,0) [0|255] "" MED9
+ SG_ FF_Reserved1 : 32|8@1+ (1,0) [0|255] "" MED9
+ SG_ FF_Reserved2 : 40|8@1+ (1,0) [0|255] "" MED9
+ SG_ FF_FwVersion : 48|8@1+ (1,0) [0|255] "" MED9
+ SG_ FF_Status : 56|8@1+ (1,0) [0|3] "" MED9
+
+
+
+CM_ BU_ FlexFuelNode "Raspberry Pi Pico 2 node in pico_can_sender/, reads a GM/Continental 13577379 flex-fuel sensor and transmits on the powertrain CAN at 500 kbit/s, 10 Hz.";
+CM_ BU_ MED9 "Bosch MED9.1.1 engine control unit 03H906032 (0261S02226), receives the frame in a spare RX slot.";
+CM_ BO_ 236 "Flex-fuel status, id 0x0EC. Bytes 0, 1 and 7 match the Zeitronix ECA-2 CAN layout so an ECA-2 can be substituted; bytes 2 to 6 are specific to this node. The identifier must be confirmed free on the powertrain CAN with pi_can_setup/find_active_ids.py before use.";
+CM_ SG_ 236 FF_EthanolPct "Ethanol content by volume, averaged over 4 sensor periods. E = sensor frequency in Hz - 50, clamped to 0..100. Held at the last plausible value while FF_Status is SensorFault.";
+CM_ SG_ 236 FF_FuelTemp "Fuel temperature from the sensor low pulse width: T = 41.5 * low_ms - 81.25, clamped to the sensor range -40..125 C. Encoded as T + 40.";
+CM_ SG_ 236 FF_FreqRaw "Raw (un-averaged) sensor frequency of the last measured period, 2 Hz resolution. 0 while FF_Status is SensorFault or NotReady.";
+CM_ SG_ 236 FF_Counter "Rolling counter, incremented once per transmitted frame. The ECU treats three identical values in a row as a fault (docs/05_flexfuel_design.md section 3.2).";
+CM_ SG_ 236 FF_Reserved1 "Reserved, transmitted as 0.";
+CM_ SG_ 236 FF_Reserved2 "Reserved, transmitted as 0.";
+CM_ SG_ 236 FF_FwVersion "Firmware version of the node (FF_FW_VERSION in pico_can_sender/src/ff_sensor.h).";
+CM_ SG_ 236 FF_Status "Node status. Plausibility window: 45..155 Hz valid, 155..200 Hz contaminated, anything else or no edges for 500 ms is a fault.";
+
+BA_DEF_ BO_  "GenMsgCycleTime" INT 0 65535;
+BA_DEF_ BU_  "NodeLayerModules" STRING ;
+BA_DEF_DEF_  "GenMsgCycleTime" 0;
+BA_DEF_DEF_  "NodeLayerModules" "";
+BA_ "GenMsgCycleTime" BO_ 236 100;
+
+VAL_ 236 FF_Status 0 "OK" 1 "SensorFault" 2 "ContaminatedFuel" 3 "NotReady" ;
