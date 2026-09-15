@@ -186,8 +186,48 @@ other used vectors -> 0x110F0, a fatal-error handler that spins).
 Which functions run under which r2 must be established from the call graph in
 Ghidra (both bases land on dense data, so no static shortcut). Default to
 0x5C9FF0 and override for the boot module reachable from 0x1004.
-One outlier `lis r2,0xD5; addi r2,r2,-0x3210` at 0x86330 (r2 = 0xD4CDF0) is
-unexplained.
+
+> **2026-09-15 (B1, issue #8) — the boot module is delimited, and the 0x86330
+> outlier is explained. VERIFIED-STATIC.** Full derivation and the commands:
+> `re/findings/boot.md` §1 and §3.
+>
+> **The boot module is exactly 119 functions in 0x001004-0x01978F.** Seeding a
+> static call-graph walk (`tools/callgraph.py`) at `boot_start` (0x1004) and
+> `boot_main_init` (0x12328) and stopping at `app_sda_setup_a/b/int` (0x986AC,
+> 0x9E3E0, 0x405588) reaches 119 functions; **all 118** `bl` targets that lie
+> in 0x001000-0x019800 are among them, and **no** boot function calls or
+> tail-branches outside that window, so the subgraph is closed. Its
+> instructions occupy twelve ranges (0x001004-0x001287, 0x0110F0-0x011117,
+> 0x011524-0x011CB3, 0x011CE0-0x01382B, 0x01383C-0x0138D3, 0x013D64-0x0155FF,
+> 0x015620-0x016843, 0x016860-0x0179EB, 0x017A10-0x017B33, 0x017CF0-0x01810B,
+> 0x01814C-0x018227, 0x01831C-0x01978F). These are what
+> `ghidra_scripts/b1_context_and_symbols.py` gives r2 = 0x017FF0; everything
+> else in 0x000000-0x1FFFFF and 0x404000-0x47FFFF keeps 0x5C9FF0.
+>
+> **`med9_setup.py --boot-r2` is too generous** and should not be used on its
+> own: its blanket `BOOT_R2_RANGE = (0x001000, 0x01FFFF)` also covers **100
+> application functions between 0x019948 and 0x01E848**, none of them reachable
+> from the boot seeds. Code *does* live in the block documented as "constant
+> data 0x10000-0x1FFFF": the boot module's own body plus those 100 functions.
+>
+> **Check.** `tools/r2_context.py` resolves every r2-relative D-form access in
+> the image under its assigned base: `unmapped = 0` and `outside_window = 0` on
+> both sides (177 boot references, 3,338 application references). The 120 that
+> land on an 0xFF byte are all accounted for: the 10 boot ones are `addi`
+> instructions computing the *base pointer* of `tbl_or_values_by_clockmode`
+> (0x010020), whose OR entries start with 0xFF by construction; the 110
+> application ones are calibration cells that hold 0xFF.
+>
+> **The outlier `lis r2,0xD5; addi r2,r2,-0x3210` at 0x86330 (r2 = 0xD4CDF0).**
+> Six instructions earlier the same function computes `0x804800 - 0x081A00 =
+> 0x782E00`, and **0x5C9FF0 + 0x782E00 = 0xD4CDF0 exactly**. It is the
+> application SDA2 base with a flash-to-RAM relocation delta folded in, emitted
+> by the linker for the routine that is copied from flash 0x081A00 to external
+> SRAM 0x804800 and run there (`bl 0x806EA0` at 0x861B0, flash original
+> 0x840A0 — almost certainly the external-flash programming driver). It is
+> **inert**: the relocated block 0x081A00-0x085400 contains zero r2-relative
+> references, and 0x862DC restores r2 = 0x5C9FF0 on the way out. Leaving
+> r2 = 0x5C9FF0 over 0x86284-0x86350 is therefore correct.
 
 ## 5. Structure markers and directories
 
@@ -362,3 +402,33 @@ Evidence and full derivations: `re/findings/mpc5xx_registers.md`.
 
 - Section 7 said the KWP dispatch table is *"0x2B870, 24 entries"*. The dispatcher reads its configuration from a structure whose first word is **0x2B820** and whose count is **28**; the four entries before 0x2B870 (SIDs 0x12, 0x3E, 0x1A, 0x83) were missed by the byte-pattern walk that produced the original row. Confirmed by dumping file 0x2B820-0x2B86F.
 - The `flags` word is a diagnostic-session bit mask, not a security requirement; SecurityAccess is only needed for the upload services. The community `seed + 0x11170` key is level 2 and is now VERIFIED-DYNAMIC.
+### 2026-09-15 — agent B1, issues #8 and #11 (evidence: `re/findings/boot.md`, `re/findings/scheduler.md`)
+
+- Section 3 called 0x010000-0x01FFFF "constant data". It is **constant data
+  *and* code**: the boot module's body (0x0110F0-0x01978F) plus 100
+  application functions at 0x019948-0x01E848. Section 4 now carries the exact
+  boot ranges.
+- Section 4's "one outlier … is unexplained" is **resolved** (see the note in
+  that section): 0xD4CDF0 = 0x5C9FF0 + (0x804800 - 0x081A00).
+- Section 3 listed two routines copied to DECRAM. There are **three**: file
+  0x10FEC (0xE4 B), file 0x11118 (0x238 B) and **file 0x11350 (0x1D4 B**, copy
+  loop 0x12F78-0x12F80, called at 0x12F84). The three sources tile
+  0x10FEC-0x11523 exactly.
+- Section 3's list of blocks starting with `5A5A5A5A` and the 0x80100
+  directory: slot **+0x20 of the directory (0x080120) is 0x0009E3B4, the
+  application entry**. `boot_main_init` reaches it with
+  `lwz r9,-0x1600(r13); lwz r9,0x20(r9); mtlr r9; blrl` at 0x13070-0x1307C —
+  the single handover point from boot to application. If it ever returns,
+  `boot_start` falls into `ba 0x110F0` (fatal spin).
+- **File 0x080000-0x0800FF is a second BBC ETR branch table** (same layout as
+  the one at file 0x0), pointing at the application exception handlers at
+  0x4055A0-0x4062A4 in on-chip flash. Both tables send the external interrupt
+  to a fatal spin, while the application demonstrably runs with MSR[EE] = 1
+  (it uses the RCPU `EIE`/`EID` SPRs 80/81) — so the live table really is the
+  one at 0x400000, in the missing 16 KB. Another argument for the BDM read.
+- New for section 3's peripheral list, from issue #11: the scheduler's clock
+  is the USIU **Time Base with reference B** — `TBSCR` 0x6FC200, `TBREF1`
+  0x6FC208 — and the **PIT** (`PISCR` 0x6FC240) is used only as a
+  software-triggerable interrupt at a selectable level. `PITC` (0x6FC244) is
+  never written. The OS is **ETAS ERCOSEK V4.1.16** (string at file 0x345D0
+  and 0x9C3F0).

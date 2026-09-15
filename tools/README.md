@@ -19,6 +19,8 @@ document and `med9lib.py` together.
 | `draft_to_xdf.py` | `re/calibration_draft.csv` -> a TunerPro `.xdf`. Maps CPU addresses to **file offsets** through `med9lib`, emits big-endian row-major tables, and validates the result structurally (`--validate`, `--self-test`). No scaling is applied: every value is raw counts. |
 | `blobdis.py` | Disassemble a raw big-endian PowerPC blob at a chosen CPU address; `--check-sda` fails if patch code touches r2/r13. |
 | `eeprom_map.py` | Decode the SPI EEPROM block layout (EEP_CONF, file 0xB2FF0): block table, copies, RAM mirror, free space; `--clients` maps which block bytes the firmware actually uses; `--check` verifies the block checksums of a real 2 KB EEPROM read. `re/findings/eeprom.md`. |
+| `callgraph.py` | Static PowerPC call graph: every `bl` target is a function entry, each function is walked as a CFG (`--reach`, `--func`, `--callers`, `--entries`). Also extracts r2/r13-relative accesses and finds `lis`+D-form pairs that address a register range (`--xref-store`). |
+| `r2_context.py` | Decides the SDA2 base (r2) of every function from the call graph and checks every r2-relative access against it: reports references that leave the SDA2 window, land outside a mapped region, or hit 0xFF filler. Evidence for issue #8. |
 
 Quick checks:
 
@@ -32,6 +34,9 @@ python3 tools/measuring_vars.py data/passat_azx_ori.bin --groups
 python3 tools/draft_to_xdf.py re/calibration_draft.csv -o re/med9_draft.xdf \
         --min-confidence hypothesis            # 1,066 tables
 python3 tools/draft_to_xdf.py --validate re/med9_draft.xdf
+python3 tools/callgraph.py data/passat_azx_ori.bin \
+        --reach 0x1004 0x12328 --stop 0x986AC 0x9E3E0 0x405588   # the boot module
+python3 tools/r2_context.py data/passat_azx_ori.bin --compare --violations
 ```
 
 Regression checks before a file goes anywhere near the car

@@ -15,6 +15,7 @@ what reproduce it.
 | `med9_symbols.py` | Shared CSV/address helpers. Not a Ghidra script; imported by the two above. |
 | `enumerate_maps.py` | Walks the 44 Bosch interpolation helpers in the on-chip flash, resolves the constant arguments at every call site, and writes `re/calibration_draft.csv`, `re/findings/calibration_call_sites.csv` and `re/findings/calibration_coverage.md`. Names the helpers in the program so `export_symbols.py` carries them into `re/symbols.csv` (issue #19). |
 | `b4_eeprom_symbols.py` | Applies agent B4's names and plate comments for the QSPI driver, the M95160 EEPROM primitives, the EEP_CONF block manager and the KWP variant-coding path (issue #18). Run it before `export_symbols.py`. |
+| `b1_context_and_symbols.py` | Per-function r2 (SDA2) context from the call graph plus the brief-B1 symbols (issues #8 and #11). Run it after `med9_setup.py`; it supersedes `--boot-r2`. |
 
 ## Prerequisites
 
@@ -88,6 +89,33 @@ About 25 s. `--label` additionally puts `cand_*` labels on the 1,066 detected
 tables; leave it off before an `export_symbols.py` run, or they all land in the
 shared `re/symbols.csv`. `--no-scalars` skips the direct-load scan.
 Background and the data layout: `re/findings/calibration_maps.md`.
+## Per-function r2 context (issue #8)
+
+`med9_setup.py --boot-r2` sets r2 = 0x017FF0 over a blanket 0x001000-0x01FFFF.
+That range is too wide -- 100 application functions live at 0x019948-0x01E848
+(`re/findings/boot.md` section 1.1). Use this instead, after the map is built:
+
+```bash
+./.venv/bin/python -m pyghidra.ghidra_launch \
+    --install-dir "$GHIDRA_INSTALL_DIR" \
+    ghidra.app.util.headless.AnalyzeHeadless ghidra_projects med9 \
+    -process passat_azx_ori.bin -noanalysis \
+    -scriptPath ghidra_scripts -postScript b1_context_and_symbols.py "$PWD"
+```
+
+It derives the 119-function boot module with `tools/callgraph.py`, sets
+r2 = 0x017FF0 over exactly those twelve address ranges and 0x5C9FF0 over the
+rest of the code, prints nine read-back probes, and applies 42 named symbols
+with their confidence tag in the plate comment. It also drops the stale label
+`tbl_exception_vectors` that `med9_setup.py` still seeds at 0x0 (A2 renamed it
+to `tbl_etr_branch_table` in `re/symbols.csv`; without the drop every
+`export_symbols.py` run appends a duplicate row for 0x000000).
+
+Violations are listed outside Ghidra:
+
+```bash
+python3 tools/r2_context.py data/passat_azx_ori.bin --compare --violations
+```
 
 ## Symbol round trip (issue #9)
 
