@@ -1,6 +1,6 @@
 cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
-0x000000,0x000000,ext_flash,table,tbl_exception_vectors,0x2000,tools scan: ba branches every 0x100,static,dump,reset 0x100 -> 0x49C; used vectors -> 0x110F0
-0x000100,0x000100,ext_flash,func,reset_vector,4,ba 0x49c,static,dump,
+0x000000,0x000000,ext_flash,table,tbl_etr_branch_table,0x100,32 x 8 B ba entries matching MPC561RM Table 4-1 (BBC exception table relocation); xxd -s 0 -l 0x100,static,dump,CORRECTED 2026-09-15 A2: not a 0x100-spaced vector table. +0x08 reset -> 0x3C4; +0x10 machine check -> 0x164; +0x28 external interrupt -> 0x80028; unused -> 0x144; Page_Offset = 0x400000*ISB so the live copy is at 0x400000 (missing 16 KB)
+0x000100,0x000100,ext_flash,func,reset_vector,4,ba 0x49c,static,dump,"classic 0x100-spaced layout, used only when RCW[IP]=0; that layout is incomplete (file 0x500, the external-interrupt vector, is zero) - the live table is the ETR one at 0x0"
 0x000200,0x000200,ext_flash,const,vector_200,,ghidra passat_azx_ori.bin 2026-09-15 @000200,static,ghidra,MPC5xx exception vector 0x200 -> 000110F0
 0x000300,0x000300,ext_flash,const,vector_300,,ghidra passat_azx_ori.bin 2026-09-15 @000300,static,ghidra,MPC5xx exception vector 0x300 -> 000110F0
 0x00049C,0x00049C,ext_flash,func,boot_trampoline,4,b 0x1004,static,dump,
@@ -9,13 +9,22 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x000C00,0x000C00,ext_flash,const,vector_C00,,ghidra passat_azx_ori.bin 2026-09-15 @000C00,static,ghidra,MPC5xx exception vector 0xc00 -> 000110F0
 0x001000,0x001000,ext_flash,const,vector_1000,,ghidra passat_azx_ori.bin 2026-09-15 @001000,static,ghidra,MPC5xx exception vector 0x1000 -> 000110F0
 0x001004,0x001004,ext_flash,func,boot_start,0xF4,"disassembly: IMMR ISB=1, BR0|=0x100, IC_CST, MSR 0x3942, SIPEND poll, r1/r13/r2 setup, bl 0x12328",static,dump,r1=0x7FEFFC r13=0x7FFFF0 r2=0x17FF0
+0x001118,0x001118,ext_flash,func,boot_bbcmcr_setup,0x28,"mfspr r9,560; ori r9,r9,2; mtspr 560,r9; isync at file 0x1118-0x1138",static,dump,BBCMCR: only DCAE set; ETRE/OERC left at reset-configuration-word values
 0x001FF0,0x001FF0,ext_flash,table,tbl_checksum_boot,0x10,checksum.py,static,dump,1 entry 0x0-0x1FFF
+0x010020,0x010020,ext_flash,table,tbl_or_values_by_clockmode,0x80,read by lwzx at 0x1201C/0x12040/0x12070/0x120B0/0x12124/0x12178/0x121B0 with r2=0x17FF0; values 0xFF8006xx/0xFF801xx/0xFFFC01xx/0xFFFF8Cxx,static,dump,overlapping 0xC-stride windows indexed by the clock mode in r29
+0x010624,0x010624,ext_flash,const,tpu3_code_image,0x800,"copied to 0x702000 by the loop at 0x18098-0x180A0, word count 0x200 from file 0x10E24",static,dump,content looks like TPU3 microcode (HYPOTHESIS)
+0x010FEC,0x010FEC,ext_flash,func,decram_routine_a_src,0xE4,"copied to 0x6F8000 by the loop at 0x11FAC-0x11FC8, called at 0x11FCC",static,dump,first of the two DECRAM-resident routines
 0x0110F0,0x0110F0,ext_flash,func,fatal_exception_handler,0x28,"PLPRCR |= 0x80, MSR 0x2942, sth 0x704002, infinite loop",static,dump,target of unused exception vectors
 0x011118,0x011118,ext_flash,func,decram_flashcs_routine_src,0x238,copied to 0x6F8000 by boot at file 0x120C8-0x120FC then bl 0x6f8000,static,dump,accesses CS2 device 0x900000
+0x0115DC,0x0115DC,ext_flash,func,boot_pll_setup,0x140,"writes SCCR 0x6FC280=0x03217100 and PLPRCR 0x6FC284, then the lock spin at 0x116FC-0x1170C",static,dump,emulated 2026-09-15: stalls here without a PLPRCR stub
+0x0116FC,0x0116FC,ext_flash,func,boot_pll_lock_wait,0x14,"rlwimi sets PLPRCR bit 0x8000, lwz+rlwinm. tests it, bne loops",dynamic,emu,first unmodelled peripheral value in the boot path (emu/boot_trace.py)
+0x0118C0,0x0118C0,ext_flash,func,boot_ram_probe,0x60,writes/reads r9+0x8000 with pattern 0xA55AC33C; reaches 0x808000 for r9=0x800000,static,dump,external SRAM size/alias probe; the emulator reports 0x808000 as unmapped
 0x011E44,0x011E44,ext_flash,func,boot_or_adjust,0x14,lbz 0x7FE9E8(r13-0x1608); rlwinm clears bit 8 of OR value,static,dump,
 0x012004,0x012004,ext_flash,func,boot_memctrl_init,0x1D8,stores to BR0/OR0 BR1/OR1 BR2/OR2 BR3/OR3 (0x6FC100-0x6FC11C),static,dump,BR0=0x000000|0x103/0x90B; BR1=0x800000|0x403; BR2=0x900000|0x823; BR3=0xA00000|3; OR tables at file 0x10020-0x1009C
 0x012328,0x012328,ext_flash,func,boot_main_init,,called from boot_start; checks IMMR PARTNUM==0x35,static,dump,
+0x014604,0x014604,ext_flash,func,cand_tpu_param_scan,0xC4,"scans TPU3_A parameter RAM at base+0x100 in 0x10-byte steps, counters in DECRAM 0x6F8620, retries at 0x146C4 until all groups match",dynamic,emu,second boot stall; HYPOTHESIS that it is a TPU self-test
 0x017FF0,0x017FF0,ext_flash,const,r2_boot_sda2_base,,"lis r2,1; addi r2,r2,0x7ff0 at file 0x10E8",static,dump,boot module small data in 0x10000-0x1FFFF
+0x018060,0x018060,ext_flash,func,boot_tpu_code_load,0x50,sth 0xFFA0 to 0x700004 then copies 0x200 words from file 0x10624 to 0x702000,static,dump,
 0x01E73C,0x01E73C,ext_flash,table,tbl_runtime_check_regions_a,,0x404000-0x47FFFF followed by RAM ptrs 0x7FCC8C 0x7FCCC4,static,dump,
 0x01FFC0,0x01FFC0,ext_flash,table,tbl_checksum_const,0x40,checksum.py,static,dump,4 x 16 KB 0x10000-0x1FFFF
 0x020004,0x020004,ext_flash,func,romcheck_result_set,0x1C,"li r3,0; stb r3,-0x7DA6(r13); li r4,0xFF; stb ... blr",static,dump,community crc_check patch site (constants 0x55/0xAA)
@@ -29,6 +38,10 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x035064,0x035064,ext_flash,func,kwp_sid_18_h1,0x4,ghidra passat_azx_ori.bin 2026-09-15 @035064,static,ghidra,"KWP2000/OBD service 0x18 handler (h1), tbl_kwp_services[4]"
 0x0352F4,0x0352F4,ext_flash,func,kwp_sid_14_h2,0xC,ghidra passat_azx_ori.bin 2026-09-15 @0352F4,static,ghidra,"KWP2000/OBD service 0x14 handler (h2), tbl_kwp_services[0]"
 0x035410,0x035410,ext_flash,func,kwp_sid_14_h1,0x4,ghidra passat_azx_ori.bin 2026-09-15 @035410,static,ghidra,"KWP2000/OBD service 0x14 handler (h1), tbl_kwp_services[0]"
+0x03574C,0x03574C,ext_flash,func,measuring_group_read4,0x70,"addi r29,r2,-0x4AD8; loop 4x lhzx from tbl_measuring_groups; bl 0x045768; copies the triple to the response",static,dump,entry 0x035748 sets up r11; KWP SID 0x21 route
+0x0357E0,0x0357E0,ext_flash,func,measuring_field_read,0x5C,"same group table, one field: r3=out buf, r4=field, r5=group; bl 0x045768",static,dump,called 4x from 0x439F8C-0x439FE0 in on-chip flash
+0x03583C,0x03583C,ext_flash,func,kwp21_group_request,0x90,lbz from request; stb 0x7FD05E; range check; bl 0x035748 (or 0x046338),static,dump,called from 0x0A2CC4
+0x035F6C,0x035F6C,ext_flash,func,kwp_sid21_handler,0xB8,tbl_kwp_services entry file 0x2B884 handler field,static,dump,"local id ranges: 0x01-0x7F/0xA0-0xEF -> 0x0A2CC4, 0x80-0x9F -> 0x035728, 0xF0-0xF9 -> 0x034F48"
 0x035F6C,0x035F6C,ext_flash,func,kwp_sid_21_h1,0xB8,ghidra passat_azx_ori.bin 2026-09-15 @035F6C,static,ghidra,"KWP2000/OBD service 0x21 handler (h1), tbl_kwp_services[1]"
 0x036024,0x036024,ext_flash,func,kwp_sid_17_h1,0x8C,ghidra passat_azx_ori.bin 2026-09-15 @036024,static,ghidra,"KWP2000/OBD service 0x17 handler (h1), tbl_kwp_services[5]"
 0x0360B0,0x0360B0,ext_flash,func,kwp_sid_37_h1,0x14,ghidra passat_azx_ori.bin 2026-09-15 @0360B0,static,ghidra,"KWP2000/OBD service 0x37 handler (h1), tbl_kwp_services[12]"
@@ -46,7 +59,9 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x037FE0,0x037FE0,ext_flash,func,kwp_sid_08_h1,0x1BC,ghidra passat_azx_ori.bin 2026-09-15 @037FE0,static,ghidra,"KWP2000/OBD service 0x08 handler (h1), tbl_kwp_services[22]"
 0x03819C,0x03819C,ext_flash,func,kwp_sid_09_h2,0x14,ghidra passat_azx_ori.bin 2026-09-15 @03819C,static,ghidra,"KWP2000/OBD service 0x09 handler (h2), tbl_kwp_services[23]"
 0x0381B0,0x0381B0,ext_flash,func,kwp_sid_09_h1,0x534,ghidra passat_azx_ori.bin 2026-09-15 @0381B0,static,ghidra,"KWP2000/OBD service 0x09 handler (h1), tbl_kwp_services[23]"
-0x038EA8,0x038EA8,ext_flash,func,cand_kwp_measblock_return,,MED9Toolchain signature match at file 0x38EC4 - 28,hypothesis,MED9Toolchain,
+0x038EB4,0x038EB4,ext_flash,func,measuring_result_emit,0x10,"stb r3,-0x2F81(r13); stb r4,-0x2F7F(r13); stb r5,-0x2F80(r13); blr",static,dump,corrects the earlier cand_kwp_measblock_return at 0x038EA8 (12 bytes short); see re/findings/measuring_vars.md
+0x038EC4,0x038EC4,ext_flash,func,measuring_var_not_available,0x10,"li r3,0x25; li r4,0; addi r5,r4,0; b 0x38EB4",static,dump,handler of 1535 of the 2200 ids
+0x045768,0x045768,ext_flash,func,measuring_var_dispatch,0x64,"360trev/MED9inf MemoryVars signature; cmplwi r3,0x898 then lwzx from tbl_measuring_vars and blrl",static,dump,r3 = measuring-variable id 0..2199; result left in 0x7FD06F-0x7FD071
 0x05CBE8,0x05CBE8,ext_flash,func,kwp_sid_01_h2,0x2EC,ghidra passat_azx_ori.bin 2026-09-15 @05CBE8,static,ghidra,"KWP2000/OBD service 0x01 handler (h2), tbl_kwp_services[16]"
 0x05D0F4,0x05D0F4,ext_flash,func,kwp_sid_01_h1,0x4,ghidra passat_azx_ori.bin 2026-09-15 @05D0F4,static,ghidra,"KWP2000/OBD service 0x01 handler (h1), tbl_kwp_services[16]"
 0x080100,0x080100,ext_flash,marker,code_directory,0x30,5A5A5A5A 33333333 + 10 pointers,static,dump,
@@ -54,11 +69,13 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x0986AC,0x0986AC,ext_flash,func,app_sda_setup_a,0x10,lis/addi r13=0x7FFFF0 r2=0x5C9FF0,static,dump,
 0x09E3E0,0x09E3E0,ext_flash,func,app_sda_setup_b,0x10,lis/addi r13=0x7FFFF0 r2=0x5C9FF0,static,dump,
 0x0A0000,0x0A0000,ext_flash,table,tbl_checksum_code,0x360,checksum.py,static,dump,54 entries incl. on-chip flash 0x404000-0x47FFFF
+0x0A2CC4,0x0A2CC4,ext_flash,func,kwp21_measuring_block_route,,bl 0x03583C then formats the positive response,static,dump,reached from kwp_sid21_handler for local ids 0x01-0x7F and 0xA0-0xEF
 0x0A3320,0x0A3320,ext_flash,func,kwp_sid_3B_h2,0x20,ghidra passat_azx_ori.bin 2026-09-15 @0A3320,static,ghidra,"KWP2000/OBD service 0x3b handler (h2), tbl_kwp_services[2]"
 0x0A33A4,0x0A33A4,ext_flash,func,kwp_sid_36_h2,0x10,ghidra passat_azx_ori.bin 2026-09-15 @0A33A4,static,ghidra,"KWP2000/OBD service 0x36 handler (h2), tbl_kwp_services[11]"
 0x0A3A18,0x0A3A18,ext_flash,table,tbl_runtime_check_regions_c,,"0x404000-0x47FFFF, 0x5C2E00-0x5FFFFF",static,dump,
-0x0A5654,0x0A5654,ext_flash,table,cand_tbl_tkmwl,,MED9Toolchain signature 'blr 00 03' match,hypothesis,MED9Toolchain,confirm with 360trev/MED9inf
+0x0A5658,0x0A5658,ext_flash,table,tbl_measuring_vars,0x2260,"tools/measuring_vars.py; lis r12,0xA / addi r12,r12,0x5658 at 0x045780 then lwzx r31,r12,id*4",static,dump,"TKMWL: 2200 x 4 B handler pointers; corrects the 0xA5654 MED9Toolchain candidate, which matched the preceding blr"
 0x144950,0x144950,ext_flash,marker,end_of_code,8,02030600 5A5A5A5A then 0xFF,static,dump,MED9Toolchain FREE_FLASH signature
+0x400000,,int_flash,region,uc3f_small_block_0,0x4000,MPC561RM Fig.21-8 p.21-19,static,manual,missing from the dump; hosts the shadow row / reset configuration word
 0x404000,0x200000,int_flash,func,int_flash_entry,0x4,ghidra passat_azx_ori.bin 2026-09-15 @404000,static,ghidra,"VERIFIED-STATIC -- ghidra_scripts/med9_setup.py, from docs/02_memory_map.md"
 0x405588,0x201588,int_flash,func,app_sda_setup_int,0x10,lis/addi r13=0x7FFFF0 r2=0x5C9FF0,static,dump,
 0x4278AC,0x2238AC,int_flash,func,kwp_sid_06_h2,0x2A4,ghidra passat_azx_ori.bin 2026-09-15 @4278AC,static,ghidra,"KWP2000/OBD service 0x06 handler (h2), tbl_kwp_services[20]"
@@ -68,16 +85,53 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x438F40,0x234F40,int_flash,func,kwp_sid_32_h1,0x164,ghidra passat_azx_ori.bin 2026-09-15 @438F40,static,ghidra,"KWP2000/OBD service 0x32 handler (h1), tbl_kwp_services[9]"
 0x4390A4,0x2350A4,int_flash,func,kwp_sid_81_h1,0x6C,ghidra passat_azx_ori.bin 2026-09-15 @4390A4,static,ghidra,"KWP2000/OBD service 0x81 handler (h1), tbl_kwp_services[6]"
 0x439110,0x235110,int_flash,func,kwp_sid_31_h1,0x4,ghidra passat_azx_ori.bin 2026-09-15 @439110,static,ghidra,"KWP2000/OBD service 0x31 handler (h1), tbl_kwp_services[8]"
+0x5C0000,0x1C0000,cal,region,cal_dualmap_window,0x40000,DMBR=0x70000001 DMOR=0x70000000 at file 0x1250C; MPC561RM Eqn 10-1,static,dump,"CPU 0x5C0000-0x5FFFFF -> external flash 0x1C0000-0x1FFFFF, CS0, code+data"
 0x5C2000,0x1C2000,cal,marker,cal_directory,0x20,5A5A5A5A CCCCCCCC + pointers 0x1C2080 0x1C2040 0x1C20C0 0x1C2100 0x1E2500,static,dump,
 0x5C21F0,0x1C21F0,cal,const,str_bosch_project,0x40,56/1/MED91/3/6W6432.D//D9133_43K6P0/D9133_43K6P0/080506/,static,dump,
 0x5C2E78,0x1C2E78,cal,table,tbl_ram_init_ranges,,00800000 00800004 00807FF8 007FE588,static,dump,external SRAM 0x800000-0x807FFF
 0x5C3300,0x1C3300,cal,table,tbl_checksum_cal,0x60,checksum.py,static,dump,6 entries 0x5C2000-0x5FFFFF
+0x5C5518,0x1C5518,cal,table,tbl_measuring_groups,0x7F8,"tools/measuring_vars.py --groups; addi r29,r2,-0x4AD8 with r2=0x5C9FF0 at 0x035760 and 0x0357F8",static,dump,"4 fields x 255 groups of u16 variable ids; entry(field,group) = base + field*0x1FE + group*2"
 0x5C9FF0,0x1C9FF0,cal,const,r2_app_sda2_base,,app_sda_setup_a/b/int,static,dump,application read-only small data
 0x5CEE20,0x1CEE20,cal,const,ecu_ident_block,0x50,03H906032 / P3.2 FSI-EU4 / 9387 / 0261S02226 / 1037382557 / 4.7.6 A / P0000,static,dump,
 0x6F8000,,periph,region,decram_code_copy,0x238,boot copies 0x11118.. here and calls it,static,dump,
+0x6F8620,,periph,var,decram_tpu_scan_counters,,"stwu r31,4(r6) with r6=0x6F8620 in cand_tpu_param_scan",dynamic,emu,scratch use of DECRAM after the flash routine has finished
+0x6FC000,,periph,var,usiu_siumcr,4,MPC561RM Table 5-1 p.5-3,static,manual,bit 1 IP = initial MSR[IP]
+0x6FC010,,periph,var,usiu_sipend,4,polled once at 0x104C with andis. 0x8000,static,dump,"SIPEND; 0 means nothing pending, so it is not an emulation blocker"
+0x6FC100,,periph,var,usiu_br0,4,|=0x100 at 0x1020; cleared/restored by the DECRAM routine at 0x6F8098/0x6F81F4,static,dump,bit 0x100 = write protect (COMMUNITY)
+0x6FC104,,periph,var,usiu_or0,4,boot_or_adjust result stored at 0x12180/0x12428,static,dump,
+0x6FC108,,periph,var,usiu_br1,4,MPC561RM Table 10-6,static,manual,"0x800403: base 0x800000, 8-bit port"
+0x6FC10C,,periph,var,usiu_or1,4,MPC561RM Table 10-6,static,manual,0xFFFC01x0: 256 KB region 0x800000-0x83FFFF
+0x6FC110,,periph,var,usiu_br2,4,MPC561RM Table 10-6,static,manual,"0x900823: base 0x900000, 16-bit port, byte enables"
+0x6FC114,,periph,var,usiu_or2,4,MPC561RM Table 10-6,static,manual,0xFFFC0110: 256 KB region 0x900000-0x93FFFF
+0x6FC118,,periph,var,usiu_br3,4,MPC561RM Table 10-6,static,manual,"0xA00003: base 0xA00000, 32-bit port"
+0x6FC11C,,periph,var,usiu_or3,4,MPC561RM Table 10-6,static,manual,0xFFFF8C20/30: 32 KB region 0xA00000-0xA07FFF
+0x6FC140,,periph,var,usiu_dmbr,4,"stw r11,0x140(r31) at file 0x12514",static,dump,"0x70000001: BA=0b111000, DMCS=CS0, DME=1"
+0x6FC144,,periph,var,usiu_dmor,4,"stw r12,0x144(r31) at file 0x1250C",static,dump,"0x70000000: AM=0b111000, ATM=0 (code+data)"
+0x6FC280,,periph,var,usiu_sccr,4,written 0x03217100 at 0x115DC,static,dump,
+0x6FC284,,periph,var,usiu_plprcr,4,written 0x00015080 at 0x115F4; bit 0x8000 set at 0x116FC and polled at 0x11704,dynamic,emu,"PLL lock status sticky (SPLSS, COMMUNITY); must be stubbed to boot past 0x116FC"
+0x6FC288,,periph,var,usiu_rsr,4,halfword read at 0x12220,static,dump,reset status register
+0x6FC800,,periph,var,uc3f_control,0xC,MPC561RM sec.21.2.1; 5 refs,static,manual,"UC3FMCR/UC3FMCRE/UC3FCTL, on-chip flash program+erase"
+0x702000,,periph,region,cand_tpu3_code_ram,0x800,filled from file 0x10624 by boot_tpu_code_load,hypothesis,dump,identity needs the MPC563/564 manual
+0x704000,,periph,region,tpu3_a,0x400,parameter RAM at +0x100 scanned by cand_tpu_param_scan,static,dump,
+0x704400,,periph,region,tpu3_b,0x400,written during boot (emu/boot_trace.py),static,dump,
+0x705000,,periph,region,qsmcm,0x400,MPC561RM Table 15-1 p.15-3; 49 refs,static,manual,"QSPI ctrl 0x705018-0x70501F, RX RAM 0x705140, TX RAM 0x705180, CMD RAM 0x7051C0 (EEPROM driver)"
+0x707000,,periph,region,toucan_a,0x400,MPC561RM Fig.1-4 / Table 16-10,static,manual,"CANMCR 0x707080, IMASK 0x7070A2, IFLAG 0x7070A4, MB n at 0x707100+0x10n"
+0x707400,,periph,region,toucan_b,0x400,MPC561RM Fig.1-4 / Table 16-10,static,manual,CANMCR 0x707480
+0x707800,,periph,region,toucan_c,0x400,MPC561RM Fig.1-4 / Table 16-10,static,manual,CANMCR 0x707880
 0x7F824A,,sram_int,var,romcheck_result_flags,4,romcheck_result_set writes r13-0x7DA6..-0x7DA3,static,dump,
+0x7FB8E8,,sram_int,var,measuring_last_handler_ptr,4,"stw r31,-0x4708(r13) at 0x045798",static,dump,address of the handler last invoked
+0x7FCE57,,sram_int,table,cand_mw_percyl_block,6,"measuring var ids 88-93, handlers 0x039CD0-0x039D48, all formula 0x22 with A=0x4B; groups 020-024",hypothesis,dump,six consecutive per-cylinder bytes; VCDS groups 020/021 are normally knock retard. Cylinder order not established
+0x7FCE95,,sram_int,var,cand_mw_nmot,1,"measuring var id 1, handler 0x03915C emits VAG formula 0x01 with A=0xC8; group 001 field 1",community,dump,"display byte, 40 rpm per count; not the FR nmot_w"
+0x7FCE96,,sram_int,var,cand_mw_nmot_fine,1,"measuring var id 14, handler 0x0392E8 emits formula 0x01 with A=0x32; group 050 field 1",hypothesis,dump,10 rpm per count
+0x7FD05E,,sram_int,var,measuring_group_req,1,"stb at 0x035860 (r13-0x2F92), read at 0x035768",static,dump,requested VCDS group number
+0x7FD06F,,sram_int,var,measuring_result_triple,3,"written by measuring_result_emit, read back at 0x035780-0x0357A0",static,dump,"0x7FD06F formula id, 0x7FD070 byte B, 0x7FD071 byte A"
+0x7FD072,,sram_int,var,measuring_flag_byte,1,"li r10,0 / stb r10,-0x2F7E(r13) at 0x045794-0x04579C; accumulated by the formula-0x10 handlers",static,dump,"handler scratch/bit accumulator, cleared before every handler call"
 0x7FE9E8,,sram_int,var,boot_mode_flag,1,r13-0x1608 read by boot_or_adjust and boot_main_init,static,dump,
+0x7FEF74,,sram_int,var,cand_mw_rl,1,"measuring var id 2, handler 0x03916C emits formula 0x21 with A=0x85; group 002 field 2",community,dump,engine load display byte
+0x7FEFA2,,sram_int,var,cand_mw_ml,2,"measuring var id 10, handler 0x0391DC emits formula 0x19; group 003 field 2",community,dump,mass air flow display word
 0x7FEFFC,,sram_int,const,initial_stack_top,,boot_start,static,dump,
 0x7FFFF0,,sram_int,const,r13_sda_base,,boot_start and app_sda_setup,static,dump,r13-relative range 0x7F8000-0x8073E9
+0x8021EF,,sram_ext,var,cand_mw_tmot,1,"measuring var id 80, handler 0x039BA4 emits formula 0x05 with A=0x0A; group 001 field 2",community,dump,coolant temperature display byte
+0x802529,,sram_ext,var,cand_mw_nsoll,1,"measuring var id 15, handler 0x0392F8 emits formula 0x01 with A=0x32; group 050 field 2",hypothesis,dump,"idle speed control group, same scaling as id 14"
 0x900000,,periph,region,cs2_external_device,,BR2; 20 refs; accessed from DECRAM routine,static,dump,identity unknown
 0xA00000,,periph,region,cs3_external_device,,BR3; 2 refs,static,dump,identity unknown
