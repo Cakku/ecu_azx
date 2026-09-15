@@ -1,0 +1,69 @@
+MED9inf (360trev) raw output, captured 2026-09-15 on macOS 26 / Apple M2 Pro.
+
+Source : https://github.com/360trev/MED9inf  commit 9f2bb54a715a53398cd7a84399961a069490eed8
+Build  : clang -O1 -Wno-int-conversion -Wno-pointer-sign -Wno-format -o med9inf main.c
+         (one portability fix; see re/findings/measuring_vars.md section 2)
+Dump   : data/passat_azx_ori.bin  sha256 b15590d3f1874ace3125c5d047c09a686db9b8bb498187663539ebab205609b3
+Tool   : work/MED9inf (work/ is gitignored; re-clone and rebuild to reproduce)
+
+==============================================================================
+$ work/MED9inf/med9inf med9_re/passat_azx_flash.bin      # first 2 MB of the dump
+==============================================================================
+MED9BasicInf v0.1 (c) 2019 by 360trev. << Freeware >>
+
+þ Opening 'med9_re/passat_azx_flash.bin' file
+Succeded loading file.
+
+Searching for MED 9 ECUID signature function...
+Found an MED9 ECUID signature @ offset:0xa24bc, table offset @ offset:0xe0...
+
+Bosch hardware number      : 0261S02226
+Bosch software number      : 1037382557
+Bosch software version     : 4.7.6 A
+Bosch OEM Part number      : 03H906032   
+Bosch OEM software version : 9387
+Bosch OEM engine info      : P3.2 FSI-EU4        
+
+Looking for memory variables...
+found memory vars function @ offset: 0x45768
+table has 2200 elements
+
+==============================================================================
+$ work/MED9inf/med9inf data/passat_azx_ori.bin           # full 2,605,056 B dump
+==============================================================================
+MED9BasicInf v0.1 (c) 2019 by 360trev. << Freeware >>
+
+þ Opening 'data/passat_azx_ori.bin' file
+Succeded loading file.
+
+Searching for MED 9 ECUID signature function...
+Found an MED9 ECUID signature @ offset:0xa24bc, table offset @ offset:0xe0...
+
+Bosch hardware number      : 0261S02226
+Bosch software number      : 1037382557
+Bosch software version     : 4.7.6 A
+Bosch OEM Part number      : 03H906032   
+Bosch OEM software version : 9387
+Bosch OEM engine info      : P3.2 FSI-EU4        
+
+Looking for memory variables...
+found memory vars function @ offset: 0x45768
+table has 2200 elements
+
+Both runs agree: everything MED9inf looks for lives in the first 2 MB, so no
+input adaptation was needed for our 2.5 MB KESSv2 read.
+
+==============================================================================
+$ python3 tools/measuring_vars.py data/passat_azx_ori.bin   # this repo's follow-up
+==============================================================================
+dispatcher      cpu 0x045768 (file 0x045768)
+handler table   cpu 0x0a5658 (file 0x0a5658), 2200 entries x 4 B = 0x2260 B, ends 0x0a78b8
+unused stub     cpu 0x038ec4, used by 1535 of 2200 ids
+emit helper     cpu 0x038eb4 (stores the formula/A/B triple)
+scratch cleared 0x7fd072
+
+implemented ids   : 665
+RAM source found  : 660
+no RAM source     : 5
+outside RAM window: 0
+named (cand_, not static): 6

@@ -15,8 +15,8 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x02BC50,0x02BC50,ext_flash,const,ptr_can_config,4,"value 0x0002BF50",static,dump,
 0x02BC90,0x02BC90,ext_flash,table,tbl_can_rx,0x160,"header + 21 x 16 B: index, 0x01mmnn08, 4, id",static,dump,"ids 1A0 5A0 4A0 440 540 320 442 1AC 0C2 050 51A 5E0 390 38A 7FF 7FF 2A0 368 7FF 7FF 5C0"
 0x02BDF0,0x02BDF0,ext_flash,table,tbl_can_tx,0x110,"header + 16 x 16 B: index, id, 0x0101xxxx, dlc",static,dump,"ids 7C7 280 288 380 480 488 580 588 48A 38A 284 56A 7C4 7C5 7C5 7C6"
-0x038EA8,0x038EA8,ext_flash,func,cand_kwp_measblock_return,,"MED9Toolchain signature match at file 0x38EC4 - 28",hypothesis,MED9Toolchain,
-0x0A5654,0x0A5654,ext_flash,table,cand_tbl_tkmwl,,"MED9Toolchain signature 'blr 00 03' match",hypothesis,MED9Toolchain,"confirm with 360trev/MED9inf"
+0x038EB4,0x038EB4,ext_flash,func,measuring_result_emit,0x10,"stb r3,-0x2F81(r13); stb r4,-0x2F7F(r13); stb r5,-0x2F80(r13); blr",static,dump,"corrects the earlier cand_kwp_measblock_return at 0x038EA8 (12 bytes short); see re/findings/measuring_vars.md"
+0x0A5658,0x0A5658,ext_flash,table,tbl_measuring_vars,0x2260,"tools/measuring_vars.py; lis r12,0xA / addi r12,r12,0x5658 at 0x045780 then lwzx r31,r12,id*4",static,dump,"TKMWL: 2200 x 4 B handler pointers; corrects the 0xA5654 MED9Toolchain candidate, which matched the preceding blr"
 0x0986AC,0x0986AC,ext_flash,func,app_sda_setup_a,0x10,"lis/addi r13=0x7FFFF0 r2=0x5C9FF0",static,dump,
 0x09E3E0,0x09E3E0,ext_flash,func,app_sda_setup_b,0x10,"lis/addi r13=0x7FFFF0 r2=0x5C9FF0",static,dump,
 0x405588,0x201588,int_flash,func,app_sda_setup_int,0x10,"lis/addi r13=0x7FFFF0 r2=0x5C9FF0",static,dump,
@@ -41,3 +41,22 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x6F8000,,periph,region,decram_code_copy,0x238,"boot copies 0x11118.. here and calls it",static,dump,
 0x900000,,periph,region,cs2_external_device,,"BR2; 20 refs; accessed from DECRAM routine",static,dump,"identity unknown"
 0xA00000,,periph,region,cs3_external_device,,"BR3; 2 refs",static,dump,"identity unknown"
+0x045768,0x045768,ext_flash,func,measuring_var_dispatch,0x64,"360trev/MED9inf MemoryVars signature; cmplwi r3,0x898 then lwzx from tbl_measuring_vars and blrl",static,dump,r3 = measuring-variable id 0..2199; result left in 0x7FD06F-0x7FD071
+0x038EC4,0x038EC4,ext_flash,func,measuring_var_not_available,0x10,"li r3,0x25; li r4,0; addi r5,r4,0; b 0x38EB4",static,dump,handler of 1535 of the 2200 ids
+0x03574C,0x03574C,ext_flash,func,measuring_group_read4,0x70,"addi r29,r2,-0x4AD8; loop 4x lhzx from tbl_measuring_groups; bl 0x045768; copies the triple to the response",static,dump,entry 0x035748 sets up r11; KWP SID 0x21 route
+0x0357E0,0x0357E0,ext_flash,func,measuring_field_read,0x5C,"same group table, one field: r3=out buf, r4=field, r5=group; bl 0x045768",static,dump,called 4x from 0x439F8C-0x439FE0 in on-chip flash
+0x03583C,0x03583C,ext_flash,func,kwp21_group_request,0x90,lbz from request; stb 0x7FD05E; range check; bl 0x035748 (or 0x046338),static,dump,called from 0x0A2CC4
+0x0A2CC4,0x0A2CC4,ext_flash,func,kwp21_measuring_block_route,,bl 0x03583C then formats the positive response,static,dump,reached from kwp_sid21_handler for local ids 0x01-0x7F and 0xA0-0xEF
+0x035F6C,0x035F6C,ext_flash,func,kwp_sid21_handler,0xB8,tbl_kwp_services entry file 0x2B884 handler field,static,dump,"local id ranges: 0x01-0x7F/0xA0-0xEF -> 0x0A2CC4, 0x80-0x9F -> 0x035728, 0xF0-0xF9 -> 0x034F48"
+0x5C5518,0x1C5518,cal,table,tbl_measuring_groups,0x7F8,"tools/measuring_vars.py --groups; addi r29,r2,-0x4AD8 with r2=0x5C9FF0 at 0x035760 and 0x0357F8",static,dump,"4 fields x 255 groups of u16 variable ids; entry(field,group) = base + field*0x1FE + group*2"
+0x7FD05E,,sram_int,var,measuring_group_req,1,"stb at 0x035860 (r13-0x2F92), read at 0x035768",static,dump,requested VCDS group number
+0x7FD06F,,sram_int,var,measuring_result_triple,3,"written by measuring_result_emit, read back at 0x035780-0x0357A0",static,dump,"0x7FD06F formula id, 0x7FD070 byte B, 0x7FD071 byte A"
+0x7FD072,,sram_int,var,measuring_flag_byte,1,"li r10,0 / stb r10,-0x2F7E(r13) at 0x045794-0x04579C; accumulated by the formula-0x10 handlers",static,dump,"handler scratch/bit accumulator, cleared before every handler call"
+0x7FB8E8,,sram_int,var,measuring_last_handler_ptr,4,"stw r31,-0x4708(r13) at 0x045798",static,dump,address of the handler last invoked
+0x7FCE95,,sram_int,var,cand_mw_nmot,1,"measuring var id 1, handler 0x03915C emits VAG formula 0x01 with A=0xC8; group 001 field 1",community,dump,"display byte, 40 rpm per count; not the FR nmot_w"
+0x7FCE96,,sram_int,var,cand_mw_nmot_fine,1,"measuring var id 14, handler 0x0392E8 emits formula 0x01 with A=0x32; group 050 field 1",hypothesis,dump,10 rpm per count
+0x802529,,sram_ext,var,cand_mw_nsoll,1,"measuring var id 15, handler 0x0392F8 emits formula 0x01 with A=0x32; group 050 field 2",hypothesis,dump,"idle speed control group, same scaling as id 14"
+0x7FEF74,,sram_int,var,cand_mw_rl,1,"measuring var id 2, handler 0x03916C emits formula 0x21 with A=0x85; group 002 field 2",community,dump,engine load display byte
+0x7FEFA2,,sram_int,var,cand_mw_ml,2,"measuring var id 10, handler 0x0391DC emits formula 0x19; group 003 field 2",community,dump,mass air flow display word
+0x8021EF,,sram_ext,var,cand_mw_tmot,1,"measuring var id 80, handler 0x039BA4 emits formula 0x05 with A=0x0A; group 001 field 2",community,dump,coolant temperature display byte
+0x7FCE57,,sram_int,table,cand_mw_percyl_block,6,"measuring var ids 88-93, handlers 0x039CD0-0x039D48, all formula 0x22 with A=0x4B; groups 020-024",hypothesis,dump,six consecutive per-cylinder bytes; VCDS groups 020/021 are normally knock retard. Cylinder order not established
