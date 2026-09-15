@@ -10,6 +10,13 @@ implemented KWP SID 0x21 variable id with its RAM address, access width, VAG
 display formula and evidence. Regenerate with
 `python3 tools/measuring_vars.py data/passat_azx_ori.bin --csv re/measuring_vars.csv`.
 
+`calibration_draft.csv` is the machine-generated calibration inventory: one row
+per detected map, curve, axis or scalar with its address, dimensions, element
+type, the function that reads it, and the evidence. Regenerate with
+`ghidra_scripts/enumerate_maps.py` (issue #19). `med9_draft.xdf` is the
+TunerPro definition built from it with `tools/draft_to_xdf.py`; its addresses
+are file offsets and no scaling is applied.
+
 `findings/` holds longer notes per topic (CAN, KWP, injection, ...).
 
 Current notes:
@@ -17,6 +24,9 @@ Current notes:
 | File | Topic |
 |---|---|
 | `findings/mpc5xx_registers.md` | MPC561/MPC563 register facts: IMMR/ISB, chip selects BR/OR, DMBR/DMOR calibration window, exception-table relocation, TouCAN, QSMCM, UC3F. Every fact cites the reference manual. |
+| `findings/calibration_maps.md` | The 44 Bosch interpolation helpers at 0x40C000-0x411FFF: argument conventions, the self-describing and shared-axis table layouts, which axis is X, and what the detected draft is and is not. |
+| `findings/calibration_coverage.md` | What of 0x5C2000-0x5E2FFF the draft accounts for, every uncovered range, and the free-space check for the FFCAL001 block. |
+| `findings/calibration_call_sites.csv` | One row per interpolation-helper call site, resolved or not, with the reason. |
 | `findings/fr_index.md` | Bosch MED9.1 Funktionsrahmen index: which FR module and which labels cover each area we care about, and what our dump actually confirms. |
 `ghidra_export/functions.csv` is a regenerated dump of **every** function in
 the current Ghidra project, auto-named `FUN_` ones included. It is not
