@@ -1,12 +1,13 @@
-__pycache__/
-.venv/
-*.pyc
-work/
 *.fixed.bin
 *.patched
+*.pyc
 .DS_Store
+.venv/
+__pycache__/
+build/
 ghidra_projects/
 
 # Large reference PDFs (> 10 MB) - see documents/SOURCES.md for URLs and SHA-256
 documents/MPC561RM.pdf
 documents/MED9.1_TFSI_Funktionsrahmen.pdf
+work/

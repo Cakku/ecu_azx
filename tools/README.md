@@ -15,6 +15,7 @@ document and `med9lib.py` together.
 | `measuring_vars.py` | Measuring-variable (TKMWL) table: find the dispatcher, walk all 2200 handlers, report each variable's RAM address/width and VAG display formula; `--groups` dumps the measuring-block group table. |
 | `bindiff.py` | Diff two dumps and classify every changed byte as *patch* (listed in a `patch.json`), *descriptor* (a checksum sum/~sum word) or **unexpected**. Exit 1 on anything unexpected. |
 | `logcmp.py` | Compare a baseline and a candidate log over their common variables with per-variable tolerances. Format and tolerance file: `logging/README.md`. |
+| `blobdis.py` | Disassemble a raw big-endian PowerPC blob at a chosen CPU address; `--check-sda` fails if patch code touches r2/r13. |
 
 Quick checks:
 
@@ -55,3 +56,13 @@ and checks that only the edits and their descriptors moved), `test_logcmp.py`
 (the synthetic logs in `logging/samples/`) and `test_emu.py` (the Unicorn
 harness, `emu/README.md`). Every test that loads the dump asserts its SHA-256
 is unchanged afterwards; none of them writes to `data/`.
+`blobdis.py` disassembles a raw big-endian PowerPC blob at a chosen CPU
+address (capstone). `llvm-objdump` cannot do this — it has no `-b binary` —
+and looking at the ELF instead of the bytes the CPU will fetch is exactly the
+mistake the pre-flash checklist exists to prevent.
+
+```bash
+python3 tools/blobdis.py patches/examples/hello_patch/build/hello.bin \
+    --addr 0x145000 --check-sda      # non-zero exit if r2 or r13 are touched
+python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x20004 --len 0x20
+```
