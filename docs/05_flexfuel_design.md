@@ -306,6 +306,20 @@ if we want that limit, we have to add it. The clean place is the existing
 min-chain at **0x0C7CF8**, which already reduces `0x80235A` from `0x803070`
 and propagates to the throttle exactly like every stock protection limit.
 
+**Correction 2b — and even that clamp is disarmed on a healthy rail.**
+`0x7FEA48 = (prist > PRWBHMX 0x5D3CDC = 2600 = 13.0 bar)`, and it gates all
+three interventions: the `awea` angle clamp, the charge limit, and a **hard
+injection cut-off angle** that `esausg_output` (0x409834) otherwise programs
+into the injector TPU driver at `cylinder reference - 50.25 degCA`. Since
+`KFPRSOLHOM` never asks for less than 35 bar, **in normal running none of it
+is armed: the injection window is enforced by calibration only.** The flip
+side is the failure mode to design against — if a raised setpoint plus E85's
+higher volume demand ever lets `prist` fall below 13 bar, all three arm at
+once and the driver gets a simultaneous fuel cut and torque drop. **The
+acceptance signal for any rail raise is therefore `prist` staying above
+13 bar, and the early warning is `0x80316E` pinned at `VMSVMX` = 5000.**
+(`re/findings/rail.md` §14.)
+
 **What the numbers say about the window.** `ti` is **1 us per LSB** (proved in
 `rail.md` §8 from `k_nmot = (nmot_w * 34360) >> 16` and the 3/128 degCA angle
 LSB — this also closes the first open item of `re/findings/injection.md` §11).
