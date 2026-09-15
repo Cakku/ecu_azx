@@ -119,8 +119,8 @@ void FUN_0041d38c(void)      /* zwgru_build */
   }
   iVar1 = (int)DAT_007fd316;
   if ((DAT_005c753c & 0x80) == 0)          /* codeword bit 7 */
-    iVar1 += (int)DAT_00800004._2_1_ - (int)(char)DAT_00800004;
-  iVar1 += DAT_007fd314 + (int)DAT_00800004._0_1_
+    iVar1 += (s8)MEM_0x800006 - (s8)MEM_0x800007;   /* lbz 0x16/0x17(r13) */
+  iVar1 += DAT_007fd314 + (s8)MEM_0x800004          /* lbz 0x14(r13)      */
          + (int)DAT_007fd313 + (int)DAT_007fd337;
   if (iVar1 < 0x80) { if (iVar1 < -0x80) iVar1 = -0x80; }
   else              iVar1 = 0x7f;
@@ -457,3 +457,55 @@ redirect of that one byte. But:
 
 Use it only as a bench experiment to prove the chain end to end
 (bump it by +2 counts, watch group 003 field 4 move by 1.5 °).
+
+## 12. Python model and emulator check (VERIFIED-DYNAMIC, emulated)
+
+`emu/zw_model.py` re-implements, in the ECU's own integer arithmetic:
+
+* `axis_search_u16_hint` (0x40C9CC) — `(index << 16) | frac`,
+* `interp_2d_s8` (0x40C3B4) — `val[iy*nx + ix]`, bilinear, s8 cells,
+* `zwgru_kfzw_lookup` (0x41D334) — `KFZW(nmot_w, rl_w)`,
+* `zwgru_build` (0x41D38C) — the base-angle sum, with an optional
+  `ethanol_offset` argument at exactly the point §11 patches,
+* `KFZWOP` for comparison.
+
+`tests/test_zw_model.py` runs the **real functions out of the dump** under
+A5's Unicorn harness (`emu/Med9Emu`) and compares them with the model:
+
+```
+$ ./.venv/bin/python -m unittest tests.test_zw_model -v
+...
+Ran 8 tests in 1.7s
+OK
+```
+
+What it covers: both KFZW axes searched at every breakpoint, one below, one
+above, the midpoints and every hint index (the hint must not change the
+result — it does not); `interp_2d_s8` over every cell corner of the real
+KFZW array plus four fractional positions per cell; `FUN_0041d334` end to end
+with nmot_w/rl_w in RAM, including that it writes the axis keys back to
+0x7FD5EC/0x7FD5F0; and `FUN_0041d38c` over a 9x9 input grid crossed with five
+correction sets.
+
+**The check found a real modelling error**, which is why it is worth having:
+the three tester-adaptation bytes `FUN_0041d38c` reads are **not**
+consecutive. The disassembly is `lbz r12,0x16(r13)` / `lbz r11,0x17(r13)` for
+the codeword-gated difference and `lbz r11,0x14(r13)` for the always-added
+term, i.e. **0x800006 - 0x800007** and **0x800004** with r13 = 0x7FFFF0 —
+not `DAT_00800004[0..2]` as Ghidra's `._0_1_` / `._2_1_` field names suggest.
+
+`./.venv/bin/python -m emu.zw_model` prints the KFZW table in degrees and
+these spot checks:
+
+| nmot, rl | KFZW | KFZWOP | headroom |
+|---|---|---|---|
+| 1800 rpm, 35 % | 27.75 ° | 29.25 ° | 1.50 ° |
+| 3000 rpm, 60 % | 24.75 ° | 27.75 ° | 3.00 ° |
+| 4500 rpm, 90 % | 22.50 ° | 31.50 ° | 9.00 ° |
+| 6000 rpm, 100 % | 24.75 ° | 33.00 ° | 8.25 ° |
+
+`KFZWOP > KFZW` everywhere, and the gap widens exactly where the engine is
+knock-limited. That gap is the physical budget an ethanol advance can spend:
+the flex-fuel offset should stay inside it, which is a useful sanity bound for
+the `dzw_E(nmot, rl)` map of `docs/05_flexfuel_design.md` §3.4 (its proposed
++0..+2 °, up to +6 ° at high load, fits).
