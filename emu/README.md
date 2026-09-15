@@ -145,4 +145,6 @@ project.
 | `memmap.py` | the address map, peripheral names, consistency check against `tools/med9lib.py` |
 | `core.py` | `Med9Emu`, `Result`, `Access`, `SprAccess`; also a small CLI (`python3 -m emu.core --call 0x11E44 --arg 0xFF800140`) |
 | `boot_trace.py` | `python3 -m emu.boot_trace`: the two-stage boot report above |
+| `zw_model.py` | brief B7: bit-exact model of the base-ignition path (`KFZW`, `zwgru_build`); `python3 -m unittest tests.test_zw_model` |
+| `start_model.py` | brief B8: bit-exact model of the start path -- the cranking fuel factor `ksta` (`%ESSTT`, 0x41A268) and the start ignition angle `zwstt` (0x431294), with the two flex-fuel insertion points S1 and Z1; `python3 -m emu.start_model` prints both tables, `python3 -m unittest tests.test_start_model` checks them against the real code |
 | `../tests/test_emu.py` | the regression tests for all of it |

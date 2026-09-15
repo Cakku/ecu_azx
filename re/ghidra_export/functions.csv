@@ -1896,7 +1896,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x0BD3E0,0x0BD3E0,ext_flash,func,FUN_000bd3e0,0xB0,ghidra passat_azx_ori.bin 2026-09-15 @0BD3E0,hypothesis,ghidra,
 0x0BD490,0x0BD490,ext_flash,func,FUN_000bd490,0xFC,ghidra passat_azx_ori.bin 2026-09-15 @0BD490,hypothesis,ghidra,
 0x0BD5A8,0x0BD5A8,ext_flash,func,FUN_000bd5a8,0x140,ghidra passat_azx_ori.bin 2026-09-15 @0BD5A8,hypothesis,ghidra,
-0x0BD6E8,0x0BD6E8,ext_flash,func,FUN_000bd6e8,0x1AC,ghidra passat_azx_ori.bin 2026-09-15 @0BD6E8,hypothesis,ghidra,
+0x0BD6E8,0x0BD6E8,ext_flash,func,engine_running_detect,0x1AC,ghidra passat_azx_ori.bin 2026-09-15 @0BD6E8,static,ghidra,"VERIFIED-STATIC (B8, issue #16). Writes 0x7FEAD0 (engine not running) / 0x7FEAD1 from the speed-signal counter 0x7FCE98 and the segment period 0x7FD68C against 200000000 / KAL(0x5C866C). 0x7FEAD0 is what latches tmst. re/findings/start.md sections 2 and 4."
 0x0BD894,0x0BD894,ext_flash,func,FUN_000bd894,0x34,ghidra passat_azx_ori.bin 2026-09-15 @0BD894,hypothesis,ghidra,
 0x0BD8C8,0x0BD8C8,ext_flash,func,FUN_000bd8c8,0x11C,ghidra passat_azx_ori.bin 2026-09-15 @0BD8C8,hypothesis,ghidra,
 0x0BD9E4,0x0BD9E4,ext_flash,func,FUN_000bd9e4,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0BD9E4,hypothesis,ghidra,
@@ -1998,7 +1998,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x0D0560,0x0D0560,ext_flash,func,FUN_000d0560,0x358,ghidra passat_azx_ori.bin 2026-09-15 @0D0560,hypothesis,ghidra,
 0x0D09A8,0x0D09A8,ext_flash,func,FUN_000d09a8,0x160,ghidra passat_azx_ori.bin 2026-09-15 @0D09A8,hypothesis,ghidra,
 0x0D0B08,0x0D0B08,ext_flash,func,FUN_000d0b08,0x160,ghidra passat_azx_ori.bin 2026-09-15 @0D0B08,hypothesis,ghidra,
-0x0D0DFC,0x0D0DFC,ext_flash,func,FUN_000d0dfc,0x8C,ghidra passat_azx_ori.bin 2026-09-15 @0D0DFC,hypothesis,ghidra,
+0x0D0DFC,0x0D0DFC,ext_flash,func,afterstart_timer,0x8C,ghidra passat_azx_ori.bin 2026-09-15 @0D0DFC,static,ghidra,"VERIFIED-STATIC (B8, issue #16). Increments the u16 after-start timer 0x8011D8 while the engine turns (0x7FE91F), saturating at 0xFFFF, and clears 0x7FE920/0x7FE921/0x7FE91D/0x7FD05B whenever 0x7FEAD0 is set. Also the two start-speed threshold curves 0x7FD059/0x7FD05A. re/findings/start.md section 4."
 0x0D0E88,0x0D0E88,ext_flash,func,FUN_000d0e88,0x134,ghidra passat_azx_ori.bin 2026-09-15 @0D0E88,hypothesis,ghidra,
 0x0D0FBC,0x0D0FBC,ext_flash,func,FUN_000d0fbc,0xAC,ghidra passat_azx_ori.bin 2026-09-15 @0D0FBC,hypothesis,ghidra,
 0x0D1068,0x0D1068,ext_flash,func,FUN_000d1068,0xD8,ghidra passat_azx_ori.bin 2026-09-15 @0D1068,hypothesis,ghidra,
@@ -2298,7 +2298,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x11A780,0x11A780,ext_flash,func,FUN_0011a780,0x118,ghidra passat_azx_ori.bin 2026-09-15 @11A780,hypothesis,ghidra,
 0x11A898,0x11A898,ext_flash,func,FUN_0011a898,0x18C,ghidra passat_azx_ori.bin 2026-09-15 @11A898,hypothesis,ghidra,
 0x11AA24,0x11AA24,ext_flash,func,FUN_0011aa24,0x4,ghidra passat_azx_ori.bin 2026-09-15 @11AA24,hypothesis,ghidra,
-0x11AA28,0x11AA28,ext_flash,func,FUN_0011aa28,0x4BC,ghidra passat_azx_ori.bin 2026-09-15 @11AA28,hypothesis,ghidra,
+0x11AA28,0x11AA28,ext_flash,func,tmot_init,0x4BC,ghidra passat_azx_ori.bin 2026-09-15 @11AA28,static,ghidra,"VERIFIED-STATIC (B8, issue #16). Init of the coolant-temperature module: ~20 calibration defaults into 0x8021xx / 0x8022xx plus the same tmot_w / tmot computation as tmot_task. re/findings/start.md section 1."
 0x11AEE4,0x11AEE4,ext_flash,func,FUN_0011aee4,0xA0,ghidra passat_azx_ori.bin 2026-09-15 @11AEE4,hypothesis,ghidra,
 0x11AF84,0x11AF84,ext_flash,func,FUN_0011af84,0x84,ghidra passat_azx_ori.bin 2026-09-15 @11AF84,hypothesis,ghidra,
 0x11B008,0x11B008,ext_flash,func,FUN_0011b008,0x3C,ghidra passat_azx_ori.bin 2026-09-15 @11B008,hypothesis,ghidra,
@@ -2410,7 +2410,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x1201C0,0x1201C0,ext_flash,func,FUN_001201c0,0x54,ghidra passat_azx_ori.bin 2026-09-15 @1201C0,hypothesis,ghidra,
 0x120214,0x120214,ext_flash,func,FUN_00120214,0x144,ghidra passat_azx_ori.bin 2026-09-15 @120214,hypothesis,ghidra,
 0x120358,0x120358,ext_flash,func,FUN_00120358,0x114,ghidra passat_azx_ori.bin 2026-09-15 @120358,hypothesis,ghidra,
-0x12046C,0x12046C,ext_flash,thunk,thunk_FUN_004324dc,0x4,ghidra passat_azx_ori.bin 2026-09-15 @12046C,hypothesis,ghidra,
+0x12046C,0x12046C,ext_flash,thunk,tmot_task,0x4,ghidra passat_azx_ori.bin 2026-09-15 @12046C,hypothesis,ghidra,
 0x120470,0x120470,ext_flash,func,FUN_00120470,0xE8,ghidra passat_azx_ori.bin 2026-09-15 @120470,hypothesis,ghidra,
 0x120558,0x120558,ext_flash,func,FUN_00120558,0x18,ghidra passat_azx_ori.bin 2026-09-15 @120558,hypothesis,ghidra,
 0x120570,0x120570,ext_flash,func,task_100ms_epilogue,0x30,ghidra passat_azx_ori.bin 2026-09-15 @120570,static,ghidra,"VERIFIED-STATIC (B1, issue #11, 2026-09-15). Called at 0x1206B0, the last call of task_100ms. bl 0x1447C0; bl 0x13CA1C; increments the activation counter at r13-0x2898; b os_deadline_supervisor."
@@ -3182,22 +3182,22 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x419328,0x215328,int_flash,func,FUN_00419328,0x974,ghidra passat_azx_ori.bin 2026-09-15 @419328,hypothesis,ghidra,
 0x419C9C,0x215C9C,int_flash,func,FUN_00419c9c,0xC,ghidra passat_azx_ori.bin 2026-09-15 @419C9C,hypothesis,ghidra,
 0x419CA8,0x215CA8,int_flash,func,FUN_00419ca8,0x4,ghidra passat_azx_ori.bin 2026-09-15 @419CA8,hypothesis,ghidra,
-0x419CAC,0x215CAC,int_flash,func,FUN_00419cac,0x2C,ghidra passat_azx_ori.bin 2026-09-15 @419CAC,hypothesis,ghidra,
-0x419CD8,0x215CD8,int_flash,func,FUN_00419cd8,0x64,ghidra passat_azx_ori.bin 2026-09-15 @419CD8,hypothesis,ghidra,
+0x419CAC,0x215CAC,int_flash,func,start_flag_build,0x2C,ghidra passat_azx_ori.bin 2026-09-15 @419CAC,static,ghidra,"VERIFIED-STATIC (B8, issue #16). B_st (0x7FE91D) = 0x7FEAD0 ? 0 : (0x7FE91F ? 1 : keep). re/findings/start.md section 4."
+0x419CD8,0x215CD8,int_flash,func,start_end_build,0x64,ghidra passat_azx_ori.bin 2026-09-15 @419CD8,static,ghidra,"VERIFIED-STATIC (B8, issue #16). 0x7FE920 (start end) = B_st && (0x7FD058 & 1); 0x7FD05B counts cycles since then; B_stend 0x7FE921 = 0x7FD05B > 3. re/findings/start.md section 4."
 0x419D3C,0x215D3C,int_flash,func,FUN_00419d3c,0x4,ghidra passat_azx_ori.bin 2026-09-15 @419D3C,hypothesis,ghidra,
 0x419D40,0x215D40,int_flash,func,FUN_00419d40,0x64,ghidra passat_azx_ori.bin 2026-09-15 @419D40,hypothesis,ghidra,
-0x419DA4,0x215DA4,int_flash,func,FUN_00419da4,0x4C0,ghidra passat_azx_ori.bin 2026-09-15 @419DA4,hypothesis,ghidra,
+0x419DA4,0x215DA4,int_flash,func,mixture_running_build,0x4C0,ghidra passat_azx_ori.bin 2026-09-15 @419DA4,static,ghidra,"VERIFIED-STATIC (B8, issue #16). Builds 0x803020 (Q12, 4096 = 1.0), the mixture factor gk_rk uses once the start has ended: 0x80301C from the sub-factors 0x7FD261/0x7FD263/0x7FD265/0x7FD266/0x7FD267 and 0x801CF7..0x801D06; 0x803022 = 0x80301C + 0x1000; 0x803020 = mul_q15(0x803026, (0x7FD264 * 0x803022) >> 7), stored at 0x41A250. Insertion point S2 of re/findings/start.md section 4.2."
 0x41A264,0x216264,int_flash,func,FUN_0041a264,0x4,ghidra passat_azx_ori.bin 2026-09-15 @41A264,hypothesis,ghidra,
-0x41A268,0x216268,int_flash,func,FUN_0041a268,0x424,ghidra passat_azx_ori.bin 2026-09-15 @41A268,hypothesis,ghidra,
+0x41A268,0x216268,int_flash,func,esstt_ksta,0x424,ghidra passat_azx_ori.bin 2026-09-15 @41A268,dynamic,ghidra,"VERIFIED-DYNAMIC (B8, issue #16). %ESSTT low-pressure start quantity. Early-out: if B_stend (0x7FE921) then ksta_adapted (0x80302C) = 0x400 = 1.0. Otherwise anztist(0x7FD269) = clamp(0x7FD298-0x7FD26B); 0x80302A = KFWKSTT(0x5C6C60; tmst,anztist) * KFKSTT(0x5C6E24; tmst,prist) >> 7; * KFWKSTN(0x5C6C46; tmst,nmot8) >> 8; * 0x7FD067 (Q7); * map 0x5D3739(tmst,0x800EEC) -> ksta 0x803028; 0x80302C = kstaa(0x7FD27B) * max(ksta,0x400) >> 7. u16 with 1024 = 1.0. Model + emulator check: emu/start_model.py, tests/test_start_model.py. re/findings/start.md section 3."
 0x41A68C,0x21668C,int_flash,func,FUN_0041a68c,0x4,ghidra passat_azx_ori.bin 2026-09-15 @41A68C,hypothesis,ghidra,
-0x41A690,0x216690,int_flash,func,FUN_0041a690,0x19C,ghidra passat_azx_ori.bin 2026-09-15 @41A690,hypothesis,ghidra,
+0x41A690,0x216690,int_flash,func,esstt_ksta_hdr,0x19C,ghidra passat_azx_ori.bin 2026-09-15 @41A690,static,ghidra,"VERIFIED-STATIC (B8, issue #16). High-pressure-start twin of esstt_ksta: same structure on KFKSTTHDR (0x5C6E66) and KFWKSTTHDR (0x5C6D40); shares KFWKSTN (0x5C6C50) and the 0x5D3745 weighting. Publishes the same 0x80302C at 0x41A808. Runs only while B_stend (0x7FE921) is clear. re/findings/start.md section 3."
 0x41A82C,0x21682C,int_flash,func,FUN_0041a82c,0x208,ghidra passat_azx_ori.bin 2026-09-15 @41A82C,hypothesis,ghidra,
 0x41AA34,0x216A34,int_flash,func,FUN_0041aa34,0x14,ghidra passat_azx_ori.bin 2026-09-15 @41AA34,hypothesis,ghidra,
 0x41AA48,0x216A48,int_flash,func,gk_rk,0x39C,ghidra passat_azx_ori.bin 2026-09-15 @41AA48,static,ghidra,"VERIFIED-STATIC. Gemischkontrolle: base fuel mass * fr (0x802DF8 / 0x802E00, Q15) + fra (0x801D1A) * frm (0x801E36 / 0x801E28, Q15), minus 0x80315C, then the ZGST per-cylinder factor 0x801D8C[cyl]; publishes rk at RAM 0x803038 with the sth at 0x41ADD4. B6 #14, re/findings/injection.md section 9"
 0x41ADE4,0x216DE4,int_flash,func,FUN_0041ade4,0x8C,ghidra passat_azx_ori.bin 2026-09-15 @41ADE4,hypothesis,ghidra,
 0x41AE70,0x216E70,int_flash,func,FUN_0041ae70,0xB8,ghidra passat_azx_ori.bin 2026-09-15 @41AE70,hypothesis,ghidra,
 0x41AF2C,0x216F2C,int_flash,func,FUN_0041af2c,0x50,ghidra passat_azx_ori.bin 2026-09-15 @41AF2C,hypothesis,ghidra,
-0x41AF7C,0x216F7C,int_flash,func,FUN_0041af7c,0x7E0,ghidra passat_azx_ori.bin 2026-09-15 @41AF7C,hypothesis,ghidra,
+0x41AF7C,0x216F7C,int_flash,func,stadap_kstaa,0x7E0,ghidra passat_azx_ori.bin 2026-09-15 @41AF7C,static,ghidra,"VERIFIED-STATIC (B8, issue #16). %STADAP start-quantity adaptation. Maintains the adaptation bytes 0x7FD278/0x7FD279/0x7FD27A behind the state word 0x801D2E and publishes kstaa = 0x7FD27B at 0x41B6B0 (u8, 128 = 1.0), which esstt_ksta multiplies ksta by. re/findings/start.md section 3.2."
 0x41B75C,0x21775C,int_flash,func,FUN_0041b75c,0x1E0,ghidra passat_azx_ori.bin 2026-09-15 @41B75C,hypothesis,ghidra,
 0x41B93C,0x21793C,int_flash,func,FUN_0041b93c,0x3C,ghidra passat_azx_ori.bin 2026-09-15 @41B93C,hypothesis,ghidra,
 0x41B978,0x217978,int_flash,func,FUN_0041b978,0x2C,ghidra passat_azx_ori.bin 2026-09-15 @41B978,hypothesis,ghidra,
@@ -3433,11 +3433,11 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x430E04,0x22CE04,int_flash,func,FUN_00430e04,0x3C,ghidra passat_azx_ori.bin 2026-09-15 @430E04,hypothesis,ghidra,
 0x430E40,0x22CE40,int_flash,func,FUN_00430e40,0x60,ghidra passat_azx_ori.bin 2026-09-15 @430E40,hypothesis,ghidra,
 0x430EA0,0x22CEA0,int_flash,func,FUN_00430ea0,0x228,ghidra passat_azx_ori.bin 2026-09-15 @430EA0,hypothesis,ghidra,
-0x4310C8,0x22D0C8,int_flash,func,FUN_004310c8,0x78,ghidra passat_azx_ori.bin 2026-09-15 @4310C8,hypothesis,ghidra,
+0x4310C8,0x22D0C8,int_flash,func,zwgru_10ms_driver,0x78,ghidra passat_azx_ori.bin 2026-09-15 @4310C8,static,ghidra,"VERIFIED-STATIC (B8, issue #16). 10 ms driver of the base ignition: sets 0x7FEA72 = (nmot8 < 0x5C76BE), recomputes zwgru_kfzw/zwgru_dzw here when the speed is above that threshold, and computes 0x7FD313 = KF(0x5C76D5; nmot8, efficiency 0x7FD271) -- the warm-up/torque-reserve ignition term that zwgru_build adds. re/findings/start.md section 5.1."
 0x431140,0x22D140,int_flash,func,FUN_00431140,0x94,ghidra passat_azx_ori.bin 2026-09-15 @431140,hypothesis,ghidra,
 0x4311D4,0x22D1D4,int_flash,func,FUN_004311d4,0x54,ghidra passat_azx_ori.bin 2026-09-15 @4311D4,hypothesis,ghidra,
 0x431228,0x22D228,int_flash,func,FUN_00431228,0x6C,ghidra passat_azx_ori.bin 2026-09-15 @431228,hypothesis,ghidra,
-0x431294,0x22D294,int_flash,func,FUN_00431294,0x10C,ghidra passat_azx_ori.bin 2026-09-15 @431294,hypothesis,ghidra,
+0x431294,0x22D294,int_flash,func,zwstt_build,0x10C,ghidra passat_azx_ori.bin 2026-09-15 @431294,dynamic,ghidra,"VERIFIED-DYNAMIC (B8, issue #16). Start ignition angle -> zwstt 0x802096 (s8, 0.75 deg CA per LSB), stb at 0x431384. Runs only while 0x7FECCA (= B_stend) is clear. KFZWSTT(0x5C7B64; zdgz 0x7FCE14, tmst) + KFZWSTN(0x5C7B23; nmot8, tmst), or the 0x5C7B40 map when 0x7FCE0C bit 1 is set, plus the 1D s8 term 0x5C7BAB over 0x7FD3E5. INSERTION POINT Z1 for a start-ignition ethanol offset. re/findings/start.md section 5."
 0x4313A0,0x22D3A0,int_flash,func,FUN_004313a0,0x4,ghidra passat_azx_ori.bin 2026-09-15 @4313A0,hypothesis,ghidra,
 0x4313A4,0x22D3A4,int_flash,func,FUN_004313a4,0xA24,ghidra passat_azx_ori.bin 2026-09-15 @4313A4,hypothesis,ghidra,
 0x431DC8,0x22DDC8,int_flash,func,FUN_00431dc8,0x120,ghidra passat_azx_ori.bin 2026-09-15 @431DC8,hypothesis,ghidra,
@@ -3446,7 +3446,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x432134,0x22E134,int_flash,func,FUN_00432134,0xA8,ghidra passat_azx_ori.bin 2026-09-15 @432134,hypothesis,ghidra,
 0x4321DC,0x22E1DC,int_flash,func,FUN_004321dc,0x54,ghidra passat_azx_ori.bin 2026-09-15 @4321DC,hypothesis,ghidra,
 0x432230,0x22E230,int_flash,func,FUN_00432230,0x2AC,ghidra passat_azx_ori.bin 2026-09-15 @432230,hypothesis,ghidra,
-0x4324DC,0x22E4DC,int_flash,func,FUN_004324dc,0xC0,ghidra passat_azx_ori.bin 2026-09-15 @4324DC,hypothesis,ghidra,
+0x4324DC,0x22E4DC,int_flash,func,tmot_task,0xC0,ghidra passat_azx_ori.bin 2026-09-15 @4324DC,static,ghidra,"VERIFIED-STATIC (B8, issue #16). Cyclic coolant-temperature conversion: every tenth call (counter 0x8021DC) tmot_w (0x802228) = lookup_1d_u16(curve 0x5D770E or the substitute 0x5D76BC, raw ADC 0x80345A) and tmot (0x8021EF) = tmot_w >> 8. re/findings/start.md section 1."
 0x43259C,0x22E59C,int_flash,func,FUN_0043259c,0x68,ghidra passat_azx_ori.bin 2026-09-15 @43259C,hypothesis,ghidra,
 0x432604,0x22E604,int_flash,func,FUN_00432604,0x2AC,ghidra passat_azx_ori.bin 2026-09-15 @432604,hypothesis,ghidra,
 0x4328B0,0x22E8B0,int_flash,thunk,thunk_FUN_00432604,0x4,ghidra passat_azx_ori.bin 2026-09-15 @4328B0,hypothesis,ghidra,
@@ -3476,7 +3476,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x436154,0x232154,int_flash,func,FUN_00436154,0x48,ghidra passat_azx_ori.bin 2026-09-15 @436154,hypothesis,ghidra,
 0x43619C,0x23219C,int_flash,func,FUN_0043619c,0x80,ghidra passat_azx_ori.bin 2026-09-15 @43619C,hypothesis,ghidra,
 0x43621C,0x23221C,int_flash,func,zwopt_delta_maps,0xB8,ghidra passat_azx_ori.bin 2026-09-15 @43621C,static,ghidra,"VERIFIED-STATIC (B7, issue #15). Reads the two 16x11 s8 KFZWOP delta maps 0x5C9E25 (axis block 0x5C9E08) and 0x5C9EF2 (axis block 0x5C9ED5); both all zeros in this dataset. Also a 1-D curve at 0x5C9FA2."
-0x4362D4,0x2322D4,int_flash,func,FUN_004362d4,0x180,ghidra passat_azx_ori.bin 2026-09-15 @4362D4,hypothesis,ghidra,
+0x4362D4,0x2322D4,int_flash,func,zw_eta_offset,0x180,ghidra passat_azx_ori.bin 2026-09-15 @4362D4,static,ghidra,"VERIFIED-STATIC (B8, issue #16). Converts the torque coordinator's efficiency demand 0x803042 (u16, 4096 = 1.0) into the additive ignition angle 0x800004 (s8); exactly 0 when the demand is 1.0. Second half of the warm-up / catalyst-heating retard path. re/findings/start.md section 5.1."
 0x436454,0x232454,int_flash,func,FUN_00436454,0x44,ghidra passat_azx_ori.bin 2026-09-15 @436454,hypothesis,ghidra,
 0x436498,0x232498,int_flash,func,FUN_00436498,0x58,ghidra passat_azx_ori.bin 2026-09-15 @436498,hypothesis,ghidra,
 0x4364F0,0x2324F0,int_flash,func,FUN_004364f0,0x4,ghidra passat_azx_ori.bin 2026-09-15 @4364F0,hypothesis,ghidra,
@@ -3569,7 +3569,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x442B74,0x23EB74,int_flash,func,FUN_00442b74,0x34,ghidra passat_azx_ori.bin 2026-09-15 @442B74,hypothesis,ghidra,
 0x442BA8,0x23EBA8,int_flash,func,FUN_00442ba8,0x6C,ghidra passat_azx_ori.bin 2026-09-15 @442BA8,hypothesis,ghidra,
 0x442C14,0x23EC14,int_flash,func,FUN_00442c14,0x4,ghidra passat_azx_ori.bin 2026-09-15 @442C14,hypothesis,ghidra,
-0x442C18,0x23EC18,int_flash,func,FUN_00442c18,0x478,ghidra passat_azx_ori.bin 2026-09-15 @442C18,hypothesis,ghidra,
+0x442C18,0x23EC18,int_flash,func,eta_coordinator,0x478,ghidra passat_azx_ori.bin 2026-09-15 @442C18,static,ghidra,"VERIFIED-STATIC (B8, issue #16). Torque-coordinator efficiency setpoints 0x803046 / 0x803044 (u16, 4096 = 1.0), their mean 0x803042 and 0x7FD271 = 0x803042 >> 5 (u8, 128 = 1.0). Default 0x1000 = 1.0 when 0x7FB69A bit 0 is clear. re/findings/start.md section 5.1."
 0x443090,0x23F090,int_flash,func,FUN_00443090,0x1C0,ghidra passat_azx_ori.bin 2026-09-15 @443090,hypothesis,ghidra,
 0x443250,0x23F250,int_flash,func,FUN_00443250,0xD8,ghidra passat_azx_ori.bin 2026-09-15 @443250,hypothesis,ghidra,
 0x443328,0x23F328,int_flash,func,FUN_00443328,0x7C,ghidra passat_azx_ori.bin 2026-09-15 @443328,hypothesis,ghidra,

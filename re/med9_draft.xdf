@@ -3144,8 +3144,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x49" flags="0x30">
-    <title>cand_KF_5C6C50</title>
-    <description>map_2d at CPU 0x5C6C50 (file 0x1C6C50), 4x4 u8. enumerate_maps.py; lookup_2d_u8; 2 call site(s): 0x41A5CC 0x41A75C; struct 0x5C6C46</description>
+    <title>KFWKSTN</title>
+    <description>map_2d at CPU 0x5C6C50 (file 0x1C6C50), 4x4 u8. B8 issue #16, re/findings/start.md S3.1; speed weighting of the start factor f(tmst, nmot), 4x4 u8 256 = 1.0, all cells 255 (off); 0x41A5CC/0x41A75C; VERIFIED-DYNAMIC via tests/test_start_model.py</description>
     <CATEGORYMEM index="0" category="0x3"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1C6C4C" mmedelementsizebits="8" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -3185,8 +3185,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x4A" flags="0x30">
-    <title>cand_KF_5C6C7C</title>
-    <description>map_2d at CPU 0x5C6C7C (file 0x1C6C7C), 14x12 u8. enumerate_maps.py; lookup_2d_u8; 2 call site(s): 0x41A520 0x41A590; struct 0x5C6C60</description>
+    <title>KFWKSTT</title>
+    <description>map_2d at CPU 0x5C6C7C (file 0x1C6C7C), 14x12 u8. B8 issue #16, re/findings/start.md S3.1; decay of the start enrichment over the injection count, 12 tmst x 14 anztist, u8 128 = 1.0; 0x41A520/0x41A590; VERIFIED-DYNAMIC via tests/test_start_model.py</description>
     <CATEGORYMEM index="0" category="0x3"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1C6C6E" mmedelementsizebits="8" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -3226,8 +3226,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x4B" flags="0x30">
-    <title>cand_KF_5C6D40</title>
-    <description>map_2d at CPU 0x5C6D40 (file 0x1C6D40), 14x12 u8. enumerate_maps.py; lookup_2d_u8; 1 call site(s): 0x41A6FC; struct 0x5C6D24</description>
+    <title>KFWKSTTHDR</title>
+    <description>map_2d at CPU 0x5C6D40 (file 0x1C6D40), 14x12 u8. B8 issue #16, re/findings/start.md S3.1; high-pressure-start twin of KFWKSTT, 12 tmst x 14, u8; only caller FUN_0041a690 at 0x41A6FC</description>
     <CATEGORYMEM index="0" category="0x3"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1C6D32" mmedelementsizebits="8" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -3390,8 +3390,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x4F" flags="0x30">
-    <title>cand_GKF_5C6E24</title>
-    <description>map_2d_shared at CPU 0x5C6E24 (file 0x1C6E24), 2x12 u16. enumerate_maps.py; lookup_2d_g_u8_u16_u16; 2 call site(s): 0x41A50C 0x41A57C</description>
+    <title>KFKSTT</title>
+    <description>map_2d_shared at CPU 0x5C6E24 (file 0x1C6E24), 2x12 u16. B8 issue #16, re/findings/start.md S3.1; start quantity factor f(tmst, prist), 12x2 u16, 1024 = 1.0; read at 0x41A50C/0x41A57C in FUN_0041a268; VERIFIED-DYNAMIC via tests/test_start_model.py</description>
     <CATEGORYMEM index="0" category="0x6"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1C6E20" mmedelementsizebits="16" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -3431,8 +3431,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x50" flags="0x30">
-    <title>cand_GKF_5C6E66</title>
-    <description>map_2d_shared at CPU 0x5C6E66 (file 0x1C6E66), 2x12 u8. enumerate_maps.py; lookup_2d_g_u8_u16_u8; 1 call site(s): 0x41A720</description>
+    <title>KFKSTTHDR</title>
+    <description>map_2d_shared at CPU 0x5C6E66 (file 0x1C6E66), 2x12 u8. B8 issue #16, re/findings/start.md S3.1; high-pressure-start twin of KFKSTT, 12 tmst x 2 prist, u8; only caller FUN_0041a690 at 0x41A720</description>
     <CATEGORYMEM index="0" category="0x6"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1C6E62" mmedelementsizebits="16" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -3472,8 +3472,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x51" flags="0x30">
-    <title>cand_GKF_5C6E8C</title>
-    <description>map_2d_shared at CPU 0x5C6E8C (file 0x1C6E8C), 4x4 u8. enumerate_maps.py; lookup_2d_g_u16_u8_u8; 1 call site(s): 0x41A544</description>
+    <title>cand_KFWKSTAB</title>
+    <description>map_2d_shared at CPU 0x5C6E8C (file 0x1C6E8C), 4x4 u8. B8 issue #16, re/findings/start.md S3.1; 4x4 u8 repeat-start weighting f(0x80218C, tmst) used only on the FUN_0041a268 0x7FEA29 branch, 0x41A544</description>
     <CATEGORYMEM index="0" category="0x6"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1C6E88" mmedelementsizebits="8" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -3595,8 +3595,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x54" flags="0x30">
-    <title>cand_GKF_5C6F36</title>
-    <description>map_2d_shared at CPU 0x5C6F36 (file 0x1C6F36), 12x12 u16. enumerate_maps.py; lookup_2d_g_u8_u16_u16; 1 call site(s): 0x44319C</description>
+    <title>cand_KFETAKS</title>
+    <description>map_2d_shared at CPU 0x5C6F36 (file 0x1C6F36), 12x12 u16. B8 issue #16, re/findings/start.md S5.1; 12 tmst x 12 u16 (4096 = 1.0) cold-start efficiency derate feeding the torque coordinator; 0x44319C</description>
     <CATEGORYMEM index="0" category="0x6"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1C6F1E" mmedelementsizebits="16" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -4712,8 +4712,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x6E" flags="0x30">
-    <title>cand_GKF_5C76D5</title>
-    <description>map_2d_shared at CPU 0x5C76D5 (file 0x1C76D5), 12x8 s8. enumerate_maps.py; lookup_2d_g_u8_u8_s8; 1 call site(s): 0x431128</description>
+    <title>cand_KFZWETA</title>
+    <description>map_2d_shared at CPU 0x5C76D5 (file 0x1C76D5), 12x8 s8. B8 issue #16, re/findings/start.md S5.1; 8 nmot x 12 efficiency s8 ignition correction, x axis 83..154 = eta 0.65..1.20 (0x7FD271 = 0x803042&gt;&gt;5); result 0x7FD313 is added by zwgru_build; 0x4310E8</description>
     <CATEGORYMEM index="0" category="0x6"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1C76C9" mmedelementsizebits="8" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -5254,8 +5254,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x78" flags="0x30">
-    <title>cand_GKF_5C7B23</title>
-    <description>map_2d_shared at CPU 0x5C7B23 (file 0x1C7B23), 6x3 s8. enumerate_maps.py; lookup_2d_g_u8_u8_s8; 1 call site(s): 0x431328</description>
+    <title>KFZWSTN</title>
+    <description>map_2d_shared at CPU 0x5C7B23 (file 0x1C7B23), 6x3 s8. B8 issue #16, re/findings/start.md S5; speed term added to zwstt, 3 nmot x 6 tmst s8, all zero in this dataset; 0x431328; VERIFIED-DYNAMIC</description>
     <CATEGORYMEM index="0" category="0x6"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1C7B1D" mmedelementsizebits="8" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -5295,8 +5295,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x79" flags="0x30">
-    <title>cand_GKF_5C7B40</title>
-    <description>map_2d_shared at CPU 0x5C7B40 (file 0x1C7B40), 6x3 s8. enumerate_maps.py; lookup_2d_g_u8_u8_s8; 1 call site(s): 0x4312DC</description>
+    <title>cand_KFZWSTT2</title>
+    <description>map_2d_shared at CPU 0x5C7B40 (file 0x1C7B40), 6x3 s8. B8 issue #16, re/findings/start.md S5; alternative start-angle map used when 0x7FCE0C bit 1 is set, 3 nmot x 6 tmst s8; 0x4312DC; VERIFIED-DYNAMIC</description>
     <CATEGORYMEM index="0" category="0x6"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1C7B3A" mmedelementsizebits="8" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -5336,8 +5336,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x7A" flags="0x30">
-    <title>cand_GKF_5C7B64</title>
-    <description>map_2d_shared at CPU 0x5C7B64 (file 0x1C7B64), 8x8 s8. enumerate_maps.py; lookup_2d_g_u8_u8_s8; 1 call site(s): 0x431304</description>
+    <title>KFZWSTT</title>
+    <description>map_2d_shared at CPU 0x5C7B64 (file 0x1C7B64), 8x8 s8. B8 issue #16, re/findings/start.md S5; start ignition angle f(zdgz 0x7FCE14, tmst), 8x8 s8 at 0.75 deg CA/LSB, -49.5 deg at the first cold fire; 0x431304; VERIFIED-DYNAMIC via tests/test_start_model.py</description>
     <CATEGORYMEM index="0" category="0x6"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1C7B5C" mmedelementsizebits="8" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -5377,8 +5377,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x7B" flags="0x30">
-    <title>cand_GKL_5C7BAB</title>
-    <description>curve_1d_shared at CPU 0x5C7BAB (file 0x1C7BAB), 6x1 s8. enumerate_maps.py; lookup_1d_g_u8_s8; 1 call site(s): 0x431360</description>
+    <title>cand_KLZWSTT</title>
+    <description>curve_1d_shared at CPU 0x5C7BAB (file 0x1C7BAB), 6x1 s8. B8 issue #16, re/findings/start.md S5; 1D s8 term added to zwstt over RAM 0x7FD3E5, all zero in this dataset; 0x431360; VERIFIED-DYNAMIC</description>
     <CATEGORYMEM index="0" category="0x2"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1C7BA5" mmedelementsizebits="8" mmedmajorstridebits="0" mmedminorstridebits="0"/>
@@ -26548,8 +26548,8 @@
     </XDFAXIS>
   </XDFTABLE>
   <XDFTABLE uniqueid="0x26F" flags="0x30">
-    <title>cand_KF_5D3745</title>
-    <description>map_2d at CPU 0x5D3745 (file 0x1D3745), 4x6 u8. enumerate_maps.py; lookup_2d_u8; 2 call site(s): 0x41A614 0x41A7A8; struct 0x5D3739</description>
+    <title>cand_KFWKST_EEC</title>
+    <description>map_2d at CPU 0x5D3745 (file 0x1D3745), 4x6 u8. B8 issue #16, re/findings/start.md S3.1; 6 tmst x 4 u8 weighting (128 = 1.0) over RAM 0x800EEC, last factor of ksta; 0x41A614/0x41A7A8</description>
     <CATEGORYMEM index="0" category="0x3"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1D3741" mmedelementsizebits="8" mmedmajorstridebits="0" mmedminorstridebits="0"/>
