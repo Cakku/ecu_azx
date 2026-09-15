@@ -29,3 +29,15 @@ sensor, and a tuning platform for later hardware changes.
 python3 tools/checksum.py verify -q data/passat_azx_ori.bin   # ALL OK (65 blocks)
 python3 tools/layout_report.py data/passat_azx_ori.bin
 ```
+
+## License
+
+Original work here is under the [PolyForm Noncommercial License 1.0.0](LICENSE)
+(`PolyForm-Noncommercial-1.0.0`): free to use, modify and redistribute for any
+noncommercial purpose — hobby, study, research, education, non-profits.
+Commercial use needs separate permission. This is source-available, not open
+source.
+
+The firmware binary, the VW CAN database and the vendored third-party
+toolchains are **not** covered. See [NOTICE.md](NOTICE.md) before copying
+anything from this repo.
