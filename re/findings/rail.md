@@ -481,4 +481,338 @@ should be settled before anyone calibrates a rail raise.
 
 ---
 
-(§8 onwards: the injection window. Written next.)
+## 8. The injection window — units first
+
+The window arithmetic is in the **angle** domain, and its unit follows from
+the one multiply that converts `ti` into an angle (the eight instructions
+immediately before `awea_ti_to_angle`):
+
+```
+0041B9A4  lhz    r12,-0x117C(r13)   ; nmot_w  @ 0x7FEE74, 1 LSB = 0.25 min^-1
+0041B9A8  lis    r11,0x0
+0041B9AC  ori    r11,r11,0x8638     ; 34360
+0041B9B0  mullw  r12,r12,r11
+0041B9B4  rlwinm r12,r12,16,16,31   ; >> 16
+0041B9B8  sth    r12,0x3082(r13)    ; k_nmot @ 0x803072
+```
+
+so `k_nmot = (nmot_w * 34360) >> 16 = rpm * 2.0971680`, and
+`dwi = (ti * k_nmot) >> 13` (0x41BB58, B6). Substituting the physical
+identity `angle[degCA] = t[us] * rpm * 6e-6`:
+
+```
+A  =  T * 8192 * 6e-6 / 2.0971680  =  T * 0.0234375        (A = degCA per angle LSB,
+                                                            T = us per ti LSB)
+```
+
+**The angle LSB is 3/128 degCA = 0.0234375 degCA.** Two independent reasons:
+(a) every u8 angle map in `%AWEA` is scaled by `* 0x20` (32) before use, and
+32 x 3/128 = **0.75 degCA per map count** — the very resolution B7 proved for
+the whole ignition chain (`re/findings/ignition.md`); (b) 720 degCA is then
+exactly **0x7800**, and the hard latest-start constant (§9.2) works out to
+exactly **360.0 degCA**. Neither is true for any neighbouring resolution.
+
+**Therefore T = 1.000, i.e. `ti` is 1 us per LSB.** The fit is
+`2.560117e-4` (from 34360) against `2.560000e-4` (from 1 us and 3/128 degCA),
+0.005 % apart. **This closes the first open item of
+`re/findings/injection.md` §11**: `TIMINP` = 900 is **0.9 ms**, the `KLHDEV`
+axis 550..6500 is 0.55..6.5 ms and the `FKKVS` y axis 0.5..7.0 ms.
+**VERIFIED-STATIC** (arithmetic of 0x41B9A4-0x41B9B8 plus B7's 0.75 degCA).
+
+## 9. `%AWEA` — where the window is checked
+
+Two processes:
+
+| Part | Function | Call site |
+|---|---|---|
+| time-synchronous (angles + margins) | **`awea_angles` 0x45487C** (0x454880-0x454D9F) | `bl` at **0x45CCE8**, the task of §7 |
+| angle-synchronous (the check itself) | **`awea_ti_to_angle` 0x41B9C0** (B6) | `bl` at **0x422484**, `task_segment_a` |
+
+### 9.1 The two window terms
+
+```
+; --- awea_angles 0x45487C, head ---
+if (prist_w > u16 @ 0x5D3CDC = 2600)          ; 13.0 bar
+     0x7FEA48 = 1                             ; model invalid above that, see 12.4
+else {
+     0x7FEA48 = 0
+     0x80306E = min((prist_w * 2) << 16 / 0x7FEFAE, 0xFFFF)     ; pressure ratio
+     0x7FD290 = lookup_1d_g_u16_u8(n=6 @0x5D3BE8, axis 0x5D3BEA, val 0x5D3BF6, 0x80306E)
+     if ((s8)0x7FEF85 > 0 && 0x7FD290 <= 0x7FEF85) 0x7FD290 = 0x7FEF85
+}
+0x7FD28F = lookup_1d_u8(n=6 @0x5D3BDB, axis 0x5D3BDC, val 0x5D3BE2, u8 @ 0x7FD407)
+```
+
+| Term | Table | Contents in this dataset | Physical |
+|---|---|---|---|
+| **`0x7FD290`** required end-of-injection margin | 0x5D3BE8, axis `{1024, 2181, 3717, 7557, 16261, 28416}`, values **`{67 x 6}`** | constant **67** | **50.25 degCA** |
+| **`0x7FD28F`** latest permitted start | 0x5D3BDB, axis `{24, 77, 104, 131, 157, 224}`, values **`{200 x 6}`** | constant **200** (init default 0xC8 = 200 at 0x131250) | **150 degCA** above the 0x2300 base = **360.0 degCA** |
+
+Both curves are **flat** in this dataset, so the window is effectively two
+scalars. That is good news for the flex-fuel work: the margin does not move
+with rail pressure today, and making it move is a pure calibration change.
+
+### 9.2 The start-of-injection angle and the base
+
+```
+; --- awea_angles, homogeneous branch (0x803094 & 1) ---
+if (0x7FE920 != 0)                              ; cranking
+     wbho1s = lookup_2d_u8(0x5D3A01 | 0x5D3AD3, 0x7FD298, 0x7FD3F7) * 0x20 + 0x2300
+else if (0x8033FA & 0x400)  wbho1s = s16 @ 0x5D3CDE
+else {
+     wbho1s = interp_2d_u8((0x7FD419 > u8@0x5D3970=25) ? KFWBHO1SW  0x5D3A83
+                                                       : KFWBHO1SWE 0x5D3A33,
+                           nx = u8 @ 0x5C88DB = 8, key_y = 0x7FD804, key_x = 0x7FD83C)
+              * 0x20 + 0x2300
+     if (0x7FEA49 == 0)
+         wbho1s += (interp_2d_s8(KFDWBHO1SK 0x5D3971, ...) * u8@0x7FD28E) >> 3
+}
+0x803078 = wbho1s
+```
+
+**The two window maps are 8 columns x 10 rows of u8, 0.75 degCA per count,
+plus the 0x2300 = 210.0 degCA base**, with the axes
+
+* rows `0x7FD804` = `axis_search_u8(0x5C88A8, u8 nmot @ 0x7FCE95)`,
+  `{n=10}` **19, 25, 38, 50, 63, 75, 88, 100, 125, 155** = about
+  **760, 1000, 1520, 2000, 2520, 3000, 3520, 4000, 5000, 6200 min^-1**
+  (40 min^-1 per LSB, A3's measuring id 1);
+* columns `0x7FD83C` = `axis_search_u8(0x5C88DB, u8 rl @ 0x7FEF74)`,
+  `{n=8}` **13, 27, 40, 53, 67, 80, 93, 107** (relative charge, A3's
+  measuring id 2; the percent scaling of that u8 is still open).
+
+Both axis searches are done once, at 0x115C08 / 0x115C18, and shared.
+
+| Map | Address | raw range | degCA (base 210 included) |
+|---|---|---|---|
+| **`KFWBHO1SW`** 0x5D3A83 | 8x10 u8 | 0 .. 160 | **210 .. 330** |
+| **`KFWBHO1SWE`** 0x5D3A33 | 8x10 u8 | 80 .. 240 | **270 .. 390** |
+| **`KFDWBHO1SK`** 0x5D3971 | 8x10 s8 | -64 .. 0 | -48 .. 0 (x `0x7FD28E`/8) |
+| start-branch maps 0x5D3A01 / 0x5D3AD3 | 2-D u8 over (0x7FD298, 0x7FD3F7) | | |
+| fallback `wbho1s` | s16 @ 0x5D3CDE | | |
+
+### 9.3 The check itself, in `awea_ti_to_angle` (0x41B9C0)
+
+```
+if ((0x7FEA48 == 0 && 0x7FE91F != 0) || (0x80201E & 0x20)) {
+    dwi = min((ti_hom(0x8030E8) * k_nmot(0x803072)) >> 13, 0x7FFF)
+    0x803088 = dwi                                            ; the logging variable
+    if ( (s16)(wbho1s(0x80307E) - dwi)  <=  (s16)((u8@0x5D396E + u8@0x7FD290) * 0x20) ) {
+         ;  *** the injection does not fit the window ***
+         start = dwi + (s16)((u8@0x7FD290 + u8@0x5D396D) * 0x20)
+         cap   = (u8@0x7FD28F * 0x20) + 0x2300
+         0x80307E = min(start, cap)
+    }
+}
+```
+
+`u8 @ 0x5D396D = 0` and `u8 @ 0x5D396E = 0` in this dataset (B6), so the live
+form is
+
+> **trigger:** `wbho1s - dwi <= 0x7FD290 * 32` — the injection would end later
+> than **50.25 degCA** in the internal angle reference;
+> **reaction:** the start of injection is **advanced** to
+> `dwi + 50.25 degCA`, capped at **360.0 degCA**.
+
+### 9.4 What that means, and what it does not
+
+1. **There is no exceedance flag and no DTC.** The clamp writes only
+   `0x80307E`; nothing in the image tests for the branch having been taken,
+   and no fault path is entered. **VERIFIED-STATIC**: `0x803088` (`dwi`) has
+   exactly **one** reference in the whole image, the `sth` at 0x41BB7C
+   (`python3 tools/sda_xref.py data/passat_azx_ori.bin --var 0x803088`), and
+   the clamp sets no bit.
+2. **The clamp never shortens `ti` and never removes fuel.** It moves the
+   *start* earlier so the same quantity still ends at the margin. The cost is
+   mixture preparation (injection starts before or against the intake event),
+   not quantity.
+3. **It saturates silently.** Once `dwi + 50.25 degCA` exceeds the 360.0 degCA
+   cap, the injection simply runs past the margin with nothing reported.
+4. **The only torque-domain consequence is armed by a fault**, not by the
+   window (§10).
+
+### 9.5 How much room is there, numerically
+
+`dwi_max = wbho1s - 50.25 degCA`. With `KFWBHO1SW` at its high-speed,
+high-load corner (160 counts -> 330 degCA):
+
+```
+dwi_max        = 279.75 degCA
+at 6000 min^-1 : 279.75 / 36 degCA per ms  =  7.77 ms of ti
+at 4000 min^-1 : 279.75 / 24               = 11.66 ms
+```
+
+Taking a stock WOT `ti` of about **4.5 ms at 6000 min^-1** (**ASSUMPTION** —
+it has never been logged on this car), the hard clamp is reached at roughly
+**+73 %** of the gasoline injection time. E85 at a stoichiometric +40 % lands
+at 6.3 ms (margin 103 degCA); E100 at +63 % plus a 10 % WOT enrichment lands
+at 8.1 ms and **does** hit the clamp. So:
+
+* for E85 the **hard** window is not the binding constraint — it has roughly
+  20 % reserve at the worst cell;
+* what degrades first is mixture preparation, because the start of injection
+  is being pushed towards and past intake-valve opening;
+* for E100 plus enrichment the clamp does engage, silently.
+
+`dwi` (0x803088) and `wbho1s` (0x80307E) are therefore the two variables to
+log; the margin is `0x80307E - 0x803088 - 2144`.
+
+---
+
+## 10. The intervention path: an injection-window charge limit that only a fault arms
+
+`awea_angles` also produces a **relative-charge limit** from the same two
+window terms (0x454B28-0x454B70):
+
+```
+if ((0x80201E & 0x20) == 0)  0x803070 = 0xFFFF            ; no limit
+else {
+    n = (u8@0x7FD28F - u8@0x7FD290 + 0x118) * u8 @ 0x5D396F      ; 0x5D396F = 13
+    0x803070 = min((n << 15) / k_nmot(0x803072), 0xFFFF)
+}
+```
+
+`0x118 = 280` is `0x2300 / 0x20`, i.e. the base expressed in map counts, so
+the bracket is the whole available window in 0.75 degCA counts; dividing by
+`k_nmot` converts it to a time and `0x5D396F = 13` converts that into the
+relative-charge domain. The result really is a charge, not a time: its
+consumer arbitrates it against charge limits, and A3's measuring id **2051**
+for the arbitrated value uses **format 0x21** — the same format as measuring
+id 2, `rl` (`re/measuring_vars.csv`).
+
+Chain (each step **VERIFIED-STATIC**, every reference list from
+`tools/sda_xref.py --var`):
+
+```
+0x803070   (this function, the only writer besides the init at 0x13124C)
+   |  min() with 0x80234C, 0x802358, 0x802360, 0x80235E
+   v        at 0x0C7CF8-0x0C7D48 (a leaf reached through the process-pointer
+            table at file 0x0B1F0C; 0x80234C comes from the charge-protection
+            function 0x0FBE74)
+0x80235A   *** VCDS measuring id 2051, format 0x21 ***
+   |  min() with the driver request and every other charge limit
+   v        at 0x445864 (0x4458DC reads 0x80235A)
+0x80360E   final permitted relative charge  (0x803610 is the protection-only min)
+   |
+   v  read by the torque structure / throttle path at 0x42AA0C, 0x42AA60,
+      0x435B48, 0x0E8B10 and by the measuring handlers 0x03A8E4 / 0x03A920
+```
+
+**`0x80201E` is the fuel-system fault byte** (written by the rail-pressure
+diagnosis at 0x0F3148 / 0x0F3264 / 0x0F33B0). Its bit 5 is built at
+0x0F3338-0x0F3350 as **`bit5 = bit2 | bit6`**, i.e. a summary "the rail
+pressure value cannot be trusted". Bit 4 is the sensor fault that makes
+`%HDRPIST` fall back to the substitute value 0x80201A (§6).
+
+**So the window-derived charge limit is a limp-home limit: it is inactive
+(0xFFFF) whenever the rail-pressure path is healthy.** With the shipped
+`0x7FD28F = 200`, `0x7FD290 = 67` it evaluates to
+`413 * 13 * 32768 / k_nmot`, which is 0xFFFF below about 1300 min^-1 and
+falls to roughly 30 % of the 65024 ceiling at 6000 min^-1 — a genuine
+limp-home characteristic.
+
+---
+
+## 11. Logging variables
+
+| Variable | RAM | Unit | Why |
+|---|---|---|---|
+| `prist` rail pressure actual | 0x8031DA | 0.005 bar | VCDS id **500**; the controller input |
+| `prsoll` rail pressure setpoint | 0x8031F4 | 0.005 bar | VCDS id **501**; what a flex-fuel raise moves |
+| `prdiff` | 0x8031CA | 0.005 bar | VCDS id **1691**; "the pump cannot follow" shows up here |
+| HDR sum output | 0x8031CC | — | VCDS id **516** |
+| HDR volume contribution | 0x8031D2 | — | VCDS id **1687** (format 0x63) |
+| arbitrated charge limit | 0x80235A | rl | VCDS id **2051**; carries the window limit when a fault arms it |
+| unlimited setpoint | 0x8031F0 | 0.005 bar | map output before `KLPRMAX` and the rate limiter |
+| rate-limited setpoint | 0x8031EE | 0.005 bar | shows when the pump volume limits the ramp |
+| spare pump volume | 0x8031F6 | — | zero == pump at its limit |
+| MSV volume after the limit | 0x80316E | — | pinned at 5000 == pump saturated |
+| **`dwi`** injection duration as angle | **0x803088** | 3/128 degCA | the window quantity; only writer 0x41BB7C |
+| **`wbho1s`** start of injection | **0x80307E** | 3/128 degCA | window margin = `0x80307E - 0x803088 - 2144` |
+| required margin | 0x7FD290 | 0.75 degCA | 67 = 50.25 degCA today |
+| latest start | 0x7FD28F | 0.75 degCA | 200 = 360.0 degCA today |
+| `ti_sum` | 0x8030C4 | 1 us | VCDS group 002.3 (B6) |
+| HDR enable bits | 0x7FD2F4 | bits | integrator enable / anti-windup |
+| fuel fault byte | 0x80201E | bits | bit 4 sensor, bit 5 "pressure untrustworthy" |
+
+`dwi` and `wbho1s` have **no** measuring id at all and need the DDLI logger or
+a RAM read; no stock VCDS group carries them next to the pressures.
+
+---
+
+## 12. Recommended targets for the flex-fuel work
+
+### 12.1 Raising the rail pressure
+
+**Preferred: the setpoint maps, not the code.** `KFPRSOLHOM` at **0x5D5324**
+is the map the engine runs on in every normal driving condition; it is a bare
+8x8 u16 array with the shared axes at 0x5D5578 / 0x5D558A, and its top row is
+19000 = 95 bar against a `KLPRMAX` ceiling of 22000 = 110 bar.
+
+* **Headroom without touching anything else: +15 bar (19000 -> 22000).**
+  That is +15.8 % pressure, i.e. `sqrt(1.158) = 7.6 %` more flow through the
+  injector at the same `ti` (the `KLTIKRPR` curve is exactly `k/sqrt(dp)`,
+  B6 §5.2) — useful, but far short of E85's +40 % fuel demand. **The rail
+  raise is a mixture-preparation and duty-cycle measure, not a way to make
+  the fuel mass; the fuel mass still has to come from `rk` (B6 §6).**
+* To go above 110 bar, `KLPRMAX` (the six u16 at **0x5D5546**, all 22000) has
+  to be raised too. **Do not** do that without evidence about the pump and
+  the sensor: the sensor curve (§2c) saturates around 138 bar, and the pump
+  volume limit (§3.4, §5.1) will simply rate-limit the setpoint instead of
+  reaching it.
+* An E-blend-dependent raise needs a *third* input to the map. The cheapest
+  hook is **`KFPRSOLOFF` (0x5D5424)**, which is already summed into the
+  homogeneous path (`CWPRSOL & 0x20` is set) and whose fade-out curve is the
+  6-point table at 0x5D5552/0x5D5559. Re-purposing that additive path costs
+  no code at all; re-purposing its temperature fade curve for E% costs one
+  `lbz` redirect.
+
+### 12.2 The real constraint is the pump, not the map
+
+`0x8031F6` (spare pump volume) and `0x80316E` (MSV volume request, clamped at
+`0x5D4BC6 = 5000`) are the two cells that decide whether a raised setpoint is
+ever reached. E85 demands about 40 % more volume at the same pressure, and a
+higher pressure demands more again. **Log `0x80316E` before and after any
+E-blend run: if it sits at 5000, the pump is saturated and no map change will
+help.**
+
+### 12.3 The torque limiter
+
+`docs/05_flexfuel_design.md` §3.6 assumes the ECU may "cut the throttle
+unexpectedly" on a window exceedance. **It does not** (§9.4). If a torque
+limit for the window is wanted, the clean insertion point is the min-chain at
+**0x0C7CF8**, which already reduces `0x80235A` (measuring id 2051) from
+`0x803070` and feeds the whole charge-limit arbitration — one extra `min()`
+there propagates to the throttle exactly the way the stock protection limits
+do, with no new path and no DTC.
+
+### 12.4 Watch list
+
+* `%HDR` anti-windup bit `0x7FD2D9 & 2` and the enable set `0x7FD2F4`: a
+  setpoint the pump cannot reach parks the integrator and makes `prsoll`
+  track `prist`, which looks like a working controller in a log while it is
+  not.
+* The rail-pressure DTC path (0x0F30xx-0x0F3Axx) sets `0x80201E`; its bit 5
+  arms the limp-home charge limit of §10. A flex-fuel calibration that
+  creates a persistent `prdiff` risks arming it.
+* `0x5D3CDC = 2600` (**13.0 bar**) gates the window model through `0x7FEA48`;
+  it is far below the operating range, so `0x7FEA48` is normally 1 and the
+  angle clamp of §9.3 runs only through the `0x80201E & 0x20` term.
+  **This needs one more reading before §9.3 is trusted in the field**
+  (open item); it may mean the clamp is effectively inactive in normal
+  operation, which would make the mixture-preparation argument of §9.5 the
+  *only* window constraint.
+
+---
+
+## 13. Open items
+
+| Question | Status |
+|---|---|
+| Absolute meaning of VAG display format 0x53 (would confirm 0.005 bar/LSB from outside the image) | open — one VCDS log of group 106 against a known rail pressure settles it |
+| The period of the on-chip task at 0x45CAC4. B1 has it as 1000 ms (HYPOTHESIS); the entire rail-pressure controller, `%AWEA`'s angle maps and `rkti_pre` live in it, which a 1 Hz raster cannot support | **open, and it matters** — see §7 |
+| `0x7FEA48` / `0x5D3CDC = 2600`: the sense of the 13 bar gate on the window model, and whether the angle clamp is live in normal operation | open — see §12.4 |
+| Percent scaling of the u8 `rl` (0x7FEF74) that indexes `KFWBHO1SW`; the axis tops out at 107 counts | open |
+| Which FR name belongs to which `KFPRSOL*` variant (the mode bits of 0x7FB69A were not decoded) | HYPOTHESIS — the addresses and the selection logic are VERIFIED-STATIC, the names are guesses |
+| The DTC number behind `0x80201E` bits 2/4/6 | open — the fault-path manager (0x4067FC family) was not followed |
+| Stock WOT `ti` (needed to turn §9.5 into a hard margin) | open — one logged WOT pull with VCDS group 002 |
