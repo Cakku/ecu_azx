@@ -77,6 +77,56 @@ which runs from a periodic task (100 ms is enough). Alternative if the
 slot mechanism is awkward: hook the generic RX dispatcher and intercept id
 0x0EC before it is dropped.
 
+#### Added 2026-09-15 (brief B2, issue #12) — slot mechanism resolved, VERIFIED-STATIC
+
+Full derivation and evidence: `re/findings/can.md`. The slot mechanism is not
+awkward; the fallback (hooking the RX dispatcher) is not needed.
+
+How reception actually works: each `tbl_can_rx` slot owns one TouCAN message
+buffer filtered on an exact 11-bit id (RXGMSK = 0xFFE00000 on all three
+modules). `can_init_mb(slot)` at **0x135750** arms the buffer once at start-up;
+a periodic task calls `can_rx_poll(slot)` at **0x4379C8**, which copies the 8
+data bytes into `can_rx_shadow` and clears the IFLAG bit. There is no
+interrupt and no "new data" flag in the driver: **the return value of
+`can_rx_poll` is the new-data flag** — it is the received DLC (8 for our frame)
+when a frame arrived since the previous call, and 0x40 when nothing arrived.
+
+Steps to give 0x0EC a slot (target: slot 15, TouCAN **C**, message buffer 6):
+
+1. Patch the id word at **0x2BD8C** from `00 00 07 FF` to `00 00 00 EC`
+   (2 bytes change). Leave the rest of the row alone — the DLC byte is never
+   read and word 0x2BD88 must stay 0x00000004 so the payload is not
+   byte-swapped.
+2. `python3 tools/checksum.py fix` — 0x2BD8C sits in the block with descriptor
+   0x0A0010 (0x020000-0x02FFFF). Then `verify` must say ALL OK (65 blocks).
+3. **No mask register changes.** RXGMSK/RX14MSK/RX15MSK stay as they are;
+   0x0EC matches no other buffer on either module.
+4. Call `can_init_mb(15)` once from init (`li r3,15; bl 0x135750`), e.g.
+   appended to `can_rx_arm_all` at 0x12E570 or from `ff_rx`'s own init.
+   Without this the buffer stays CODE = NOT ACTIVE and receives nothing.
+5. `ff_rx` calls `can_rx_poll(15)` (`li r3,15; bl 0x4379C8`) every 10-100 ms
+   and treats a return value of 8 as "fresh frame".
+6. **The 8 data bytes appear at RAM 0x803F9C..0x803FA3** (symbol
+   `can_rx_buf_spare0`), in wire order; the id is echoed at 0x803F98.
+   The other spares: slot 16 -> 0x803FA8 (id word 0x2BD9C), slot 19 ->
+   0x803FCC (0x2BDCC), slot 20 -> 0x803FD8 (0x2BDDC).
+7. Timeout handling stays in `ff_rx` per §3.2 — the stock supervision
+   (0x429D44 / 0x42A0A0) is per-slot calibrated and has no entry for a new
+   slot.
+8. No interrupt and no transmit collision: module C's IMASK only covers
+   buffers 13-15, and every transmit object lives on module B buffers
+   0x0B-0x0D.
+
+**One open bench check before Phase 2 (#22).** All four spare slots are on
+TouCAN module **C** (0x707800), while the ECU transmits only on module **B**
+(0x707400). Both run at 500 kbit/s with identical timing and C is
+receive-only, so the working assumption (HYPOTHESIS) is that B and C hang on
+the same Antrieb-CAN pair. Confirm before wiring the Pico node: with the
+engine running, check that signals fed by module-C frames (id 0x050 slot 10,
+id 0x0C2 slot 9) *and* by module-B frames (id 0x1A0 slot 1) are all live.
+If C turns out to be a separate bus, the node must be wired to that bus
+instead — module B has no free message buffer.
+
 ### 3.2 Validation, filtering, state
 
 ```

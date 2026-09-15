@@ -10,6 +10,8 @@ what reproduce it.
 | `med9_setup.py` | Builds the verified memory map (docs/03_tooling.md §2.1), seeds disassembly, types the known tables, runs auto-analysis and prints an acceptance report. Run this first, on a fresh import. |
 | `export_symbols.py` | Ghidra → `re/ghidra_export/functions.csv` (all functions) and merge of the named symbols into `re/symbols.csv`. |
 | `import_symbols.py` | `re/symbols.csv` → names, functions and plate comments in a fresh project. |
+| `decompile.py` | Read-only: dump decompiled C, disassembly, callers/callees or references for given addresses from the command line. |
+| `annotate.py` | Bulk-apply a `address,name,kind,comment` CSV of names and plate comments, so a headless session's findings can be exported by `export_symbols.py`. |
 | `med9_symbols.py` | Shared CSV/address helpers. Not a Ghidra script; imported by the two above. |
 
 ## Prerequisites
