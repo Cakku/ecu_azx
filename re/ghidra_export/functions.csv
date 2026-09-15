@@ -422,7 +422,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x034CF0,0x034CF0,ext_flash,func,FUN_00034cf0,0x38,ghidra passat_azx_ori.bin 2026-09-15 @034CF0,hypothesis,ghidra,
 0x034D28,0x034D28,ext_flash,func,kwp_sid_2C_h1,0x4,ghidra passat_azx_ori.bin 2026-09-15 @034D28,static,ghidra,"KWP2000/OBD service 0x2c handler (h1), tbl_kwp_services[3]"
 0x034D2C,0x034D2C,ext_flash,func,FUN_00034d2c,0x21C,ghidra passat_azx_ori.bin 2026-09-15 @034D2C,hypothesis,ghidra,
-0x034F48,0x034F48,ext_flash,func,FUN_00034f48,0xEC,ghidra passat_azx_ori.bin 2026-09-15 @034F48,hypothesis,ghidra,
+0x034F48,0x034F48,ext_flash,func,kwp21_dynamic_read,0xEC,ghidra passat_azx_ori.bin 2026-09-15 @034F48,static,ghidra,ReadDataByLocalId for DDLI dynamic ids 0xF0-0xF9; response = concatenation of defined memory
 0x035034,0x035034,ext_flash,func,kwp_sid_2C_h2,0x30,ghidra passat_azx_ori.bin 2026-09-15 @035034,static,ghidra,"KWP2000/OBD service 0x2c handler (h2), tbl_kwp_services[3]"
 0x035064,0x035064,ext_flash,func,kwp_sid_18_h1,0x4,ghidra passat_azx_ori.bin 2026-09-15 @035064,static,ghidra,"KWP2000/OBD service 0x18 handler (h1), tbl_kwp_services[4]"
 0x035068,0x035068,ext_flash,func,FUN_00035068,0x28C,ghidra passat_azx_ori.bin 2026-09-15 @035068,hypothesis,ghidra,
@@ -430,7 +430,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x035300,0x035300,ext_flash,func,FUN_00035300,0x110,ghidra passat_azx_ori.bin 2026-09-15 @035300,hypothesis,ghidra,
 0x035410,0x035410,ext_flash,func,kwp_sid_14_h1,0x4,ghidra passat_azx_ori.bin 2026-09-15 @035410,static,ghidra,"KWP2000/OBD service 0x14 handler (h1), tbl_kwp_services[0]"
 0x035414,0x035414,ext_flash,func,FUN_00035414,0x314,ghidra passat_azx_ori.bin 2026-09-15 @035414,hypothesis,ghidra,
-0x035728,0x035728,ext_flash,func,FUN_00035728,0x20,ghidra passat_azx_ori.bin 2026-09-15 @035728,hypothesis,ghidra,
+0x035728,0x035728,ext_flash,func,kwp21_localid_80_9F_stub,0x20,ghidra passat_azx_ori.bin 2026-09-15 @035728,static,ghidra,ReadDataByLocalId 0x80-0x9F: unsupported (requestOutOfRange)
 0x035748,0x035748,ext_flash,func,FUN_00035748,0x4,ghidra passat_azx_ori.bin 2026-09-15 @035748,hypothesis,ghidra,
 0x03574C,0x03574C,ext_flash,func,measuring_group_read4,0x70,ghidra passat_azx_ori.bin 2026-09-15 @03574C,static,ghidra,entry 0x035748 sets up r11; KWP SID 0x21 route
 0x0357BC,0x0357BC,ext_flash,func,FUN_000357bc,0x24,ghidra passat_azx_ori.bin 2026-09-15 @0357BC,hypothesis,ghidra,
@@ -450,9 +450,9 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x0360C8,0x0360C8,ext_flash,func,FUN_000360c8,0x148,ghidra passat_azx_ori.bin 2026-09-15 @0360C8,hypothesis,ghidra,
 0x036210,0x036210,ext_flash,func,kwp_sid_27_h1,0x8A8,ghidra passat_azx_ori.bin 2026-09-15 @036210,static,ghidra,"KWP2000/OBD service 0x27 handler (h1), tbl_kwp_services[13]"
 0x036AD8,0x036AD8,ext_flash,func,FUN_00036ad8,0x70,ghidra passat_azx_ori.bin 2026-09-15 @036AD8,hypothesis,ghidra,
-0x036B48,0x036B48,ext_flash,func,FUN_00036b48,0x20,ghidra passat_azx_ori.bin 2026-09-15 @036B48,hypothesis,ghidra,
+0x036B48,0x036B48,ext_flash,func,kwp_session_is_special,0x20,ghidra passat_azx_ori.bin 2026-09-15 @036B48,static,ghidra,helper used by 0x10 StartDiagnosticSession handler
 0x036B68,0x036B68,ext_flash,func,FUN_00036b68,0x58,ghidra passat_azx_ori.bin 2026-09-15 @036B68,hypothesis,ghidra,
-0x036BC0,0x036BC0,ext_flash,func,FUN_00036bc0,0x4,ghidra passat_azx_ori.bin 2026-09-15 @036BC0,hypothesis,ghidra,
+0x036BC0,0x036BC0,ext_flash,func,kwp_start_session_core,0x4,ghidra passat_azx_ori.bin 2026-09-15 @036BC0,static,ghidra,"StartDiagnosticSession core: 0x81->sess0, 0x83->sess3, 0x85->programming(requires sec level1/state2), 0x86->sess4(requires sec level2/state3), 0x89->sess5; unknown->0x11"
 0x036BC4,0x036BC4,ext_flash,func,FUN_00036bc4,0x534,ghidra passat_azx_ori.bin 2026-09-15 @036BC4,hypothesis,ghidra,
 0x0370F8,0x0370F8,ext_flash,func,kwp_sid_10_h2,0x74,ghidra passat_azx_ori.bin 2026-09-15 @0370F8,static,ghidra,"KWP2000/OBD service 0x10 handler (h2), tbl_kwp_services[7]"
 0x03716C,0x03716C,ext_flash,func,kwp_sid_10_h1,0x4,ghidra passat_azx_ori.bin 2026-09-15 @03716C,static,ghidra,"KWP2000/OBD service 0x10 handler (h1), tbl_kwp_services[7]"
@@ -1598,11 +1598,11 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x0A2CC8,0x0A2CC8,ext_flash,func,FUN_000a2cc8,0x1C4,ghidra passat_azx_ori.bin 2026-09-15 @0A2CC8,hypothesis,ghidra,
 0x0A2E8C,0x0A2E8C,ext_flash,func,FUN_000a2e8c,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0A2E8C,hypothesis,ghidra,
 0x0A2E90,0x0A2E90,ext_flash,func,FUN_000a2e90,0x2D0,ghidra passat_azx_ori.bin 2026-09-15 @0A2E90,hypothesis,ghidra,
-0x0A3160,0x0A3160,ext_flash,func,FUN_000a3160,0x1B8,ghidra passat_azx_ori.bin 2026-09-15 @0A3160,hypothesis,ghidra,
+0x0A3160,0x0A3160,ext_flash,func,kwp_upload_range_check,0x1B8,ghidra passat_azx_ori.bin 2026-09-15 @0A3160,dynamic,ghidra,RequestUpload mode-1 address gate; protected window rejected with 0x31 (VERIFIED-DYNAMIC verify_upload.py)
 0x0A3320,0x0A3320,ext_flash,func,kwp_sid_3B_h2,0x20,ghidra passat_azx_ori.bin 2026-09-15 @0A3320,static,ghidra,"KWP2000/OBD service 0x3b handler (h2), tbl_kwp_services[2]"
 0x0A3340,0x0A3340,ext_flash,func,FUN_000a3340,0x64,ghidra passat_azx_ori.bin 2026-09-15 @0A3340,hypothesis,ghidra,
 0x0A33A4,0x0A33A4,ext_flash,func,kwp_sid_36_h2,0x10,ghidra passat_azx_ori.bin 2026-09-15 @0A33A4,static,ghidra,"KWP2000/OBD service 0x36 handler (h2), tbl_kwp_services[11]"
-0x0A33B4,0x0A33B4,ext_flash,func,FUN_000a33b4,0x3B8,ghidra passat_azx_ori.bin 2026-09-15 @0A33B4,hypothesis,ghidra,
+0x0A33B4,0x0A33B4,ext_flash,func,kwp_transfer_mode4,0x3B8,ghidra passat_azx_ori.bin 2026-09-15 @0A33B4,static,ghidra,TransferData for the 0x480000-0x480400 window; uses 32-entry segment table DAT_000b2ff2
 0x0A376C,0x0A376C,ext_flash,func,kwp_sid_3B_dispatch,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0A376C,static,ghidra,"VERIFIED-STATIC record dispatcher for SID 0x3B: looks the record local id up in tbl_kwp_3b_records and runs each field descriptor. B4 #18, re/findings/variants.md 4"
 0x0A3770,0x0A3770,ext_flash,func,FUN_000a3770,0x244,ghidra passat_azx_ori.bin 2026-09-15 @0A3770,hypothesis,ghidra,
 0x0A3A30,0x0A3A30,ext_flash,func,FUN_000a3a30,0xA8,ghidra passat_azx_ori.bin 2026-09-15 @0A3A30,hypothesis,ghidra,
@@ -1673,10 +1673,10 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x0AC2C4,0x0AC2C4,ext_flash,func,FUN_000ac2c4,0x1C,ghidra passat_azx_ori.bin 2026-09-15 @0AC2C4,hypothesis,ghidra,
 0x0AC2E0,0x0AC2E0,ext_flash,func,FUN_000ac2e0,0x30,ghidra passat_azx_ori.bin 2026-09-15 @0AC2E0,hypothesis,ghidra,
 0x0AC318,0x0AC318,ext_flash,func,FUN_000ac318,0x58,ghidra passat_azx_ori.bin 2026-09-15 @0AC318,hypothesis,ghidra,
-0x0AC370,0x0AC370,ext_flash,func,FUN_000ac370,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0AC370,hypothesis,ghidra,
+0x0AC370,0x0AC370,ext_flash,func,rk2ti,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0AC370,dynamic,ghidra,"VERIFIED-STATIC + VERIFIED-DYNAMIC. u16 rk2ti(inhibit, rk_i, frt, tv, fcorr): ti_raw = (rk_i*frt)>>9 (the mullw at 0x0AC39C is the flex-fuel multiplication point); ti = ((ti_raw * KLHDEV(ti_raw) * fcorr) >> 30) +sat tv, clamped to >= TIMINP(0x5C7328) and to 0 when inhibit != 0. The FR's RK2TI class, angle-synchronous part of %RKTI. Modelled bit-exactly by emu/models/injection.py. B6 #14, re/findings/injection.md sections 3 and 10"
 0x0AC374,0x0AC374,ext_flash,func,FUN_000ac374,0xB8,ghidra passat_azx_ori.bin 2026-09-15 @0AC374,hypothesis,ghidra,
-0x0AC42C,0x0AC42C,ext_flash,func,FUN_000ac42c,0x8C,ghidra passat_azx_ori.bin 2026-09-15 @0AC42C,hypothesis,ghidra,
-0x0AC4B8,0x0AC4B8,ext_flash,func,FUN_000ac4b8,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0AC4B8,hypothesis,ghidra,
+0x0AC42C,0x0AC42C,ext_flash,func,rkti_dp_angle,0x8C,ghidra passat_azx_ori.bin 2026-09-15 @0AC42C,dynamic,ghidra,"VERIFIED-STATIC + VERIFIED-DYNAMIC. clamp(prist - ((KLPBR(|x|) * scale) >> 17), 0, 0xFFFF): the angle-dependent differential pressure across the injector (FR KLPBR/KFPBRA). B6 #14, re/findings/injection.md section 5.7"
+0x0AC4B8,0x0AC4B8,ext_flash,func,fkkvs_func,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0AC4B8,dynamic,ghidra,"VERIFIED-STATIC + VERIFIED-DYNAMIC. fkkvs_func(rk_i, dp, *tv, *frt, use_fkkvs, *fcorr): one axis_search_u16_hint on the dp axis 0x5D3DBE serves both KLTIKRPR (0x5C72F8) and the dead-time curve (0x5C7310); frt = min((KRKATE * KLTIKRPR(dp)) >> 14, 0xFFFF); fcorr = FKKVS(ti_eff, nmot) in Q15, or 0x8000 when use_fkkvs == 0. The FR's FKKVSFUNC class, time-synchronous part of %RKTI. B6 #14, re/findings/injection.md section 4"
 0x0AC4BC,0x0AC4BC,ext_flash,func,FUN_000ac4bc,0x10C,ghidra passat_azx_ori.bin 2026-09-15 @0AC4BC,hypothesis,ghidra,
 0x0AC5C8,0x0AC5C8,ext_flash,func,FUN_000ac5c8,0x78,ghidra passat_azx_ori.bin 2026-09-15 @0AC5C8,hypothesis,ghidra,
 0x0AC7E0,0x0AC7E0,ext_flash,func,FUN_000ac7e0,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0AC7E0,hypothesis,ghidra,
@@ -1723,7 +1723,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x0B08C8,0x0B08C8,ext_flash,func,FUN_000b08c8,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0B08C8,hypothesis,ghidra,
 0x0B08CC,0x0B08CC,ext_flash,func,FUN_000b08cc,0x50,ghidra passat_azx_ori.bin 2026-09-15 @0B08CC,hypothesis,ghidra,
 0x0B09F4,0x0B09F4,ext_flash,func,FUN_000b09f4,0xC,ghidra passat_azx_ori.bin 2026-09-15 @0B09F4,hypothesis,ghidra,
-0x0B0B4C,0x0B0B4C,ext_flash,func,unexpected_ext_interrupt,0x1,ghidra passat_azx_ori.bin 2026-09-15 @0B0B4C,static,ghidra,"VERIFIED-STATIC (B1, issue #11, 2026-09-15). li r3,0xCA; b 0xBA444. Target of tbl_etr_branch_table_app+0x28 (external interrupt), which the table at 0x0 chains to. Ends in the fatal spin, so the external-interrupt vector *in the two tables we can see* is fatal; the live table is at 0x400000 (the missing 16 KB)."
+0x0B0B4C,0x0B0B4C,ext_flash,func,unexpected_ext_interrupt,0x8,ghidra passat_azx_ori.bin 2026-09-15 @0B0B4C,static,ghidra,"VERIFIED-STATIC (B1, issue #11, 2026-09-15). li r3,0xCA; b 0xBA444. Target of tbl_etr_branch_table_app+0x28 (external interrupt), which the table at 0x0 chains to. Ends in the fatal spin, so the external-interrupt vector *in the two tables we can see* is fatal; the live table is at 0x400000 (the missing 16 KB)."
 0x0B2AA4,0x0B2AA4,ext_flash,func,FUN_000b2aa4,0x8,ghidra passat_azx_ori.bin 2026-09-15 @0B2AA4,hypothesis,ghidra,
 0x0B2AAC,0x0B2AAC,ext_flash,func,FUN_000b2aac,0x8,ghidra passat_azx_ori.bin 2026-09-15 @0B2AAC,hypothesis,ghidra,
 0x0B2AB4,0x0B2AB4,ext_flash,func,FUN_000b2ab4,0x8,ghidra passat_azx_ori.bin 2026-09-15 @0B2AB4,hypothesis,ghidra,
@@ -2799,12 +2799,12 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x13CDCC,0x13CDCC,ext_flash,func,FUN_0013cdcc,0x100,ghidra passat_azx_ori.bin 2026-09-15 @13CDCC,hypothesis,ghidra,
 0x13CECC,0x13CECC,ext_flash,func,FUN_0013cecc,0xC,ghidra passat_azx_ori.bin 2026-09-15 @13CECC,hypothesis,ghidra,
 0x13CED8,0x13CED8,ext_flash,func,FUN_0013ced8,0xC,ghidra passat_azx_ori.bin 2026-09-15 @13CED8,hypothesis,ghidra,
-0x13CEE4,0x13CEE4,ext_flash,func,FUN_0013cee4,0xC,ghidra passat_azx_ori.bin 2026-09-15 @13CEE4,hypothesis,ghidra,
-0x13CEF0,0x13CEF0,ext_flash,func,FUN_0013cef0,0xC,ghidra passat_azx_ori.bin 2026-09-15 @13CEF0,hypothesis,ghidra,
+0x13CEE4,0x13CEE4,ext_flash,func,kwp_session_set,0xC,ghidra passat_azx_ori.bin 2026-09-15 @13CEE4,static,ghidra,sets internal session; called from kwp_start_session_core 0x36bc0
+0x13CEF0,0x13CEF0,ext_flash,func,kwp_session_get,0xC,ghidra passat_azx_ori.bin 2026-09-15 @13CEF0,static,ghidra,getter for kwp_session_current
 0x13CEFC,0x13CEFC,ext_flash,func,FUN_0013cefc,0x30,ghidra passat_azx_ori.bin 2026-09-15 @13CEFC,hypothesis,ghidra,
 0x13CF2C,0x13CF2C,ext_flash,func,FUN_0013cf2c,0xC,ghidra passat_azx_ori.bin 2026-09-15 @13CF2C,hypothesis,ghidra,
-0x13CF38,0x13CF38,ext_flash,func,FUN_0013cf38,0x24,ghidra passat_azx_ori.bin 2026-09-15 @13CF38,hypothesis,ghidra,
-0x13CF5C,0x13CF5C,ext_flash,func,FUN_0013cf5c,0xC,ghidra passat_azx_ori.bin 2026-09-15 @13CF5C,hypothesis,ghidra,
+0x13CF38,0x13CF38,ext_flash,func,kwp_security_state_set,0x24,ghidra passat_azx_ori.bin 2026-09-15 @13CF38,static,ghidra,"sets security state; called with 2/3/5 on grant, 0 on lock/reset"
+0x13CF5C,0x13CF5C,ext_flash,func,kwp_security_state_get,0xC,ghidra passat_azx_ori.bin 2026-09-15 @13CF5C,static,ghidra,getter for kwp_security_state
 0x13CF74,0x13CF74,ext_flash,func,FUN_0013cf74,0x1C,ghidra passat_azx_ori.bin 2026-09-15 @13CF74,hypothesis,ghidra,
 0x13CF90,0x13CF90,ext_flash,func,FUN_0013cf90,0x34,ghidra passat_azx_ori.bin 2026-09-15 @13CF90,hypothesis,ghidra,
 0x13CFC4,0x13CFC4,ext_flash,func,FUN_0013cfc4,0x20,ghidra passat_azx_ori.bin 2026-09-15 @13CFC4,hypothesis,ghidra,
@@ -2841,8 +2841,8 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x13E344,0x13E344,ext_flash,func,FUN_0013e344,0x1E8,ghidra passat_azx_ori.bin 2026-09-15 @13E344,hypothesis,ghidra,
 0x13E52C,0x13E52C,ext_flash,func,FUN_0013e52c,0x124,ghidra passat_azx_ori.bin 2026-09-15 @13E52C,hypothesis,ghidra,
 0x13E650,0x13E650,ext_flash,func,FUN_0013e650,0x2FC,ghidra passat_azx_ori.bin 2026-09-15 @13E650,hypothesis,ghidra,
-0x13E974,0x13E974,ext_flash,func,FUN_0013e974,0xC,ghidra passat_azx_ori.bin 2026-09-15 @13E974,hypothesis,ghidra,
-0x13E98C,0x13E98C,ext_flash,func,FUN_0013e98c,0x30C,ghidra passat_azx_ori.bin 2026-09-15 @13E98C,hypothesis,ghidra,
+0x13E974,0x13E974,ext_flash,func,kwp_service_config_set,0xC,ghidra passat_azx_ori.bin 2026-09-15 @13E974,static,ghidra,stores service-config ptr 0x2BA50 into DAT_00803ddc; called from 0x13c9e8
+0x13E98C,0x13E98C,ext_flash,func,kwp_service_dispatch,0x30C,ghidra passat_azx_ori.bin 2026-09-15 @13E98C,static,ghidra,"main KWP/OBD dispatcher; reached via fn-ptr (no auto-xref); mask_A(entry+2)=0xFFFF wildcard so SecurityAccess is NOT gated by the table, only the session is"
 0x13EC98,0x13EC98,ext_flash,func,FUN_0013ec98,0x18,ghidra passat_azx_ori.bin 2026-09-15 @13EC98,hypothesis,ghidra,
 0x13ECB0,0x13ECB0,ext_flash,func,FUN_0013ecb0,0x90,ghidra passat_azx_ori.bin 2026-09-15 @13ECB0,hypothesis,ghidra,
 0x13ED40,0x13ED40,ext_flash,func,FUN_0013ed40,0x70,ghidra passat_azx_ori.bin 2026-09-15 @13ED40,hypothesis,ghidra,
@@ -3193,7 +3193,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x41A690,0x216690,int_flash,func,FUN_0041a690,0x19C,ghidra passat_azx_ori.bin 2026-09-15 @41A690,hypothesis,ghidra,
 0x41A82C,0x21682C,int_flash,func,FUN_0041a82c,0x208,ghidra passat_azx_ori.bin 2026-09-15 @41A82C,hypothesis,ghidra,
 0x41AA34,0x216A34,int_flash,func,FUN_0041aa34,0x14,ghidra passat_azx_ori.bin 2026-09-15 @41AA34,hypothesis,ghidra,
-0x41AA48,0x216A48,int_flash,func,FUN_0041aa48,0x39C,ghidra passat_azx_ori.bin 2026-09-15 @41AA48,hypothesis,ghidra,
+0x41AA48,0x216A48,int_flash,func,gk_rk,0x39C,ghidra passat_azx_ori.bin 2026-09-15 @41AA48,static,ghidra,"VERIFIED-STATIC. Gemischkontrolle: base fuel mass * fr (0x802DF8 / 0x802E00, Q15) + fra (0x801D1A) * frm (0x801E36 / 0x801E28, Q15), minus 0x80315C, then the ZGST per-cylinder factor 0x801D8C[cyl]; publishes rk at RAM 0x803038 with the sth at 0x41ADD4. B6 #14, re/findings/injection.md section 9"
 0x41ADE4,0x216DE4,int_flash,func,FUN_0041ade4,0x8C,ghidra passat_azx_ori.bin 2026-09-15 @41ADE4,hypothesis,ghidra,
 0x41AE70,0x216E70,int_flash,func,FUN_0041ae70,0xB8,ghidra passat_azx_ori.bin 2026-09-15 @41AE70,hypothesis,ghidra,
 0x41AF2C,0x216F2C,int_flash,func,FUN_0041af2c,0x50,ghidra passat_azx_ori.bin 2026-09-15 @41AF2C,hypothesis,ghidra,
@@ -3202,7 +3202,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x41B93C,0x21793C,int_flash,func,FUN_0041b93c,0x3C,ghidra passat_azx_ori.bin 2026-09-15 @41B93C,hypothesis,ghidra,
 0x41B978,0x217978,int_flash,func,FUN_0041b978,0x2C,ghidra passat_azx_ori.bin 2026-09-15 @41B978,hypothesis,ghidra,
 0x41B9A4,0x2179A4,int_flash,func,FUN_0041b9a4,0x1C,ghidra passat_azx_ori.bin 2026-09-15 @41B9A4,hypothesis,ghidra,
-0x41B9C0,0x2179C0,int_flash,func,FUN_0041b9c0,0x3BC,ghidra passat_azx_ori.bin 2026-09-15 @41B9C0,hypothesis,ghidra,
+0x41B9C0,0x2179C0,int_flash,func,awea_ti_to_angle,0x3BC,ghidra passat_azx_ori.bin 2026-09-15 @41B9C0,static,ghidra,"VERIFIED-STATIC. Converts ti into a crank angle dwi = (ti * k_nmot[0x803072]) >> 13 (result 0x803088) and clamps the start/end-of-injection angles - this, not a ti maximum, is the injection window limit. Window scalars 0x5D396D / 0x5D396E (both 0x00 in this dataset), runtime terms 0x7FD28E / 0x7FD290. The FR's %AWEA. B6 #14, re/findings/injection.md section 8"
 0x41BD7C,0x217D7C,int_flash,func,FUN_0041bd7c,0x88,ghidra passat_azx_ori.bin 2026-09-15 @41BD7C,hypothesis,ghidra,
 0x41BE04,0x217E04,int_flash,func,FUN_0041be04,0x54,ghidra passat_azx_ori.bin 2026-09-15 @41BE04,hypothesis,ghidra,
 0x41BE58,0x217E58,int_flash,func,FUN_0041be58,0x4C,ghidra passat_azx_ori.bin 2026-09-15 @41BE58,hypothesis,ghidra,
@@ -3211,10 +3211,10 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x41C000,0x218000,int_flash,func,FUN_0041c000,0x2DC,ghidra passat_azx_ori.bin 2026-09-15 @41C000,hypothesis,ghidra,
 0x41C2DC,0x2182DC,int_flash,func,FUN_0041c2dc,0x1C,ghidra passat_azx_ori.bin 2026-09-15 @41C2DC,hypothesis,ghidra,
 0x41C2F8,0x2182F8,int_flash,func,FUN_0041c2f8,0xA8,ghidra passat_azx_ori.bin 2026-09-15 @41C2F8,hypothesis,ghidra,
-0x41C3A0,0x2183A0,int_flash,func,FUN_0041c3a0,0xEC,ghidra passat_azx_ori.bin 2026-09-15 @41C3A0,hypothesis,ghidra,
+0x41C3A0,0x2183A0,int_flash,func,rksplit,0xEC,ghidra passat_azx_ori.bin 2026-09-15 @41C3A0,static,ghidra,"VERIFIED-STATIC. Splits rk (RAM 0x803038) over the active injections into 0x8030B4/B6 (type 0x2000), 0x8030BA/BC (type 0x400), 0x8030B8 (homogeneous) and 0x8030BE (start), under the type bits of RAM 0x803092; the split fractions are the bytes 0x801D89 / 0x801D8A. The FR's %RKSPLIT. B6 #14, re/findings/injection.md section 6.1"
 0x41C48C,0x21848C,int_flash,func,FUN_0041c48c,0x30,ghidra passat_azx_ori.bin 2026-09-15 @41C48C,hypothesis,ghidra,
-0x41C4BC,0x2184BC,int_flash,func,FUN_0041c4bc,0x274,ghidra passat_azx_ori.bin 2026-09-15 @41C4BC,hypothesis,ghidra,
-0x41C730,0x218730,int_flash,func,FUN_0041c730,0x7C,ghidra passat_azx_ori.bin 2026-09-15 @41C730,hypothesis,ghidra,
+0x41C4BC,0x2184BC,int_flash,func,aes_ti_out,0x274,ghidra passat_azx_ori.bin 2026-09-15 @41C4BC,static,ghidra,"VERIFIED-STATIC. Calls rk2ti for every active injection, writes the per-injection ti to 0x8030E4/E6/E8/EA and the total to 0x8030C4 (the VCDS group 002.3 value), and raises the 'ti is at TIMINP' flag 0x7FEA54/0x7FEA55. The FR's %AES. B6 #14, re/findings/injection.md sections 2 and 3"
+0x41C730,0x218730,int_flash,func,aes_ti_out_start,0x7C,ghidra passat_azx_ori.bin 2026-09-15 @41C730,static,ghidra,"VERIFIED-STATIC. The start-injection counterpart of aes_ti_out, called from the second engine-synchronous task 0x4224BC. B6 #14, re/findings/injection.md"
 0x41C7AC,0x2187AC,int_flash,func,FUN_0041c7ac,0xF8,ghidra passat_azx_ori.bin 2026-09-15 @41C7AC,hypothesis,ghidra,
 0x41C8A4,0x2188A4,int_flash,func,FUN_0041c8a4,0x68,ghidra passat_azx_ori.bin 2026-09-15 @41C8A4,hypothesis,ghidra,
 0x41C90C,0x21890C,int_flash,func,FUN_0041c90c,0x5C,ghidra passat_azx_ori.bin 2026-09-15 @41C90C,hypothesis,ghidra,
@@ -3283,8 +3283,8 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x422384,0x21E384,int_flash,func,FUN_00422384,0xC,ghidra passat_azx_ori.bin 2026-09-15 @422384,hypothesis,ghidra,
 0x422390,0x21E390,int_flash,func,FUN_00422390,0x18,ghidra passat_azx_ori.bin 2026-09-15 @422390,hypothesis,ghidra,
 0x4223A8,0x21E3A8,int_flash,func,FUN_004223a8,0x8,ghidra passat_azx_ori.bin 2026-09-15 @4223A8,hypothesis,ghidra,
-0x4223B0,0x21E3B0,int_flash,func,FUN_004223b0,0x10C,ghidra passat_azx_ori.bin 2026-09-15 @4223B0,hypothesis,ghidra,
-0x4224BC,0x21E4BC,int_flash,func,FUN_004224bc,0xC8,ghidra passat_azx_ori.bin 2026-09-15 @4224BC,hypothesis,ghidra,
+0x4223B0,0x21E3B0,int_flash,func,task_segment_a,0x10C,ghidra passat_azx_ori.bin 2026-09-15 @4223B0,static,ghidra,"VERIFIED-STATIC. Engine- (segment-) synchronous ERCOSEK task, TCB entry 5, id 40, priority 0x0A (B1, re/findings/scheduler.md section 4). Flat list of 60 argument-less bl; the fuelling run is 0x422478 gk -> 0x42247C rksplit -> 0x422480 aes_ti_out -> 0x422484 awea. The bl at 0x42247C is B6's flex-fuel hook site. B6 #14, re/findings/injection.md section 6.2"
+0x4224BC,0x21E4BC,int_flash,func,task_segment_b,0xC8,ghidra passat_azx_ori.bin 2026-09-15 @4224BC,static,ghidra,"VERIFIED-STATIC. The second engine-synchronous ERCOSEK task, TCB entry 6, id 41, priority 0x0A; the only caller of aes_ti_out_start. B6 #14, re/findings/injection.md"
 0x422584,0x21E584,int_flash,func,FUN_00422584,0x130,ghidra passat_azx_ori.bin 2026-09-15 @422584,hypothesis,ghidra,
 0x4226B4,0x21E6B4,int_flash,func,FUN_004226b4,0xB0,ghidra passat_azx_ori.bin 2026-09-15 @4226B4,hypothesis,ghidra,
 0x422764,0x21E764,int_flash,func,FUN_00422764,0x1D4,ghidra passat_azx_ori.bin 2026-09-15 @422764,hypothesis,ghidra,
@@ -3367,7 +3367,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x427F0C,0x223F0C,int_flash,func,FUN_00427f0c,0xE4,ghidra passat_azx_ori.bin 2026-09-15 @427F0C,hypothesis,ghidra,
 0x427FF0,0x223FF0,int_flash,func,FUN_00427ff0,0x68,ghidra passat_azx_ori.bin 2026-09-15 @427FF0,hypothesis,ghidra,
 0x428058,0x224058,int_flash,func,FUN_00428058,0x7C,ghidra passat_azx_ori.bin 2026-09-15 @428058,hypothesis,ghidra,
-0x4280D4,0x2240D4,int_flash,func,can_rx_eval_bremse,0x758,ghidra passat_azx_ori.bin 2026-09-15 @4280D4,static,ghidra,"HYPOTHESIS: receive supervision + signal extraction for RX slots 1 (0x1A0), 2 (0x5A0), 3 (0x4A0) and 17 (0x2A0). Per slot: enable bit from calibration -> state bit0; can_rx_poll(idx); DLC == 8 and !(byte 0x7FD0CC & 0x10) -> state bit1 ""new data""; then timeout/counter supervision (0x429D44) and status derivation (0x42A0A0); status bit2 = timeout -> substitute values. The slot->function mapping is VERIFIED-STATIC, the Bremse_1/2/3 naming is from the community id list. -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
+0x4280D4,0x2240D4,int_flash,func,can_rx_eval_bremse,0x758,ghidra passat_azx_ori.bin 2026-09-15 @4280D4,community,ghidra,"HYPOTHESIS: receive supervision + signal extraction for RX slots 1 (0x1A0), 2 (0x5A0), 3 (0x4A0) and 17 (0x2A0). Per slot: enable bit from calibration -> state bit0; can_rx_poll(idx); DLC == 8 and !(byte 0x7FD0CC & 0x10) -> state bit1 ""new data""; then timeout/counter supervision (0x429D44) and status derivation (0x42A0A0); status bit2 = timeout -> substitute values. The slot->function mapping is proven from the call sites; the Bremse_1/2/3 naming is only the community id list, hence HYPOTHESIS. -- B2 2026-09-15, ghidra_scripts/decompile.py --project-dir /tmp/ghidra_B2"
 0x42882C,0x22482C,int_flash,func,FUN_0042882c,0x7C,ghidra passat_azx_ori.bin 2026-09-15 @42882C,hypothesis,ghidra,
 0x4288A8,0x2248A8,int_flash,func,FUN_004288a8,0xC8,ghidra passat_azx_ori.bin 2026-09-15 @4288A8,hypothesis,ghidra,
 0x428970,0x224970,int_flash,func,FUN_00428970,0x65C,ghidra passat_azx_ori.bin 2026-09-15 @428970,hypothesis,ghidra,
@@ -3426,7 +3426,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x430448,0x22C448,int_flash,func,FUN_00430448,0x194,ghidra passat_azx_ori.bin 2026-09-15 @430448,hypothesis,ghidra,
 0x4305DC,0x22C5DC,int_flash,func,FUN_004305dc,0x240,ghidra passat_azx_ori.bin 2026-09-15 @4305DC,hypothesis,ghidra,
 0x43081C,0x22C81C,int_flash,func,FUN_0043081c,0x158,ghidra passat_azx_ori.bin 2026-09-15 @43081C,hypothesis,ghidra,
-0x430974,0x22C974,int_flash,func,FUN_00430974,0x58,ghidra passat_azx_ori.bin 2026-09-15 @430974,hypothesis,ghidra,
+0x430974,0x22C974,int_flash,func,rkti_pre_start,0x58,ghidra passat_azx_ori.bin 2026-09-15 @430974,static,ghidra,"VERIFIED-STATIC. The start-injection variant of rkti_pre: use_fkkvs=0 (the FR suppresses FKKVS during start via B_stendes), outputs frt to 0x8030C8 and tv to 0x8030F2. Called only from task_100ms_int (bl at 0x432B00). B6 #14, re/findings/injection.md section 6.1"
 0x4309CC,0x22C9CC,int_flash,func,FUN_004309cc,0x174,ghidra passat_azx_ori.bin 2026-09-15 @4309CC,hypothesis,ghidra,
 0x430B40,0x22CB40,int_flash,func,FUN_00430b40,0x18,ghidra passat_azx_ori.bin 2026-09-15 @430B40,hypothesis,ghidra,
 0x430B58,0x22CB58,int_flash,func,FUN_00430b58,0x2AC,ghidra passat_azx_ori.bin 2026-09-15 @430B58,hypothesis,ghidra,
@@ -3675,7 +3675,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x454DA0,0x250DA0,int_flash,func,FUN_00454da0,0xC4,ghidra passat_azx_ori.bin 2026-09-15 @454DA0,hypothesis,ghidra,
 0x454E64,0x250E64,int_flash,func,FUN_00454e64,0x3C,ghidra passat_azx_ori.bin 2026-09-15 @454E64,hypothesis,ghidra,
 0x454EA0,0x250EA0,int_flash,func,FUN_00454ea0,0x1A0,ghidra passat_azx_ori.bin 2026-09-15 @454EA0,hypothesis,ghidra,
-0x455040,0x251040,int_flash,func,FUN_00455040,0x198,ghidra passat_azx_ori.bin 2026-09-15 @455040,hypothesis,ghidra,
+0x455040,0x251040,int_flash,func,rkti_pre,0x198,ghidra passat_azx_ori.bin 2026-09-15 @455040,static,ghidra,"VERIFIED-STATIC. Per-injection-type driver of fkkvs_func: picks the active types out of the bit mask at RAM 0x803094, computes dp = prist(0x8031DA) - (0x7FEFAE >> 7) or via rkti_dp_angle, and fills the frt/tv/fcorr triples 0x8030D2..0x8030DE / 0x8030EC..0x8030F2. Called only from task_1000ms_int (bl at 0x45CCEC). B6 #14, re/findings/injection.md sections 4, 6.4"
 0x4551D8,0x2511D8,int_flash,func,FUN_004551d8,0x4,ghidra passat_azx_ori.bin 2026-09-15 @4551D8,hypothesis,ghidra,
 0x4551DC,0x2511DC,int_flash,func,FUN_004551dc,0x270,ghidra passat_azx_ori.bin 2026-09-15 @4551DC,hypothesis,ghidra,
 0x45544C,0x25144C,int_flash,func,FUN_0045544c,0x208,ghidra passat_azx_ori.bin 2026-09-15 @45544C,hypothesis,ghidra,
@@ -4055,7 +4055,7 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x478370,0x274370,int_flash,func,FUN_00478370,0x64,ghidra passat_azx_ori.bin 2026-09-15 @478370,hypothesis,ghidra,
 0x4783D4,0x2743D4,int_flash,func,FUN_004783d4,0x68,ghidra passat_azx_ori.bin 2026-09-15 @4783D4,hypothesis,ghidra,
 0x47843C,0x27443C,int_flash,func,FUN_0047843c,0x24,ghidra passat_azx_ori.bin 2026-09-15 @47843C,hypothesis,ghidra,
-0x478460,0x274460,int_flash,func,FUN_00478460,0x30,ghidra passat_azx_ori.bin 2026-09-15 @478460,hypothesis,ghidra,
+0x478460,0x274460,int_flash,func,read_time_base,0x30,ghidra passat_azx_ori.bin 2026-09-15 @478460,static,ghidra,seed RNG source for SecurityAccess (PowerPC time-base counter)
 0x478490,0x274490,int_flash,func,FUN_00478490,0x20,ghidra passat_azx_ori.bin 2026-09-15 @478490,hypothesis,ghidra,
 0x4784B0,0x2744B0,int_flash,func,FUN_004784b0,0x20,ghidra passat_azx_ori.bin 2026-09-15 @4784B0,hypothesis,ghidra,
 0x4784D0,0x2744D0,int_flash,func,FUN_004784d0,0x4,ghidra passat_azx_ori.bin 2026-09-15 @4784D0,hypothesis,ghidra,
