@@ -480,6 +480,8 @@ DLC that ends up in this LENGTH field.
 
 ## 7. QSMCM / QSPI (EEPROM driver, brief B4)
 
+> **Correction 2026-09-15 (agent B4, issue #18, `re/findings/eeprom.md` §1.2):** the QSPI command/transmit/receive queue used by this firmware is **32 entries**, not 16: the driver rejects `n > 0x20` at file 0x178DC and writes ENDQP as a 5-bit field. The EEPROM is an M95160-class 2 KB part on **PCS0**, SPI mode 0, 8-bit transfers, SCK about 1.25 MHz (SPCR0 = 0xA000 | f_sys/2.5 MHz at file 0x85888). VERIFIED-STATIC.
+
 Module base 0x705000 (Fig. 1-4). Register map Table 15-2 / Appendix B,
 p. 15-3 and B-1 (PDF 622–623, 1126–1127):
 
