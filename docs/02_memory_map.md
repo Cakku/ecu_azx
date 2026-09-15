@@ -247,7 +247,7 @@ EEPROM (ST M95160-class, 2 KB, on the SPI bus) has its own block checksums
 
 | File / CPU address | Table | Detail |
 |---|---|---|
-| 0x2B870 | KWP2000 / OBD service dispatch, 24 entries x 20 bytes: `SID FF FF FF, flags, handler, handler2, 0` | SIDs 0x14 0x21 0x3B 0x2C 0x18 0x17 0x81 0x10 0x31 0x32 0x35 0x36 0x37 0x27 0x82 0x20, OBD 0x01-0x04 0x06-0x09. **No 0x23 ReadMemoryByAddress, no 0x3D.** 0x2C DynamicallyDefineLocalId + 0x21 ReadDataByLocalId + 0x35 RequestUpload are present (live RAM logging route). Handlers for 0x81 0x82 0x20 0x31 0x32 0x06 live in on-chip flash. |
+| **0x2B820** | KWP2000 / OBD service dispatch, **28 entries x 20 bytes**: `SID FF FF FF, session-mask, handler, handler2, extra` (corrected 2026-09-15 by agent B3; the earlier row said 0x2B870 / 24 entries and missed SIDs 0x12, 0x3E TesterPresent, 0x1A, 0x83) | SIDs 12 3E 1A 83 14 21 3B 2C 18 17 81 10 31 32 35 36 37 27 82 20, OBD 01 02 03 04 06 07 08 09. Gated by diagnostic session only (entry+4 = 1<<session), not by SecurityAccess. **No 0x23 ReadMemoryByAddress, no 0x3D.** 0x2C DDLI (ids 0xF0-0xF9) + 0x21 need only a session; 0x35/0x36 RequestUpload/TransferData need session 0x86 (security level 2, key = seed + 0x11170, constant at 0xA331C; level 1 = 5-round LFSR mask 0x5FBD5DBD). Dispatcher `kwp_service_dispatch` at 0x13E98C. Handlers for 0x3E 0x1A 0x83 0x81 0x82 0x20 0x31 0x32 0x06 live in on-chip flash. Full detail: `re/findings/kwp.md`. |
 | 0x2BC38 | TouCAN **register** base table | 0x707080, 0x707480, 0x707880. These are the CANMCR addresses = module base + 0x80; the module bases are 0x707000/0x707400/0x707800 and the 16 message buffers of module *x* start at base+0x100 (2026-09-15, A2; MPC561RM Table 16-10 p. 16-17). |
 | 0x2BC50 | pointer 0x0002BF50 (CAN configuration structure) | low-alias address |
 | 0x2BC90 | **CAN receive table**, header + 21 entries x 16 bytes `index, 0x01mmnn08 (module/slot/dlc), 4, CAN-ID` | IDs 0x1A0 0x5A0 0x4A0 0x440 0x540 0x320 0x442 0x1AC 0x0C2 0x050(dlc 4) 0x51A 0x5E0 0x390 0x38A(dlc 4) **0x7FF 0x7FF** 0x2A0 0x368 **0x7FF 0x7FF** 0x5C0. The four 0x7FF entries are unused receive slots. |
@@ -324,3 +324,8 @@ Evidence and full derivations: `re/findings/mpc5xx_registers.md`.
   to 0x400000+offset.
 - Not a correction but a sharpening: the table at file 0x2BC38 holds TouCAN
   **CANMCR** addresses (module base + 0x80), not module bases (section 7).
+
+### 2026-09-15 — agent B3, issue #13 (evidence: `re/findings/kwp.md`, emulation tests `tools/kwp_seckey_verify.py`, `tools/kwp_upload_verify.py`)
+
+- Section 7 said the KWP dispatch table is *"0x2B870, 24 entries"*. The dispatcher reads its configuration from a structure whose first word is **0x2B820** and whose count is **28**; the four entries before 0x2B870 (SIDs 0x12, 0x3E, 0x1A, 0x83) were missed by the byte-pattern walk that produced the original row. Confirmed by dumping file 0x2B820-0x2B86F.
+- The `flags` word is a diagnostic-session bit mask, not a security requirement; SecurityAccess is only needed for the upload services. The community `seed + 0x11170` key is level 2 and is now VERIFIED-DYNAMIC.
