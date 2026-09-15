@@ -369,3 +369,94 @@ Once the start has finished, the warm-up / catalyst-heating retard reaches
 
 So a flex-fuel ignition change during warm-up is covered by B7's additive hook
 at 0x41D40C; no separate warm-up map exists to shift.
+
+## 6. Model and emulator check (VERIFIED-DYNAMIC)
+
+`emu/start_model.py` re-implements both computations in the ECU's own fixed
+point, reading every calibration constant out of the image rather than
+hard-coding it. `tests/test_start_model.py` runs the **real** code under the
+A5 Unicorn harness and compares bit for bit:
+
+```bash
+./.venv/bin/python -m emu.start_model                    # print both tables
+./.venv/bin/python -m unittest tests.test_start_model -v # 14 tests, ~1.7 s
+```
+
+```
+Ran 14 tests in 1.710s
+OK
+```
+
+What is compared:
+
+| | firmware entry | cases |
+|---|---|---|
+| `lookup_2d_u8` on `KFWKSTT`, `KFWKSTN`, 0x5D3739 | 0x40D18C | 3 maps x 17 `tmst` x 10-12 x-values |
+| `lookup_2d_g_u8_u16_u16` on `KFKSTT` | 0x40E72C | 17 x 8 |
+| `lookup_2d_g_u8_u8_s8` on `KFZWSTT`, `KFZWSTN` | 0x40DC7C | 2 maps x 10-12 x 17 |
+| `lookup_1d_g_u8_s8` on 0x5C7BAB | 0x40F454 | 11 |
+| `mul_q15` incl. the 0xFFFF saturation | 0x410060 | 56 |
+| **`%ESSTT` end to end** -> 0x803028 / 0x80302A / 0x80302C | `FUN_0041a268` body, 0x41A274-0x41A684 | 204 (`tmst` x `anztist`) + 144 (`prist` x `nmot` x trim x `kstaa`) |
+| **`zwstt` end to end** -> 0x802096 | `FUN_00431294` | 204 + 170 + 50 |
+
+`FUN_00431294` runs under `emu.call()` unchanged. `FUN_0041a268` is entered
+with `emu.run(0x41A274, until=0x41A684)`, i.e. after its
+`bl 0x000b8234` critical-section entry and before the matching
+`bl 0x000b81d8`: those two OS primitives dispatch through the 0xFFFFFFF0
+vector, which the harness does not model. Everything between them is the real
+instruction stream.
+
+What the model says the ECU does, in physical units (nmot 400 rpm,
+prist 4000):
+
+```
+cranking factor ksta * kstaa (1.0 = no enrichment)
+  tmot C :       -30     -20     -10       0      20      40      60      90
+  inj   0:    22.76   14.94    9.76    6.97    3.83    3.26    2.79    2.07
+  inj   8:    20.45   10.50    5.87    4.19    2.42    2.16    1.94    1.55
+  inj  12:     9.07    5.95    3.35    2.40    1.53    1.73    1.44    1.34
+  inj  24:     3.38    3.03    2.21    2.40    1.53    1.73    1.44    1.34
+
+start ignition zwstt (deg CA, + = before TDC)
+  tmot C :       -30     -20     -10       0      20      40      60      90
+  zdgz  0:   -49.50  -41.25  -29.25  -16.50   -4.50   -2.25   -2.25   -3.00
+  zdgz  5:   -35.25  -29.25   -8.25    3.00   -0.75   -2.25   -2.25   -3.00
+  zdgz 12:     9.75    6.00    6.00    5.25   -0.75   -2.25   -2.25   -3.00
+```
+
+## 7. What the flex-fuel patch needs from this
+
+| | where | format | when it acts |
+|---|---|---|---|
+| **S1 — cranking fuel** | `sth` at **0x41A680** (and 0x41A808 for the HDR twin), publishing 0x80302C | u16, **1024 = 1.0**, saturate 0xFFFF | only while `B_stend` (0x7FE921) is clear; the ECU forces 1.0 afterwards, so the hook is inert outside the start |
+| **Z1 — start ignition** | `stb` at **0x431384**, publishing `zwstt` 0x802096 | **s8, 0.75 °CA per LSB** | same window; **no knock protection acts here** |
+| S2 — running mixture (not recommended) | `sth` at 0x41A250, publishing 0x803020 | u16, Q12 (4096 = 1.0) | every running operating point; duplicates B6's hook at 0x42247C |
+| warm-running ignition | B7's word at 0x41D40C | s8, 0.75 °CA per LSB | after start end |
+
+The 2-D `f_st(E, tmst)` map of `docs/05_flexfuel_design.md` §3.5 should use the
+`KFWKSTT` temperature breakpoints (0x5C6C62: -30, -24.75, -20.25, -15, -6.75,
+0, 15, 20.25, 27.75, 39.75, 60, 90 °C) so a cell maps one-to-one onto a stock
+row, and a small E axis (0, 20, 40, 60, 85, 100 %). `f_st(0, ·) = 1024` makes
+the patched ECU bit-identical at E0 — `tests/test_start_model.py` asserts that
+for both hooks.
+
+Two calibration notes that fall out of the numbers:
+
+* The stock cranking factor already runs 2.1x at 90 °C and 22.8x at -30 °C.
+  Ethanol needs roughly 1.5x the mass at a warm start and much more when cold,
+  but the **injection window** is the binding constraint at 22.8x (B6 §8:
+  `dwi`, RAM 0x803088); log it before calibrating `f_st` below about -10 °C.
+* `KFWKSTN` (0x5C6C50) is entirely 255 and `KFZWSTN` (0x5C7B23) entirely 0.
+  Both are free real estate if a speed dependence is ever wanted without
+  writing new code — but changing them changes gasoline behaviour too, so
+  prefer the additive patch.
+
+## 8. Open questions
+
+| Question | Status |
+|---|---|
+| The physical meaning of RAM 0x800EEC (the x axis of the 0x5D3745 and 0x5D3568 weightings, 4 breakpoints 45/51/58/61) and of 0x80218C (the 0x5C6E8C axis). Both weightings are ≤ 1.0 and are 1.0 at the top of their range, so they only reduce `ksta`. | open; they do not block S1, which is downstream of both |
+| Whether 0x7FD3E5 and 0x7FD3F7 are `tans` and a modelled `tmot`. They have no r13-relative writer (only reads), i.e. they are written through a pointer or an indexed store; `decompile.py --refs` shows the tester pointer table at 0x0A3AE0 for their neighbours. They feed the (all-zero) 1D `zwstt` term and the `0x5D3610` map. | open; time-boxed after 30 min |
+| The FR names of the 0x419DA4 / 0x4302DC / 0x430448 / 0x10C874 sub-factor cascade (§4.2). Structure and scaling are VERIFIED-STATIC; the module names are not. | open |
+| `KFWKSTT`'s x axis is "injections since start" (`anztist` = 0x7FD298 - 0x7FD26B) — VERIFIED-DYNAMIC as an index, COMMUNITY that the FR calls it `anztib`/`anztist`. | naming only |
+| `re/med9_draft.xdf` was **not** regenerated, to avoid a conflict with the agents editing other rows of `re/calibration_draft.csv` in parallel. Rebuild it once with `python3 tools/draft_to_xdf.py re/calibration_draft.csv -o re/med9_draft.xdf --min-confidence hypothesis` after the wave is merged. | for the integrator |
