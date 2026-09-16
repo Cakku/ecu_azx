@@ -202,6 +202,7 @@ class Extent:
     max_disp: int = 0          # largest constant displacement reached, + width
     loop_bytes: int = 0        # loop_count * stride, when both are known
     indexed: bool = False      # an X-form access whose index is not a constant
+    stride: int = 0            # record size, from the mulli/slwi that scales the index
     neighbour: int = 0         # bytes to the next statically referenced byte
     note: str = ""
 
@@ -325,6 +326,7 @@ def hunt_extent(data: bytes, base: int, site: int, window: int = 96) -> Extent:
     holder = (w0 >> 21) & 0x1F                # register that now holds `base`
     off = {holder: 0}                         # reg -> offset from base
     regs: dict = {}                           # reg -> absolute constant
+    scale: dict = {}                          # reg -> stride it was multiplied by
     ctr = None
     # Prime the constant map from the instructions before the site: loop counts
     # are usually computed before the destination pointer is formed.
@@ -356,14 +358,26 @@ def hunt_extent(data: bytes, base: int, site: int, window: int = 96) -> Extent:
             continue
         if op == 31 and ((w >> 1) & 0x3FF) == 467 and ((w >> 11) & 0x3FF) == 0x120:
             ctr = regs.get(rt)                             # mtctr rS
+        # index scaling: `mulli rD,rIdx,N` and `slwi rA,rS,N` size a record
+        if op == 7 and rt not in off:                      # mulli rD,rA,SIMM
+            scale[rt] = abs(exts16(w & 0xFFFF))
+        elif op == 21:                                     # rlwinm; slwi is SH,0,31-SH
+            sh, mb, me = rb, (w >> 6) & 0x1F, (w >> 1) & 0x1F
+            if mb == 0 and me == 31 - sh and sh:
+                scale[ra] = 1 << sh
+            else:
+                scale.pop(ra, None)
         # offset propagation
         if op == 14 and ra in off:                         # addi rD,rBase,k
             off[rt] = off[ra] + exts16(w & 0xFFFF)
         elif op == 31 and ((w >> 1) & 0x3FF) == 444 and rt == rb and rt in off:
             off[ra] = off[rt]                              # mr rA,rS
-        elif op == 31 and ((w >> 1) & 0x3FF) == 266 and ra in off:
-            off[rt] = off[ra]                              # add rD,rBase,rIdx
+        elif op == 31 and ((w >> 1) & 0x3FF) == 266 and (ra in off or rb in off):
+            base_r, idx_r = (ra, rb) if ra in off else (rb, ra)
+            off[rt] = off[base_r]                          # add rD,rBase,rIdx
             ex.indexed = True
+            if idx_r in scale and not ex.stride:
+                ex.stride = scale[idx_r]
         # memory accesses
         got = access_kind(op, rt) if op in LOADS or op in STORES else None
         if got and ra in off:
@@ -417,6 +431,12 @@ def indexed_bases(data: bytes, s: Survey, min_sites: int = 1) -> list:
             ex = hunt_extent(data, target, site)
             if best is None or ex.size > best.size or (ex.indexed and not best.indexed):
                 best = ex
+        if not best.stride:
+            for site in sites:                    # keep a stride any site found
+                cand = hunt_extent(data, target, site)
+                if cand.stride:
+                    best.stride = cand.stride
+                    break
         best.neighbour = neighbour_bound(s, target)
         best.note = f"{len(sites)} lis+addi site(s)"
         out.append(best)
@@ -845,8 +865,8 @@ def main(argv=None) -> int:
               "neighbour bound (the free run that starts\n# just after the "
               "base).  A base with a large neighbour bound AND a non-zero\n"
               "# extent is a region that reaches into that free run.")
-        print("%-10s %-10s %-8s %-10s %s"
-              % ("base", "site", "extent", "neighbour", "kind / note"))
+        print("%-10s %-10s %-8s %-8s %-10s %s"
+              % ("base", "site", "extent", "stride", "neighbour", "kind / note"))
         found = indexed_bases(data, s)
         found.sort(key=lambda e: e.neighbour, reverse=True)
         for ex in found:
@@ -854,9 +874,10 @@ def main(argv=None) -> int:
                 continue
             if want is None and ex.neighbour < args.indexed_min:
                 continue
-            print("0x%06X 0x%06X %-8s %-10s %s  [%s]" % (
-                ex.base, ex.site, "0x%X" % ex.size, "0x%X" % ex.neighbour,
-                ex.tag, ex.note))
+            print("0x%06X 0x%06X %-8s %-8s %-10s %s  [%s]" % (
+                ex.base, ex.site, "0x%X" % ex.size,
+                "0x%X" % ex.stride if ex.stride else "-",
+                "0x%X" % ex.neighbour, ex.tag, ex.note))
         return 0
 
     if not args.quiet:

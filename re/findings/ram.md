@@ -361,6 +361,28 @@ overwrites **0x800000-0x800687**. Both ranges are in the `KNOWN` table.
 (the linear walk loses one loop iteration out of 0x7D1; the true value 0x3E88
 is the one above).
 
+### 6.1 Calibration of the indexed-region method
+
+The brief names two regions whose extent is known independently. The hunt is
+calibrated on both:
+
+| base | tool: extent | tool: stride | truth | source of truth |
+|---|---|---|---|---|
+| 0x804800 | **0x3E80** (loop-bounded) | — | **0x3E88** | the copy's flash source bounds, above |
+| 0x803EE4 `can_rx_shadow` | 0xC | **0xC** | 22 × 12 = **0x108** | `can.md` 4 |
+
+So the method recovers a **loop** extent almost exactly and a **record size**
+exactly (`mulli r11,r25,0xc` at 0x233AF0 for `can_rx_shadow`), but it cannot
+recover a record *count* when the index is a function argument, as it is for
+`can_rx_shadow` — that count comes from `can.md`'s enumeration of the
+`can_init_mb` call sites. The neighbour bound is no help there either (slot 1's
+data at 0x803EF4 is referenced, so it reports 0x10).
+
+**Read the output accordingly:** `stride` and `extent` are facts about the
+code, the *count* usually is not. For the placement decision that is enough,
+because what matters is whether an array reaches into a candidate run, and the
+neighbour bound answers that whenever the array is contiguous.
+
 Consequences:
 
 * **Nothing in 0x804800-0x807FFF may hold patch state**, and not because the
@@ -432,7 +454,10 @@ an `st?x`/`lwzx` index that the linear walk cannot bound —
 0x7F8890 (102 sites), 0x7F802C (75), 0x7F8080 (71), 0x80485C (24),
 0x803620 (20), 0x7FC39C (18), 0x804088 (17) — for all of them the *neighbour
 bound* (distance to the next referenced byte) is under 0x100, so they do not
-affect the recommendation. Time spent on the hunt: within the brief's 2 h box.
+affect the recommendation. Where the walk sees a `mulli`/`slwi` it also reports
+the **record size** even when it cannot bound the count — 0xC for 0x804548 and
+for `can_rx_shadow`, 0x10 for 0x8040F5, 0x1C for the dispatch table at
+0x805784. Time spent on the hunt: within the brief's 2 h box.
 
 ### 8.1 The recommended block
 
