@@ -683,3 +683,70 @@ python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x6131C --addr 0x613
 python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x612B4 --addr 0x612B4 --len 0x70
 python3 tools/find_abs_refs.py data/passat_azx_ori.bin --target 0x7FCC95
 ```
+
+---
+
+## 9. Where the stock code commits, and why there is nothing to piggyback on
+### (D2, 2026-09-16, #38 — a time-boxed negative result)
+
+Brief D2 was asked to find the key-off write-back and hook it "only if the
+piggyback is trivial". It is not trivial, and for block 8 it does not exist.
+What the search established, all VERIFIED-STATIC:
+
+**1. Block 8 has exactly one stock client, and it never commits.**
+`tools/eeprom_map.py data/passat_azx_ori.bin --clients` resolves all 87 call
+sites of `nvm_block_request`. Exactly one names block 8:
+
+```
+blk off len mode   site
+  8 0xE   1    0   cpu 0x134380        <- a STAGE of one byte at payload +14
+```
+
+There is **no commit site (`len = 0`, `handle != 0`) for block 8 anywhere in
+the image**. The twelve commit-shaped sites belong to blocks 24 (0x035378,
+0x0353BC), 10 (0x036DC4, 0x036DEC, 0x036EDC), 7 (0x0A28AC, 0x115994,
+0x115A58, 0x115A8C) and 6 (0x0FF9AC, 0x44A05C, 0x44A0B0). So the stock byte at
++14 reaches the device only through the *write-all-blocks* routine — and so
+would ours, if we waited for the stock code. **A patch that wants its value in
+the EEPROM has to commit block 8 itself**, which is what
+`patches/ff_fuel/src/ff_diag.c` does.
+
+**2. The write-all-blocks routine has no resolvable trigger.**
+`tools/find_branch_refs.py data/passat_azx_ori.bin 0x062740 0x062280` finds
+**no branch and no stored pointer** to either the write-back (0x62740) or the
+start-up read (0x62280) — §3.5 already said so, and it still holds after a
+second pass. They are reached through a structure the static scan cannot
+resolve.
+
+**3. The synchronous "shutdown" mode is real but equally unreachable.**
+`nvm_block_request` pumps the queue inline (`while (0x7FADAB != 0x21)
+nvm_queue_pump()`) when the halfword at **0x7FCD68** is 2, i.e. a commit
+becomes synchronous — exactly what a shutdown path needs. That halfword is
+written by two one-line setters, `nvm_set_sync_mode` **0x0BA0F4** (writes 2)
+and `nvm_set_normal_mode` **0x0BA104** (writes 1), and **neither has a
+caller**: they appear only as two entries of the function-pointer table at
+0x0B1AB0 / 0x0B1AC8, and `find_abs_refs.py --range 0x0B1A00 0x0B1B00` finds
+nothing that references that table either. The existence of the mode is
+VERIFIED-STATIC; its trigger stays **HYPOTHESIS**.
+
+**4. `engine_not_running` (0x7FEAD0) leads somewhere else.**
+Twelve sites read or write it (`tools/sda_xref.py --var 0x7FEAD0 0x7FEAD0`).
+The two nearest are the functions on either side of ff_fuel's set-A hook:
+0x0BD9E8 and 0x0BDA64 both gate on `0x7FEAD0 != 0`, take a one-shot latch at
+0x7FC1D8, and call 0x475E8C with pointers loaded from 0x487678 / 0x4876C0.
+They look like afterrun event dispatchers and they touch no EEPROM function.
+**Not followed further — time-boxed here.**
+
+**5. The queue is pumped from the two tasks we already hook.**
+`FUN_00061944` (the pump wrapper) is called from exactly two sites,
+**0x120694** inside task set B's 0x1205A0 and **0x432BB4** inside task set A's
+0x4328E4 (`find_branch_refs.py ... 0x061944`). Both are the 10 ms rasters
+`patches/ff_fuel` hooks, so a commit the flex-fuel tick queues is drained by
+the same task a few activations later without the patch pumping anything.
+
+**Consequence for #38.** No key-off hook is added. The ethanol estimate is
+written *while the engine runs*, rate-limited to one page write per minute, so
+the value that survives a power cut is at most one minute and one hysteresis
+step old — which is what the requirement asks for, and it does not depend on
+an orderly shutdown at all. A future brief that wants a true key-off flush
+should start at the function-pointer table 0x0B1A80+ and find its consumer.
