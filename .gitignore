@@ -2,6 +2,7 @@
 *.patched
 *.pyc
 .DS_Store
+.venv/
 .venv
 __pycache__/
 build/
