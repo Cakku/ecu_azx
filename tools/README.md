@@ -21,6 +21,9 @@ document and `med9lib.py` together.
 | `eeprom_map.py` | Decode the SPI EEPROM block layout (EEP_CONF, file 0xB2FF0): block table, copies, RAM mirror, free space; `--clients` maps which block bytes the firmware actually uses; `--check` verifies the block checksums of a real 2 KB EEPROM read. `re/findings/eeprom.md`. |
 | `callgraph.py` | Static PowerPC call graph: every `bl` target is a function entry, each function is walked as a CFG (`--reach`, `--func`, `--callers`, `--entries`). Also extracts r2/r13-relative accesses and finds `lis`+D-form pairs that address a register range (`--xref-store`). |
 | `r2_context.py` | Decides the SDA2 base (r2) of every function from the call graph and checks every r2-relative access against it: reports references that leave the SDA2 window, land outside a mapped region, or hit 0xFF filler. Evidence for issue #8. |
+| `gen_stock_header.py` | Generate `patches/common/med9_stock.h` (stock function / RAM addresses for patch code) from `re/symbols.csv`; `--check` fails the build when the checked-in header is stale. |
+| `patch_gen.py` | Turn a patch's `build` section into its `changes` list: resolve hook targets from the `.sym` file, encode the I-form branch words (reach and alignment checked), assert the stock bytes under the blob are 0xFF. `changes` is generated, never hand-edited. |
+| `patch_apply.py` | The only tool that modifies an image. Checks `base_sha256`, the forbidden regions and every `old`; writes the `new` bytes to a copy; fixes and verifies the checksums; proves the identification block is unchanged; requires a clean `bindiff`. Writes nothing if any of that fails. |
 | `sda_xref.py` | Whole-image cross-references. `--var LO [HI]` decodes every r2/r13-relative D-form load/store and prints the ones resolving into the range — the small-data accesses `callgraph.py --xref-store` cannot see. `--code ADDR...` prints every `b`/`bl` **site** targeting an address (not the enclosing function), so a flat ERCOSEK task body reads off directly. Used throughout `re/findings/rail.md` (issue #17). |
 
 Quick checks:
@@ -42,6 +45,24 @@ python3 tools/sda_xref.py data/passat_azx_ori.bin --var 0x8031DA   # prist reade
 python3 tools/sda_xref.py data/passat_azx_ori.bin --code 0x457BC8  # who calls the HDR controller
 ```
 
+Building and applying a patch (`docs/06_patch_pipeline.md`, issue #25). The
+Makefile in each patch directory wraps all of it; these are the raw commands:
+
+```bash
+python3 tools/gen_stock_header.py --check           # the stock addresses are current
+cd patches/ff_counter && make check && make dump    # build, prove no r2/r13, read the blob
+python3 tools/patch_gen.py patches/ff_counter       # rewrite `changes` from the blob
+python3 tools/patch_apply.py data/passat_azx_ori.bin patches/ff_counter \
+        -o work/ff_counter.bin                      # --dry-run, --json
+```
+
+`patch_apply.py` refuses (and writes nothing) on a wrong `base_sha256`, an
+`old` that is not there, a change inside 0x000000-0x00FFFF, 0x400000-0x47FFFF
+or 0x1C0000-0x1DFFFF without `"calibration_edit": true`, a touched
+identification block, a failed checksum or an unexpected byte in the bindiff.
+A patch whose `"ram_status"` is not `"verified"` applies with a loud
+do-not-flash warning.
+
 Regression checks before a file goes anywhere near the car
 (`docs/06_patch_pipeline.md` section 5):
 
@@ -62,14 +83,17 @@ Everything in `tools/` and `emu/` is covered by one suite:
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python3 -m unittest discover -s tests -v      # 31 tests, needs data/passat_azx_ori.bin
+python3 -m unittest discover -s tests -v      # 107 tests, needs data/passat_azx_ori.bin
 ```
 
 `tests/` contains `test_draft_to_xdf.py` (the XDF skeleton, the file-offset
 mapping and the `val[iy*nx+ix]` layout), `test_bindiff.py` (builds a patched copy in a temp directory
 and checks that only the edits and their descriptors moved), `test_logcmp.py`
-(the synthetic logs in `logging/samples/`) and `test_emu.py` (the Unicorn
-harness, `emu/README.md`). Every test that loads the dump asserts its SHA-256
+(the synthetic logs in `logging/samples/`), `test_emu.py` (the Unicorn
+harness, `emu/README.md`) and `test_patch_framework.py` (the patch framework,
+`patches/common/` + `patch_gen` + `patch_apply` + the ff_counter hook under the
+emulator; the build layer skips itself with a clear message when `LLVM_DIR` is
+not installed). Every test that loads the dump asserts its SHA-256
 is unchanged afterwards; none of them writes to `data/`.
 `blobdis.py` disassembles a raw big-endian PowerPC blob at a chosen CPU
 address (capstone). `llvm-objdump` cannot do this — it has no `-b binary` —
