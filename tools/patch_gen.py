@@ -291,6 +291,21 @@ def generate(patch_dir: Path, stock_path: Path = DEFAULT_STOCK) -> tuple[dict, l
             origin = " = " + ", ".join(f"{n} {syms[n]:#08x}" for n in item["u32_syms"])
         notes.append(f"data {addr:#08x}: {len(new)} B{origin}")
 
+    # --- RAM objects worth recording ------------------------------------
+    # A patch's .bss is more than its documented state block once it owns
+    # anything a stock API keeps a pointer to.  Naming those objects here puts
+    # their addresses in `build.symbols`, where a test or a logger session can
+    # read them instead of hard-coding an offset the next link might move.
+    for name in build.get("ram_symbols", []):
+        if name not in syms:
+            raise PatchError(f"ram_symbols: {sym_path} has no symbol {name!r}")
+        value = syms[name]
+        if not ram <= value < ram + ram_size:
+            raise PatchError(f"ram_symbols: {name} is at {value:#x}, outside "
+                             f"the patch RAM block {ram:#x}+{ram_size:#x}")
+        resolved[name] = f"{value:#08x}"
+        notes.append(f"ram symbol {name} at {value:#08x}")
+
     build["blob_size"] = len(blob)
     build["blob_sha256"] = hashlib.sha256(blob).hexdigest()
     build["bss_size"] = used_ram

@@ -514,9 +514,27 @@ class TestColdStartAndModes(EmuBase):
                 self.assertEqual(st[0x0C], ff.MODE_FAULT)
                 self.assertEqual(st[0x13], 1, "cal_ok")
                 self.assertEqual(struct.unpack_from(">I", st, 0x20)[0], 1)
-                # the annex is zeroed too
-                self.assertEqual(emu.read(PATCH_RAM + 0x2C, 0x14),
-                                 b"\x00" * 0x14)
+                # The annex is zeroed too - except for the fields D2 fills on
+                # the way out of the very same activation (issue #38/#39,
+                # 2026-09-16): `rk_calls` and `e_persist` are still 0, but
+                # `persist_err` carries the return code of the EEPROM read,
+                # `diag_f_pct` is 100 % because F = 1.000, and `persist_wait`
+                # is the armed rate limit minus the one activation that just
+                # ran.  The layout did not move; only the "all zero" claim did.
+                annex = emu.read(PATCH_RAM + 0x2C, 0x14)
+                self.assertEqual(annex[0x00:0x04], b"\x00" * 4, "rk_calls")
+                self.assertEqual(annex[0x04:0x06], b"\x00\x00", "e_persist")
+                self.assertEqual(annex[0x06], 0, "persist_state = idle")
+                self.assertEqual(annex[0x07], 2, "persist_err = the read's rc")
+                self.assertEqual(annex[0x08:0x0A], b"\x00\x00", "diag_e_pct")
+                self.assertEqual(struct.unpack_from(">H", annex, 0x0A)[0], 100,
+                                 "diag_f_pct: F = 1.000 is 100 %")
+                self.assertEqual(annex[0x0C:0x0E], b"\x00\x00", "diag_t_degc")
+                self.assertEqual(struct.unpack_from(">H", annex, 0x0E)[0],
+                                 6000 - 1, "persist_wait: 60 s at 10 ms, "
+                                           "minus this activation")
+                self.assertEqual(annex[0x10:0x14], b"\x00" * 4,
+                                 "persist_writes / persist_fails")
 
     def test_a_corrupt_checksum_re_initialises(self):
         emu = self.fresh()
