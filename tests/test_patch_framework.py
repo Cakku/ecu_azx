@@ -55,6 +55,7 @@ ALIVE = 0xFC01
 SRAM_START, SRAM_LEN = 0x7F8000, 0x10000    # the whole ECU RAM (emu/memmap.py)
 STACK_TOP = 0x7FEFFC                        # emu resets r1 here
 HOOK_TAIL_FRAME = 16                        # patches/common/hooks.h
+HOOK_FULL_FRAME = 80                        # patches/common/hooks.h
 
 toolchain_available = (LLVM_DIR / "bin" / "clang").is_file()
 requires_toolchain = unittest.skipUnless(
@@ -458,12 +459,143 @@ class TestEmulatedHook(DumpUnchanged):
         self.assertTrue(changed & set(range(PATCH_RAM, PATCH_RAM + 8)))
 
     def test_the_stock_leaf_is_reached_through_the_tail_branch(self):
-        """`ba 0x11F02C` must be the last instruction of the trampoline."""
+        """`ba 0x11F02C` is the last instruction executed before the leaf."""
         emu = Med9Emu(self.image, trace=True)
         res = emu.call(self.hook_addr, mem=self._seeded(1, ALIVE))
-        self.assertIn(STOCK_LEAF, res.pc_trace)
-        self.assertLess(res.pc_trace.index(STOCK_LEAF), len(res.pc_trace))
-        self.assertEqual(res.pc_trace[0], self.hook_addr)
+        trace = res.pc_trace
+        self.assertEqual(trace[0], self.hook_addr)
+        self.assertIn(STOCK_LEAF, trace)
+        tail = self.hook_addr + HOOK_TAIL_FRAME + 0x0C    # the `ba`, 8th word
+        self.assertEqual(trace[trace.index(STOCK_LEAF) - 1], tail)
+        self.assertEqual(emu.read(tail, 4),
+                         patch_gen.encode_branch(tail, STOCK_LEAF, "ba")
+                         .to_bytes(4, "big"))
+        # and the leaf's own four instructions are the last thing that runs
+        self.assertEqual(trace[-4:], [STOCK_LEAF + 4 * i for i in range(4)])
+
+
+# ------------------------------------------------------- 5. HOOK_FULL ------
+@requires_dump
+@requires_emu
+@requires_toolchain
+class TestHookFull(DumpUnchanged):
+    """HOOK_FULL is unused by Flash 1 but is what brief D1's fuel patch needs,
+    so it is proven here rather than the first time it matters.
+
+    `tests/fixtures/hook_full_probe.S` wraps a register-destroying stub in a
+    HOOK_FULL trampoline that tail-branches to the same stock leaf. The test
+    then asks one question: is the register state after the trampoline the same
+    as after calling that leaf directly?
+    """
+
+    PROBE_BASE = 0x160000          # free flash, nowhere near ff_counter
+    PROBE_RAM = 0x807E00
+    SCRATCH = 0x807EC0             # inside the probe's RAM block, unused by it
+    SEED = {**{f"r{i}": 0x1000 + i for i in range(3, 13)},
+            "r0": 0xDEAD0000, "cr": 0x12345678, "ctr": 0xCAFEBABE,
+            "xer": 0xE000007F}
+    MEM = {CLEARED_BYTE: b"\xAA", CLEARED_HALF: b"\xBE\xEF"}
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.tmp = Path(tempfile.mkdtemp())
+        src = REPO / "tests" / "fixtures" / "hook_full_probe.S"
+        obj, elf = cls.tmp / "probe.o", cls.tmp / "probe.elf"
+        cls.bin, cls.sym = cls.tmp / "probe.bin", cls.tmp / "probe.sym"
+        bindir = LLVM_DIR / "bin"
+        common = PATCHES / "common"
+        cls._run([bindir / "clang", "--target=powerpc-unknown-eabi", "-mcpu=603e",
+                  "-I", common, "-c", src, "-o", obj])
+        cls._run([bindir / "ld.lld", "-m", "elf32ppc", "--no-dynamic-linker",
+                  "--discard-locals", "-T", common / "patch.ld",
+                  f"--defsym=PATCH_FLASH={cls.PROBE_BASE:#x}",
+                  f"--defsym=PATCH_RAM={cls.PROBE_RAM:#x}",
+                  "--defsym=PATCH_RAM_SIZE=0x100", "-o", elf, obj])
+        cls._run([bindir / "llvm-objcopy", "-O", "binary", elf, cls.bin])
+        with open(cls.sym, "w") as fh:
+            subprocess.run([str(bindir / "llvm-nm"), "-n", str(elf)],
+                           stdout=fh, check=True)
+        cls.syms = patch_gen.parse_sym(cls.sym)
+        cls.blob = cls.bin.read_bytes()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+        super().tearDownClass()
+
+    @staticmethod
+    def _run(argv):
+        r = subprocess.run([str(a) for a in argv], capture_output=True, text=True)
+        assert r.returncode == 0, f"{argv[0]} failed:\n{r.stdout}\n{r.stderr}"
+
+    def _emu_with_probe(self):
+        emu = Med9Emu(DUMP)
+        emu.reset()
+        emu.write(self.PROBE_BASE, self.blob)
+        return emu
+
+    def test_the_trampoline_leaves_the_registers_the_stock_call_would(self):
+        direct = Med9Emu(DUMP).call(STOCK_LEAF, regs=dict(self.SEED), mem=dict(self.MEM))
+        self.assertTrue(direct.ok, direct.issues)
+
+        emu = self._emu_with_probe()
+        hooked = emu.call(self.syms["test_full_hook"], regs=dict(self.SEED),
+                          mem=dict(self.MEM), reset=False)
+        self.assertTrue(hooked.ok, f"{hooked.stop_reason}: {hooked.issues}")
+
+        # r12 is clobbered by the stock leaf itself (`li r12,0`), so comparing
+        # against the direct call - rather than against the seed - is the point.
+        watched = [f"r{i}" for i in range(13)] + ["cr", "ctr", "lr", "r1"]
+        differ = {k: (hex(direct.regs[k]), hex(hooked.regs[k]))
+                  for k in watched if direct.regs[k] != hooked.regs[k]}
+        self.assertEqual(differ, {},
+                         "HOOK_FULL did not restore the EABI volatile set")
+        self.assertEqual(hooked.regs["r1"], STACK_TOP)
+
+    def test_the_stub_really_destroys_those_registers(self):
+        """Otherwise the test above would pass with an empty trampoline."""
+        emu = self._emu_with_probe()
+        res = emu.call(self.syms["clobber_all"], regs=dict(self.SEED), reset=False)
+        self.assertTrue(res.ok, res.issues)
+        for name in ["r0"] + [f"r{i}" for i in range(3, 13)]:
+            self.assertEqual(res.regs[name], 0xFFFFFFFF, name)
+        self.assertEqual(res.regs["ctr"], 0xFFFFFFFF)
+        self.assertEqual(res.regs["cr"], 0xFFFFFFFF)
+
+    def test_xer_is_restored_as_the_guest_sees_it(self):
+        """uc_reg_read(XER) drops SO/OV/CA, so ask the guest with mfxer.
+
+        VERIFIED-DYNAMIC 2026-09-16 (brief C1): `mfxer` -> `stw` -> `lwz` ->
+        `mtxer` round-trips exactly inside Unicorn for every seed tried, while
+        the Python accessor shows 0x20000000 as 0. Recorded in emu/README.md.
+        """
+        emu = self._emu_with_probe()
+        res = emu.call(self.syms["xer_probe"], args=[0, self.SCRATCH],
+                       mem=dict(self.MEM), regs={"xer": self.SEED["xer"]},
+                       reset=False)
+        self.assertTrue(res.ok, f"{res.stop_reason}: {res.issues}")
+        before, after = struct.unpack(">II", emu.read(self.SCRATCH, 8))
+        self.assertNotEqual(before, 0, "seed XER so the test can fail")
+        self.assertEqual(before, after,
+                         f"HOOK_FULL lost XER: {before:#010x} -> {after:#010x}")
+
+    def test_the_stock_leaf_still_runs(self):
+        emu = self._emu_with_probe()
+        res = emu.call(self.syms["test_full_hook"], regs=dict(self.SEED),
+                       mem=dict(self.MEM), reset=False)
+        self.assertTrue(res.ok, res.issues)
+        self.assertEqual(emu.read(CLEARED_BYTE, 1), b"\x00")
+        self.assertEqual(emu.read(CLEARED_HALF, 2), b"\x00\x00")
+
+    def test_the_frame_stays_inside_the_documented_size(self):
+        emu = self._emu_with_probe()
+        res = emu.call(self.syms["test_full_hook"], regs=dict(self.SEED),
+                       mem=dict(self.MEM), reset=False)
+        self.assertTrue(res.ok, res.issues)
+        below = emu.read(STACK_TOP - 0x100, 0x100 - HOOK_FULL_FRAME)
+        self.assertEqual(set(below), {0},
+                         "HOOK_FULL wrote below its own 80-byte frame")
 
 
 if __name__ == "__main__":
