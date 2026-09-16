@@ -2,7 +2,8 @@
  * patch.ld - the linker script every MED9.1.1 flash patch links with.
  *
  * Generic: nothing in here names a patch.  Placement comes from the command
- * line (patches/common/patch.mk passes all three):
+ * line (patches/common/patch.mk passes all three; there are no defaults, see
+ * the note above SECTIONS):
  *
  *     ld.lld -m elf32ppc -T ../../common/patch.ld \
  *            --defsym=PATCH_FLASH=0x00150000 \
@@ -38,9 +39,23 @@
 OUTPUT_FORMAT("elf32-powerpc")
 OUTPUT_ARCH(powerpc)
 
-PATCH_FLASH    = DEFINED(PATCH_FLASH)    ? PATCH_FLASH    : 0x00150000;
-PATCH_RAM      = DEFINED(PATCH_RAM)      ? PATCH_RAM      : 0x00807F00;
-PATCH_RAM_SIZE = DEFINED(PATCH_RAM_SIZE) ? PATCH_RAM_SIZE : 0x40;
+/*
+ * PATCH_FLASH, PATCH_RAM and PATCH_RAM_SIZE are REQUIRED on the command line.
+ * There are deliberately no defaults here, because in ld.lld a script
+ * assignment silently beats the --defsym it is meant to fall back to:
+ *
+ *     PATCH_RAM = DEFINED(PATCH_RAM) ? PATCH_RAM : 0x00807F00;
+ *
+ * evaluates to the default while the script computes addresses, and only
+ * afterwards does --defsym overwrite the symbol's value in the symbol table.
+ * The result is a blob linked at the default with a symbol table that says
+ * otherwise - a silent wrong answer, which is the worst kind.  VERIFIED-STATIC
+ * 2026-09-16 (brief C1): with the idiom above, --defsym=PATCH_RAM=0x806000
+ * produced `.bss` at 0x807F00 and `PATCH_RAM = 0x806000` in the same ELF;
+ * without it, `.bss` lands at 0x806000.  So: no defaults, and an undefined
+ * PATCH_* fails the link loudly.  patches/common/patch.mk always passes all
+ * three (from patch.json's "build" section).
+ */
 
 /* Bounds of the free flash area, so a mis-typed PATCH_FLASH fails the link
  * instead of overwriting stock code (docs/06_patch_pipeline.md section 3). */
