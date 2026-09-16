@@ -19,7 +19,7 @@
  *   ---- ----  ---------------  --------  ------------------------------------
  *   +00   4    magic            tick      0x46463031 "FF01" when valid
  *   +04   2    length           tick      0x0040, the size of this struct
- *   +06   2    csum             tick      ~sum16 of the CORE bytes (+08..+27)
+ *   +06   2    csum             tick      ~sum16 of the CORE bytes (+08..+2B)
  *   --- core: written only by the periodic tick, covered by csum -------------
  *   +08   2    e_filt           tick      filtered ethanol, 1/16 %, 0..1600
  *   +0A   2    f_q10            tick      fuel factor, 1/1024, 1024..2048
@@ -54,9 +54,23 @@
  *   +34   2    diag_e_pct       D2        e_filt in 1 %, for the measuring block
  *   +36   2    diag_f_pct       D2        F in %, (f_q10 * 100) >> 10
  *   +38   2    diag_t_degc      D2        fuel temperature, degC + 40
- *   +3A   2    reserved0        D2
- *   +3C   4    reserved1        D2
+ *   +3A   2    persist_wait     D2        activations left of the commit rate limit
+ *   +3C   2    persist_writes   D2        commits that finished OK (saturating)
+ *   +3E   2    persist_fails    D2        commits that failed (saturating)
  *   --- 0x40 -----------------------------------------------------------------
+ *
+ * D2 (issue #38/#39, 2026-09-16) took the three reserved words at +3A..+3F for
+ * the rate-limit counter and two saturating counters.  No offset D1 defined
+ * moved, the length is still 0x40 and the magic is still "FF01", so D1's
+ * tests, logging/sessions/ff_fuel.json and emu/models/flexfuel.py are
+ * unaffected: the whole annex is outside the checksum and carries no control
+ * value.
+ *
+ * The EEP_CONF request record is NOT part of this block.  The block manager
+ * keeps a pointer to it for milliseconds after the call returns
+ * (re/findings/eeprom.md section 8.2), so it has to be stable storage, but it
+ * is the manager's layout, not ours; it is a separate .bss object and the
+ * linker puts it right after the state block at PATCH_RAM + 0x40.
  *
  * `frame_bad` is a LATCH, not an event.  docs/05 section 3.2 lists "status in
  * {fault, not ready}" and "counter unchanged for 3 received frames" as
@@ -145,14 +159,87 @@ struct ff_state {
     volatile u16 diag_e_pct;          /* +34  D2 */
     volatile u16 diag_f_pct;          /* +36  D2 */
     volatile u16 diag_t_degc;         /* +38  D2 */
-    volatile u16 reserved0;           /* +3A  D2 */
-    volatile u32 reserved1;           /* +3C  D2 */
+    volatile u16 persist_wait;        /* +3A  D2 */
+    volatile u16 persist_writes;      /* +3C  D2 */
+    volatile u16 persist_fails;       /* +3E  D2 */
 };
 
 #define FF_CORE_OFF  0x08u            /* first checksummed byte */
 #define FF_CORE_LEN  0x24u            /* +08 .. +2B inclusive   */
 
 extern struct ff_state ff_state;
+
+/* ------------------------------------------- D2: E% persistence (#38) --- */
+/*
+ * `persist_state`, and what each value means for the next activation.
+ */
+#define FF_P_IDLE    0u               /* nothing in flight; may start a commit */
+#define FF_P_STAGED  1u               /* mirror written, commit not yet queued */
+#define FF_P_BUSY    2u               /* queued; poll ff_nvm_req.status        */
+#define FF_P_DONE    3u               /* the last commit finished OK           */
+#define FF_P_ERR     4u               /* the last commit failed; persist_err   */
+
+/*
+ * The EEP_CONF block manager's request record (re/findings/eeprom.md 8.2).
+ * `nvm_block_request(blk, off, len, mode, buf, &req)` fills it in and puts a
+ * POINTER to it in the manager's 4-slot queue, so it must outlive the call -
+ * a stack temporary would be dereferenced after the frame is gone.
+ */
+struct ff_nvm_req {
+    volatile u32 buf;                 /* +0  the caller's buffer, 0 on commit */
+    volatile u8  blk;                 /* +4 */
+    volatile u8  off;                 /* +5 */
+    volatile u8  len;                 /* +6 */
+    volatile u8  shape;               /* +7  the call-shape case, 3 = commit  */
+    volatile u8  status;              /* +8  1 queued, 2 done, else failed    */
+    volatile u8  pad[3];              /* keep the next object aligned         */
+};
+
+extern struct ff_nvm_req ff_nvm_req;
+
+/* The one-byte staging buffer the stage shape copies out of; global so the
+ * linker records it and `build.ram_symbols` can pin its address. */
+extern volatile u8 ff_persist_buf;
+
+#define FF_NVM_WRITE     0u           /* `mode` for stage (mirror <- buf)     */
+#define FF_NVM_READ      1u           /* `mode` for read back (buf <- mirror) */
+#define FF_NVM_RC_SYNC   2u           /* a synchronous shape did its work     */
+#define FF_NVM_RC_QUEUED 1u           /* the commit was accepted              */
+#define FF_NVM_ST_BUSY   1u           /* record.status while in flight        */
+#define FF_NVM_ST_OK     2u           /* record.status when it finished       */
+
+#define FF_E_PCT_MAX     100u         /* a stored byte above this is garbage  */
+#define FF_E_PCT_NONE    0xFFu        /* an erased EEPROM byte                */
+
+/* src/ff_diag.c; all three read the calibration themselves except for the
+ * raster period, which ff_cal_load() has already clamped. */
+void ff_persist_init(void);
+void ff_persist_tick(u16 tick_ms);
+void ff_diag_publish(void);
+
+/* --------------------------------------- D2: the measuring block (#39) --- */
+/*
+ * The four TKMWL ids and the group are FACTS ABOUT THE IMAGE, not choices the
+ * code makes: the handler pointers live in tbl_measuring_vars (0xA5658) and
+ * the group words in tbl_measuring_groups (0x5C5518), both written by
+ * patch.json.  They are recorded here so the C, patch.json, the tests and
+ * logging/sessions/ff_fuel.json quote one number each.
+ * Evidence: re/findings/measuring_vars.md section 8.
+ */
+#define FF_MW_ID_E       2196u        /* field 1, formula 0x21, A = 100       */
+#define FF_MW_ID_F       2197u        /* field 2, formula 0x21, A = 100       */
+#define FF_MW_ID_T       2198u        /* field 3, formula 0x05, A = 10        */
+#define FF_MW_ID_MODE    2199u        /* field 4, formula 0x36 (a count)      */
+#define FF_MW_GROUP      111u         /* 0x6F; its 0x7F echo (238) is empty   */
+
+#define FF_FMT_PCT       0x21u        /* 100 * B / A                          */
+#define FF_FMT_DEGC      0x05u        /* 0.1 * A * (B - 100)                  */
+#define FF_FMT_COUNT     0x36u        /* (A << 8) | B                         */
+#define FF_FMT_NONE      0x25u        /* with A = B = 0: "not available"      */
+#define FF_FMT_A_PCT     100u         /* A for 0x21, so the value IS B in %   */
+#define FF_FMT_A_DEGC    10u          /* A for 0x05, so the value IS B - 100  */
+#define FF_DEGC_BIAS     100u         /* B of formula 0x05 at 0 degC          */
+#define FF_T_FUEL_BIAS   40u          /* the frame byte is degC + 40          */
 
 /* ------------------------------------------------------ FFCAL001 layout --- */
 #define FF_CAL_BASE        0x005E2510u

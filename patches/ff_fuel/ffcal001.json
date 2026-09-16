@@ -8,6 +8,10 @@
     "re/findings/scheduler.md section 11).  Move the hook to another raster and",
     "this one value follows; nothing is rebuilt.",
     "",
+    "D2 (issue #38) turned ff_persist_enable on and gave the other four",
+    "persistence values their real defaults: EEP_CONF block 8, payload",
+    "offset 0, 5 % hysteresis, one commit per 60 s (eeprom.md section 5).",
+    "",
     "null means 'use the built-in default': the F curve from the docs/05",
     "section 3.3 formula, and the neutral values for the four tables the MVP",
     "reserves but does not read yet."
@@ -26,7 +30,7 @@
   "ff_e_override": 0,
   "ff_stall_max": 3,
 
-  "ff_persist_enable": 0,
+  "ff_persist_enable": 1,
   "ff_persist_hyst_pct": 5,
   "ff_persist_block": 8,
   "ff_persist_offset": 0,

@@ -118,6 +118,22 @@ static void ff_state_init(void)
     if (ff_state.cal_ok && ff_state.cal_mode == 1u)
         MED9_FN(void (*)(u32), MED9_CAN_INIT_MB)(15u);
 
+    /* D2 (#38): seed e_filt and e_key from EEP_CONF block 8 before the first
+     * frame.  It only reads the block manager's RAM mirror, so it costs a
+     * memcpy of one byte and cannot block.  A store that was never written
+     * (0xFF) or is out of range leaves both at 0, i.e. E0. */
+    ff_persist_init();
+    ff_diag_publish();
+    ff_state.csum = ff_core_csum();
+}
+
+/*
+ * The tail of every activation: refresh what the measuring-block handlers read
+ * (annex, so it may happen here) and re-checksum the core.
+ */
+static void ff_finish(void)
+{
+    ff_diag_publish();
     ff_state.csum = ff_core_csum();
 }
 
@@ -241,7 +257,7 @@ static void ff_tick(u8 src)
         if (ff_state.src_foreign < 0xFFu)
             ff_state.src_foreign = (u8)(ff_state.src_foreign + 1u);
         if (ff_state.src_foreign < (u8)FF_OWNER_SWITCH) {
-            ff_state.csum = ff_core_csum();
+            ff_finish();
             return;
         }
         ff_state.src_owner = src;
@@ -262,7 +278,7 @@ static void ff_tick(u8 src)
     if (!ff_state.cal_ok || ff_state.cal_mode == 0u) {
         ff_state.mode = (u8)FF_MODE_OFF;
         ff_state.f_q10 = (u16)FF_F_MIN;
-        ff_state.csum = ff_core_csum();
+        ff_finish();
         return;
     }
 
@@ -272,7 +288,7 @@ static void ff_tick(u8 src)
         ff_state.age_ticks = 0u;
         ff_move((u16)((u32)c.e_override * 16u), 1u, &c);
         ff_state.f_q10 = ff_f_of(ff_state.e_filt);
-        ff_state.csum = ff_core_csum();
+        ff_finish();
         return;
     }
 
@@ -340,7 +356,11 @@ static void ff_tick(u8 src)
     /* HOLD: E is frozen, so F is frozen with it. */
 
     ff_state.f_q10 = ff_f_of(ff_state.e_filt);
-    ff_state.csum = ff_core_csum();
+    ff_finish();
+    /* D2 (#38): only mode 1 persists.  ff_finish() has just refreshed
+     * `diag_e_pct`, which is the rounded percent the store keeps, and the
+     * store writes annex fields only, so the checksum above still holds. */
+    ff_persist_tick(c.tick_ms);
 }
 
 /* Called by the HOOK_TAIL trampolines in src/hooks.S. */

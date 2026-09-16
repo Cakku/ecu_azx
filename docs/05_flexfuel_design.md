@@ -490,6 +490,32 @@ block (VCDS-readable) or via the DDLI logger, and later as OBD PID 0x52 if the
 OBD handler is extended. No DTC is raised by the patch in the MVP; a fault
 only switches the mode.
 
+> **2026-09-16 — brief D2, issue #39: implemented, and the slots are named.**
+> `patches/ff_fuel` publishes four values in **VCDS measuring block 111**
+> (`21 6F` over KWP). Evidence for every number:
+> `re/findings/measuring_vars.md` §8, reproducible with
+> `python3 tools/measuring_vars.py data/passat_azx_ori.bin --free`.
+>
+> | Field | Value | Measuring id | Formula | Reads |
+> |---|---|---|---|---|
+> | 1 | `E_filt`, whole % | **2196** | 0x21, A = 100 -> the value is B | `ff_diag_e_pct` |
+> | 2 | `F`, % (100 = 1.000) | **2197** | 0x21, A = 100 | `ff_diag_f_pct` |
+> | 3 | `T_fuel`, degC | **2198** | 0x05, A = 10 -> `B - 100` (CROSS-CHECKED, §7.1) | `ff_diag_t_degc` |
+> | 4 | `256 * persist_state + mode` | **2199** | 0x36, a plain count | `ff_state.mode` |
+>
+> The ids are the **last four entries of `tbl_measuring_vars`** (0x0A78A8, one
+> contiguous 16-byte edit); all four point at the "not available" stub today
+> and no group names them. Group 111 and its `+0x7F` echo 238 are both empty,
+> so the whole 25-byte answer to `21 6F` belongs to the patch. Groups **108**
+> and **109** are equally free and are left for the ignition (§3.4) and rail
+> (§3.6) blends.
+>
+> `f_zw` is **not** published: it does not exist yet. A handler that reads a
+> reserved zero would be a field that lies. When §3.4 lands, take group 108.
+>
+> Still true: **no DTC is raised.** A fault only switches the mode, and the
+> mode is field 4. OBD PID 0x52 is untouched.
+
 ### 3.8 Persistence (Phase 5)
 Store `E_filt` in EEPROM via the ECU's own EEPROM block handler or in
 battery-backed RAM if the external SRAM is permanently powered (to be
@@ -560,6 +586,50 @@ fuel.
 > community patches manipulate **does not exist in this software**
 > (`re/findings/variants.md`). There is no stock variant byte to reuse for a
 > map-set switch and no coding bit the fuelling path reads.
+
+> **2026-09-16 — brief C2, issue #23: Fallback B is REFUTED.** The external
+> SRAM is ordinary `.bss`: `ram_clear_block` (0x06D8F8), called from `app_init`
+> (0x04CCD4), zeroes 0x800004-0x80498F at every cold start, and
+> 0x804990-0x807FFF is the flash driver's programming copy
+> (`re/findings/ram.md` §3, `re/findings/eeprom.md` §6). Only the four bytes
+> the probe itself saves survive. **EEPROM block 8 is the only route**; do not
+> revive the battery-backed-RAM branch.
+
+> **2026-09-16 — brief D2, issue #38: implemented, with three corrections.**
+> Code: `patches/ff_fuel/src/ff_diag.c` (`ff_persist_init`, `ff_persist_tick`).
+> Calibration: `ff_persist_enable` = 1, block 8, offset 0, hysteresis 5 %,
+> rate 60 s. Bench procedure: `patches/ff_fuel/test/procedure_d2.md` part B.
+>
+> 1. **The read-back call above has the wrong mode.** It is
+>    `nvm_block_request(8, 0, 1, **1**, &dst, 0)`. With mode 0 the identical
+>    argument list is the *stage* shape and overwrites the mirror with whatever
+>    the destination buffer happened to contain. The shape is chosen by a
+>    16-entry table at 0x6199C indexed by
+>    `8*(len!=0) + 4*(handle!=0) + 2*(buf!=0) + mode`
+>    (`re/findings/eeprom.md` §8.1).
+> 2. **The "handle" is a 9-byte record, not a word**, and the manager keeps a
+>    *pointer* to it in a 4-slot queue, so it must be stable storage — the
+>    patch keeps it in its own RAM block at 0x7FFB44. `+8` is the status: 1
+>    queued, **2 done**, 0x80 device failure, 0x82 checksum failure (§8.2-8.3).
+> 3. **"Commit at key-off" is not available.** Block 8 has exactly one stock
+>    client and it never commits; the write-all-blocks routine has no
+>    resolvable trigger; the synchronous-shutdown flag's two setters have no
+>    callers (`re/findings/eeprom.md` §9). So the patch commits *while the
+>    engine runs*, rate-limited to one page write per minute and gated on a
+>    5 % hysteresis and on mode OK/HOLD. The stored value is then at most one
+>    minute old and does not depend on an orderly shutdown at all — which is
+>    strictly better than a key-off flush for the case #38 cares about, a
+>    battery disconnect.
+>
+> The restore seeds **both** `e_filt` and `e_key`. Seeding only the decay
+> target would leave the first 50 s of a cold start on the E0 fuel factor with
+> an E85 tank — lean, the dangerous direction. A store that reads back 0xFF or
+> above 100 is ignored and the patch starts at E0.
+>
+> Still open, and the first thing part B of the procedure does: **nothing
+> proves the factory leaves block 8 payload +0 at 0xFF.** `ff_persist_offset`
+> and `ff_persist_block` are calibration bytes precisely so that a bench read
+> can move the store without a rebuild.
 
 ## 4. New calibration data
 

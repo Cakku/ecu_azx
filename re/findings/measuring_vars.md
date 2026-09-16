@@ -364,3 +364,98 @@ does not claim to know. The ids actually used by this dataset, by frequency:
 Reproduce with
 `python3 -c "import csv,re,collections; ..."` over `re/measuring_vars.csv`, or
 `python3 logging/med9log.py groups --formula-table`.
+
+---
+
+## 8. The four flex-fuel ids and group 111 (D2, 2026-09-16, #39)
+
+`patches/ff_fuel` publishes its state in a measuring block. The slots it takes
+and the proof that nothing else reads them, all VERIFIED-STATIC:
+
+```bash
+python3 tools/measuring_vars.py data/passat_azx_ori.bin --free
+```
+
+### 8.1 The ids: 2196-2199, the last four entries of TKMWL
+
+1,507 of the 2,200 ids both point at the "not available" stub 0x038EC4 *and*
+are named by no group, so nothing in the image can reach them. The four taken
+are the **last four**, 2196-2199, which makes the edit one contiguous 16-byte
+range at **0x0A78A8-0x0A78B7** (the table ends at 0x0A78B7) whose stock content
+is `00 03 8E C4` four times.
+
+| id | handler | field | emits | reads |
+|---|---|---|---|---|
+| 2196 | `ff_diag_e_pct` | 1 | `(0x21, A=0x64, B = E %)` | `ff_state.diag_e_pct` |
+| 2197 | `ff_diag_f_pct` | 2 | `(0x21, A=0x64, B = F %)` | `ff_state.diag_f_pct` |
+| 2198 | `ff_diag_t_degc` | 3 | `(0x05, A=0x0A, B = T + 100)` | `ff_state.diag_t_degc` |
+| 2199 | `ff_diag_mode` | 4 | `(0x36, A = persist_state, B = mode)` | `ff_state.mode` |
+
+Nothing else reads those four words:
+
+* `tools/find_abs_refs.py data/passat_azx_ori.bin --range 0xA78A8 0xA78B7`
+  → **no site at all**; over the whole table
+  (`--range 0xA5650 0xA78C0`) there is **exactly one**, `0x045780`, which is
+  the dispatcher's own `lis`/`addi` (§3);
+* `tools/find_branch_refs.py data/passat_azx_ori.bin 0xA78A8 0xA78AC 0xA78B0
+  0xA78B4` → no branch and no stored pointer to any of them;
+* the only consumer of a variable id is the group table, and the highest id it
+  names anywhere is **1746**.
+
+### 8.2 The group: 111 (0x6F)
+
+`21 <group>` accepts 1..0x7F only and answers with the requested group **and**
+group + 0x7F (kwp.md §12.3), so a free group must be empty *in both halves*.
+Sixteen qualify: 17, 19, 25, 29, 40, 45, 48, 49, 58, 59, 65, 67, 69, 108, 109
+and **111**. Group 111 is the highest, and its echo 238 is empty too, so the
+whole 25-byte response belongs to the patch: four flex-fuel fields followed by
+four `(0x25, 0, 0)` "not implemented" triples.
+
+108 and 109 are left free on purpose, for the ignition and rail blends of
+docs/05 §3.4 / §3.6.
+
+The four words, all currently `00 00`:
+
+| field | CPU | file |
+|---|---|---|
+| 1 | 0x5C55F6 | 0x1C55F6 |
+| 2 | 0x5C57F4 | 0x1C57F4 |
+| 3 | 0x5C59F2 | 0x1C59F2 |
+| 4 | 0x5C5BF0 | 0x1C5BF0 |
+
+They are inside the stock calibration (file 0x1C0000-0x1DFFFF), so
+`tools/patch_apply.py` needs `"calibration_edit": true` on the change; the
+TKMWL edit at file 0x0A78A8 is plain code-block flash and needs no flag. Both
+blocks are re-checksummed by `checksum.py fix`.
+
+Nothing else reads the group-table words either. Only two instructions in the
+whole image form the table's base address —
+
+```
+0x035760  3B A2 B5 28  addi r29,r2,-0x4AD8     ; measuring_group_read4
+0x0357F8  39 82 B5 28  addi r12,r2,-0x4AD8     ; the single-field reader 0x357E0
+```
+
+— and `tools/sda_xref.py data/passat_azx_ori.bin --var 0x5C5518 0x5C5D15`
+finds no D-form access into the table body at all (its three hits, 0x5C5D10,
+0x5C5D12 and 0x5C5D14, are past the last field row, which ends at 0x5C5D0F).
+`find_abs_refs.py --range 0x5C5518 0x5C5D0F` is empty.
+
+### 8.3 Formula choices
+
+Only formulas the logger can decode were used
+(`logging/med9kwp/vag_formulas.py`):
+
+* **0x21** `100 * B / A` — with A = 0x64 the display value *is* B in percent,
+  0..100 for ethanol and 100..200 for the fuel factor F (F = 1.40 reads
+  140 %). COMMUNITY, consistent with the id-2 anchor (A = 0x85 reads 100 % at
+  B = 0x85).
+* **0x05** `0.1 * A * (B - 100)` °C — CROSS-CHECKED against `tmot` in §7.1.
+  With A = 0x0A the value is `B - 100` °C, so the patch emits
+  `B = T + 100` from its stored `degC + 40` byte, clamped to 0..255
+  (i.e. -100 °C .. +155 °C).
+* **0x36** `(A << 8) | B` as a plain count — the mode enum 0..5 in B, with the
+  persistence state 0..4 in A, so the field reads `256 * persist + mode`.
+
+Every one of them is checked on the applied image in
+`tests/test_ff_diag_patch.py`.

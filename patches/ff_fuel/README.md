@@ -1,10 +1,17 @@
 # ff_fuel — the flex-fuel MVP
 
-Issues **#32** (implementation) and the software half of **#37** (FAULT/HOLD
-rules). The first patch of ours that changes what the engine does: it reads the
-Pico ethanol frame off a spare CAN receive slot, filters it, and scales the
-relative fuel mass `rk` by `F(E)`. At E0 it is **bit-identical to stock** —
-`F = 1024` takes an early return and never writes `rk` at all.
+Issues **#32** (implementation), the software half of **#37** (FAULT/HOLD
+rules), **#39** (VCDS-visible values) and **#38** (E% across power loss). The
+first patch of ours that changes what the engine does: it reads the Pico
+ethanol frame off a spare CAN receive slot, filters it, and scales the relative
+fuel mass `rk` by `F(E)`. At E0 it is **bit-identical to stock** — `F = 1024`
+takes an early return and never writes `rk` at all.
+
+Brief **D2** added the second half (2026-09-16): four values in **VCDS
+measuring block 111**, and the ethanol estimate kept in **EEP_CONF block 8** so
+a battery disconnect does not cost it. Both go through stock code only —
+`measuring_result_emit` and `nvm_block_request` — and neither can change what
+the engine does.
 
 > ## Do not flash yet — two blockers, both printed by `make apply`
 >
@@ -44,11 +51,12 @@ built by the patch's own generator (`ffcal001.py`), and it has to exist before
 |---|---|
 | **Hooks** | three, one word each — see the table below |
 | **Trampoline** | `HOOK_TAIL` for all three (`patches/common/hooks.S`): saves LR only, 16-byte frame |
-| **RAM** | 64 bytes of the 0x100-byte block at `PATCH_RAM` = 0x7FFB00 |
-| **Flash** | 2,304 bytes at 0x152000 (free area 0x150000-0x1AFFFF, all 0xFF) |
+| **RAM** | 80 bytes of the 0x100-byte block at `PATCH_RAM` = 0x7FFB00: the 64-byte state block, `ff_persist_buf` (0x7FFB40) and `ff_nvm_req` (0x7FFB44) |
+| **Flash** | 3,860 bytes at 0x152000 (free area 0x150000-0x1AFFFF, all 0xFF) |
 | **Calibration** | FFCAL001, 232 bytes at 0x5E2510 (checksum block 0x5E0000-0x5EFFFF) |
-| **Stock RAM written** | `rk` 0x803038 (only when F != 1024) and `can_rx_shadow` slot 15 (0x803F98-0x803FA3, which nothing else uses) |
-| **Stock code called** | `can_init_mb(15)` 0x135750 once, `can_rx_poll(15)` 0x4379C8 per activation |
+| **Stock tables edited** | `tbl_measuring_vars` ids 2196-2199 (0x0A78A8, 16 B) and `tbl_measuring_groups` group 111 (four u16) |
+| **Stock RAM written** | `rk` 0x803038 (only when F != 1024), `can_rx_shadow` slot 15 (0x803F98-0x803FA3, which nothing else uses) and — through the block manager, never directly — EEP_CONF block 8's mirror byte 0x7F9F80 |
+| **Stock code called** | `can_init_mb(15)` 0x135750 once, `can_rx_poll(15)` 0x4379C8 per activation, `measuring_result_emit` 0x38EB4 per measuring field, `nvm_block_request` 0x6131C at cold start and at most once a minute |
 
 `ff_fuel` is placed at 0x152000, not 0x150000, so it and `ff_counter` can sit
 in one image if that ever becomes useful. They share the same RAM block and are
@@ -62,8 +70,22 @@ never flashed together.
 | **0x432940** | `4B C8 B0 A5` `bl 0x0BD9E4` | `4B D1 F6 E1` `bl 0x152020` | `task_100ms_int` 0x4328E4, id 19, **10 ms, task set A** | `ba 0x0BD9E4` (an empty leaf) |
 | **0x12067C** | `4B FF E9 B1` `bl 0x11F02C` | `48 03 19 C5` `bl 0x152040` | `task_100ms` 0x1205A0, id 32, **10 ms, task set B** | `ba 0x11F02C` (`clr_ram_7FE889_800E18`) |
 
-Plus two data edits: **0x2BD8C** `00 00 07 FF` -> `00 00 00 EC` (the id word of
-`tbl_can_rx` slot 15) and **0x5E2510** 232 bytes of 0xFF -> FFCAL001.
+Plus six data edits:
+
+| Address | Old | New | What |
+|---|---|---|---|
+| **0x02BD8C** | `00 00 07 FF` | `00 00 00 EC` | the id word of `tbl_can_rx` slot 15 |
+| **0x5E2510** | 232 B of 0xFF | FFCAL001 | the new calibration block |
+| **0x0A78A8** | `00 03 8E C4` ×4 | the four handler addresses | `tbl_measuring_vars` ids 2196-2199 (D2) |
+| **0x5C55F6** | `00 00` | `08 94` | `tbl_measuring_groups` group 111 field 1 (D2) |
+| **0x5C57F4** | `00 00` | `08 95` | field 2 |
+| **0x5C59F2** | `00 00` | `08 96` | field 3 |
+| **0x5C5BF0** | `00 00` | `08 97` | field 4 |
+
+The TKMWL words are generated from the linker symbols (`"u32_syms"` in
+`patch.json`, docs/06 §1), so they follow the code instead of going stale; the
+four group words are inside the guarded stock calibration and carry
+`"calibration_edit": true`.
 
 ### Why both 10 ms rasters are hooked
 
@@ -170,8 +192,20 @@ pair is one 26-bit value in 1/16384 %; `e_filt` alone is what everything reads.
 | +34 | u16 | `ff_diag_e_pct` | **D2** | `e_filt` in 1 %, for the measuring block |
 | +36 | u16 | `ff_diag_f_pct` | **D2** | F in %, `(f_q10 * 100) >> 10` |
 | +38 | u16 | `ff_diag_t_degc` | **D2** | fuel temperature, °C + 40 |
-| +3A | u16 | — | **D2** | reserved |
-| +3C | u32 | — | **D2** | reserved |
+| +3A | u16 | `ff_persist_wait` | **D2** | activations left of the commit rate limit |
+| +3C | u16 | `ff_persist_writes` | **D2** | commits that finished OK (saturating) |
+| +3E | u16 | `ff_persist_fails` | **D2** | commits that failed (saturating) |
+
+Above the 64-byte block, still inside the declared 0x100, sit two objects the
+state block deliberately does not contain: **`ff_persist_buf` at 0x7FFB40**,
+the one byte a stage copies from, and **`ff_nvm_req` at 0x7FFB44**, the block
+manager's 9-byte request record. The manager keeps a *pointer* to that record
+in its own queue and dereferences it milliseconds after the call returns
+(`re/findings/eeprom.md` §8.2), so it cannot be a stack temporary — and its
+layout is the manager's, not ours, which is why it is not part of
+`struct ff_state`. Both addresses are in `patch.json`'s `build.symbols`
+(`build.ram_symbols`), so a test or a logger reads them rather than assuming
+them.
 
 Three things about this layout:
 
@@ -214,7 +248,7 @@ offsets and `tests/test_flexfuel_model.py` asserts the two agree.
 | +18 | u8 | `ff_mode` | **1** | 0 off / 1 normal / 2 bench override |
 | +19 | u8 | `ff_e_override` | 0 | % |
 | +1A | u8 | `ff_stall_max` | 3 | frames |
-| +1B | u8 | `ff_persist_enable` | 0 | **D2** |
+| +1B | u8 | `ff_persist_enable` | **1** | **D2**, 0 makes the patch behave exactly like D1's |
 | +1C | u8 | `ff_persist_hyst_pct` | 5 | **D2**, % |
 | +1D | u8 | `ff_persist_block` | 8 | **D2**, EEP_CONF block |
 | +1E | u8 | `ff_persist_offset` | 0 | **D2**, payload offset |
@@ -253,8 +287,8 @@ plain `ffcal001.py` to get mode 1 back, and re-run `make gen`.
 ## Blob disassembly
 
 `make dump` — the raw bytes at the address the CPU will fetch them from, not
-the ELF. Recorded 2026-09-16, LLVM 23.1.1, `PATCH_FLASH=0x152000`,
-`PATCH_RAM=0x7FFB00`. The three trampolines first (identical but for the call
+the ELF. Re-recorded 2026-09-16 after D2, LLVM 23.1.1,
+`PATCH_FLASH=0x152000`, `PATCH_RAM=0x7FFB00`. The three trampolines first (identical but for the call
 and the tail):
 
 ```
@@ -262,46 +296,56 @@ and the tail):
 00152000  94 21 FF F0  stwu     r1, -0x10(r1)
 00152004  7C 08 02 A6  mflr     r0
 00152008  90 01 00 0C  stw      r0, 0xc(r1)
-0015200C  48 00 07 49  bl       0x152754        ; ff_rk_scale
+0015200C  48 00 0D 5D  bl       0x152d68        ; ff_rk_scale
 00152010  80 01 00 0C  lwz      r0, 0xc(r1)
 00152014  7C 08 03 A6  mtlr     r0
 00152018  38 21 00 10  addi     r1, r1, 0x10
 0015201C  48 41 C3 A2  ba       0x41c3a0        ; rksplit
-                                  ; --- ff_fuel_hook_a: same, bl 0x152060, ba 0xbd9e4
-                                  ; --- ff_fuel_hook_b: same, bl 0x152730, ba 0x11f02c
+                                  ; --- ff_fuel_hook_a: same, bl 0x15263c, ba 0xbd9e4
+                                  ; --- ff_fuel_hook_b: same, bl 0x152d44, ba 0x11f02c
 ```
+
+The four measuring handlers are ordinary functions at **0x152060**
+(`ff_diag_e_pct`), **0x1520E4** (`ff_diag_f_pct`), **0x152168**
+(`ff_diag_t_degc`) and **0x1521FC** (`ff_diag_mode`) — no trampoline. The
+dispatcher enters a handler with `blrl`, so LR already holds the return
+address, and a non-leaf C function saves it, calls `measuring_result_emit` and
+`blr`s, which is exactly the stock handlers' shape.
 
 and the whole of the segment-synchronous half, which is the only code that runs
 per injection:
 
 ```
                                   ; --- ff_rk_scale
-00152754  3C 80 00 80  lis      r4, 0x80
-00152758  38 64 FB 00  addi     r3, r4, -0x500  ; 0x7FFB00 = PATCH_RAM
-0015275C  80 A3 00 2C  lwz      r5, 0x2c(r3)    ; ff_rk_calls
-00152760  38 A5 00 01  addi     r5, r5, 1
-00152764  90 A3 00 2C  stw      r5, 0x2c(r3)
-00152768  80 84 FB 00  lwz      r4, -0x500(r4)  ; ff_magic
-0015276C  6C 84 46 46  xoris    r4, r4, 0x4646
-00152770  28 04 30 31  cmplwi   r4, 0x3031
-00152774  4C 82 00 20  bnelr                    ; no valid state -> stock
-00152778  A0 63 00 0A  lhz      r3, 0xa(r3)     ; ff_f_q10
-0015277C  28 03 04 01  cmplwi   r3, 0x401
-00152780  4D 80 00 20  bltlr                    ; F <= 1024 -> stock, rk untouched
-00152784  28 03 08 00  cmplwi   r3, 0x800
-00152788  41 80 00 08  blt      0x152790
-0015278C  38 60 08 00  li       r3, 0x800       ; clamp to 2048 in code
-00152790  3C 80 00 80  lis      r4, 0x80
-00152794  A0 A4 30 38  lhz      r5, 0x3038(r4)  ; rk
-00152798  7C 65 19 D6  mullw    r3, r5, r3
-0015279C  54 63 B2 BE  srwi     r3, r3, 0xa     ; (rk * F) >> 10
-001527A0  28 03 FF FF  cmplwi   r3, 0xffff
-001527A4  41 80 00 0C  blt      0x1527b0
-001527A8  3C 60 00 00  lis      r3, 0
-001527AC  60 63 FF FF  ori      r3, r3, 0xffff  ; saturate
-001527B0  B0 64 30 38  sth      r3, 0x3038(r4)
-001527B4  4E 80 00 20  blr
+00152D68  3C 80 00 80  lis      r4, 0x80
+00152D6C  38 64 FB 00  addi     r3, r4, -0x500  ; 0x7FFB00 = PATCH_RAM
+00152D70  80 A3 00 2C  lwz      r5, 0x2c(r3)    ; ff_rk_calls
+00152D74  38 A5 00 01  addi     r5, r5, 1
+00152D78  90 A3 00 2C  stw      r5, 0x2c(r3)
+00152D7C  80 84 FB 00  lwz      r4, -0x500(r4)  ; ff_magic
+00152D80  6C 84 46 46  xoris    r4, r4, 0x4646
+00152D84  28 04 30 31  cmplwi   r4, 0x3031
+00152D88  4C 82 00 20  bnelr                    ; no valid state -> stock
+00152D8C  A0 63 00 0A  lhz      r3, 0xa(r3)     ; ff_f_q10
+00152D90  28 03 04 01  cmplwi   r3, 0x401
+00152D94  4D 80 00 20  bltlr                    ; F <= 1024 -> stock, rk untouched
+00152D98  28 03 08 00  cmplwi   r3, 0x800
+00152D9C  41 80 00 08  blt      0x152da4
+00152DA0  38 60 08 00  li       r3, 0x800       ; clamp to 2048 in code
+00152DA4  3C 80 00 80  lis      r4, 0x80
+00152DA8  A0 A4 30 38  lhz      r5, 0x3038(r4)  ; rk
+00152DAC  7C 65 19 D6  mullw    r3, r5, r3
+00152DB0  54 63 B2 BE  srwi     r3, r3, 0xa     ; (rk * F) >> 10
+00152DB4  28 03 FF FF  cmplwi   r3, 0xffff
+00152DB8  41 80 00 0C  blt      0x152dc4
+00152DBC  3C 60 00 00  lis      r3, 0
+00152DC0  60 63 FF FF  ori      r3, r3, 0xffff  ; saturate
+00152DC4  B0 64 30 38  sth      r3, 0x3038(r4)
+00152DC8  4E 80 00 20  blr
 ```
+
+Those 25 instructions are **byte for byte what D1 shipped**; D2 only moved them
+0x614 further into the blob. Nothing on the per-injection path changed.
 
 Absolute addressing throughout (`lis 0x80` / `-0x500`, `lis 0x5E` for the
 calibration), **no r2 or r13 anywhere** (`--check-sda` OK), no `.rodata`, no
@@ -334,44 +378,56 @@ them):
 | **segment stub, F = 1024** (E0) | **20** | every injection segment |
 | segment stub, F != 1024 | 30 | every injection segment |
 | segment stub, no valid state block | 17 | the first milliseconds after power-up |
-| periodic, warm, no frame | 485 | 9 of every 10 activations |
-| periodic, warm, fresh frame | 618 | 1 of every 10 activations |
-| periodic, the non-owner hook | 306 | never, unless both task sets run |
-| periodic, mode 0 | 361 | — |
-| periodic, cold start (init + tick) | 1,527 | once per power-up |
+| periodic, warm, no frame | 540 | 9 of every 10 activations |
+| periodic, warm, fresh frame | 673 | 1 of every 10 activations |
+| periodic, the activation that commits | 934 | at most once per `ff_persist_rate_s` |
+| periodic, the non-owner hook | 322 | never, unless both task sets run |
+| periodic, mode 0 | 376 | — |
+| periodic, cold start (init + tick) | 1,782 | once per power-up |
+| one measuring handler, through the dispatcher | 51-53 | only when a tester asks |
 
-The periodic figures include the real `can_rx_poll` (which has its own critical
-section) and the 36-byte state checksum. At 100 activations per second and
-56 MHz that is **about 0.1 % of the CPU**; the worst case is the cold-start
-activation, which is a single 1,527-instruction event. Deepest stack use is
-**119 bytes below the task's r1**, measured on the cold-start activation — the
-ERCOSEK task stack is 0x3B0 bytes (`ram.md` §4.1, §5).
+The segment figures are D1's and are unchanged, because `ff_rk_scale` is. The
+periodic ones grew by about 55 instructions: `ff_diag_publish()` at the end of
+every activation and `ff_persist_tick()`, which is a handful of loads on the
+9,999 activations out of 10,000 that do not commit. The cold start grew by 255,
+the cost of one `nvm_block_request` read out of the RAM mirror.
+
+They include the real `can_rx_poll` (which has its own critical section), the
+real `nvm_block_request` (which has another) and the 36-byte state checksum. At
+100 activations per second and 56 MHz that is still **about 0.1 % of the CPU**;
+the worst case is the cold-start activation, a single 1,782-instruction event.
+Deepest stack use is **168 bytes below the task's r1** (was 119), on both the
+cold-start and the committing activation — the ERCOSEK task stack is 0x3B0
+bytes (`ram.md` §4.1, §5). A measuring handler uses 32 bytes, and it runs in
+the KWP task, not in the raster.
 
 ## Applying it
 
 ```
 $ make apply
-ff_fuel: 48 patch range(s) (2494 B), 11 descriptor range(s) (34 B), 0 unexpected
+ff_fuel: 90 patch range(s) (4022 B), 15 descriptor range(s) (44 B), 0 unexpected
 checksums: ALL OK (65 blocks); identification block unchanged
-sha256: ac375be0ee3cb1e5f97b3e8fe3f880d964ad270bacf59d9d811e556951f5c8e7
+sha256: 40e22a23a2208a86c2e7ae8fd9e7cd3ccacf1cec9d0926bb5352f02eba84cae7
 WARNING: ff_fuel: "ram_status": "static" - ... Do not flash this image.
 WARNING: change at 0x42247c+0x4 writes the MPC561 on-chip flash ...
 WARNING: change at 0x432940+0x4 writes the MPC561 on-chip flash ...
 ```
 
-48 patch ranges because many of the blob's and FFCAL001's own bytes are 0xFF,
-so they do not change and the ranges around them split. The 11 descriptor
-ranges are the sum/~sum words of the **six** affected Bosch blocks, five of
-them described by the code table at file 0x0A0000 and one by the calibration
+90 patch ranges because many of the blob's and FFCAL001's own bytes are 0xFF,
+so they do not change and the ranges around them split. The 15 descriptor
+ranges are the sum/~sum words of the **eight** affected Bosch blocks, six of
+them described by the code table at file 0x0A0000 and two by the calibration
 table at 0x1C3300:
 
 | Descriptor | Table entry | Block it covers | Touched by |
 |---|---|---|---|
 | 0x0A0010 | code #1 | 0x020000-0x02FFFF | the CAN id word at 0x2BD8C |
+| 0x0A0100 | code #16 | the block holding 0x0A78A8 | the four TKMWL pointers (**D2**) |
 | 0x0A0200 | code #32 | the block holding 0x12067C | the set-B hook word |
 | 0x0A0250 | code #37 | the block holding 0x152000 | the blob |
 | 0x0A0300 | code #48 | the on-chip block holding 0x42247C | the fuel hook word |
 | 0x0A0310 | code #49 | the on-chip block holding 0x432940 | the set-A hook word |
+| 0x1C3320 | cal #2 | the block holding 0x5C55F6 | the four group words (**D2**) |
 | 0x1C3340 | cal #4 | 0x5E0000-0x5EFFFF | FFCAL001 |
 
 That the on-chip hook sites land in real, maintained descriptors is the static
@@ -380,6 +436,99 @@ self-consistent. Whether KESS *writes* them is §1 of `test/procedure.md`.
 
 The sha256 above is of this build; it changes whenever the code, the
 calibration or the toolchain changes.
+
+## What a tester sees — measuring block 111 (#39)
+
+`21 6F` over KWP, i.e. VCDS **Engine 01 → Measuring Blocks → group 111**:
+
+| Field | Value | id | Formula | Reads |
+|---|---|---|---|---|
+| 1 | filtered ethanol, whole % | 2196 | 0x21, A = 100 → the value *is* B | `ff_diag_e_pct` |
+| 2 | the fuel factor F, % (100 = 1.000 = stock) | 2197 | 0x21, A = 100 | `ff_diag_f_pct` |
+| 3 | fuel temperature, °C | 2198 | 0x05, A = 10 → `B − 100`, CROSS-CHECKED | `ff_diag_t_degc` |
+| 4 | `256 × persist_state + mode` | 2199 | 0x36, a plain count | `ff_state.mode` |
+
+Why those slots: 1,507 of the 2,200 TKMWL ids both point at the "not available"
+stub 0x38EC4 *and* are named by no group, and ids 2196-2199 are the **last
+four**, which makes the edit one contiguous 16-byte range. Group 111 and its
+`+0x7F` echo 238 are both entirely empty, so the whole 25-byte answer belongs
+to the patch. 108 and 109 are equally free and are left for the ignition and
+rail blends. Evidence and the three negative searches:
+`re/findings/measuring_vars.md` §8, reproducible with
+
+```bash
+./../../.venv/bin/python3 ../../tools/measuring_vars.py \
+    ../../data/passat_azx_ori.bin --free
+```
+
+A handler checks the block **header only** — not the checksum, which is stale
+for the length of an activation — and answers `(0x25, 0, 0)` "not available"
+when it does not hold, which is also what field 3 shows before the first frame.
+Better than displaying −40 °C.
+
+Rehearse the whole thing without an ECU, against the patched image, through the
+firmware's own SID 0x21 route:
+
+```bash
+./../../.venv/bin/python3 ../../logging/med9log.py groups --sim \
+    --sim-dump ../../work/ff_fuel.bin 111
+  field 1: fmt 0x21 A=0x64 B=0x55 -> 85.000 %      [community]
+  field 2: fmt 0x21 A=0x64 B=0x9a -> 154.000 %     [community]
+  field 3: fmt 0x05 A=0x0a B=0x7d -> 25.000 degC   [crosschecked]
+  field 4: fmt 0x36 A=0x00 B=0x01 -> 1.000 count   [community]
+```
+
+`f_zw` is deliberately **not** published. It does not exist yet; a handler that
+read a reserved zero would be a field that lies.
+
+## E% across power loss (#38)
+
+The estimate is kept in **EEP_CONF block 8, payload +0, one byte**, through
+`nvm_block_request` (0x6131C) and nothing else. The raw SPI primitives are
+never touched: they would race the manager's mirror and the patch would have to
+maintain the block checksum itself.
+
+```c
+ff_persist_init()          /* cold start: nvm(blk, off, 1, 1, &buf, 0)      */
+                           /*   mode 1 = READ.  With mode 0 the same call   */
+                           /*   is the STAGE shape and clobbers the mirror. */
+ff_persist_tick(tick_ms)   /* nvm(blk, off, 1, 0, &buf, 0)   stage  -> 2    */
+                           /* nvm(blk,   0, 0, 0,    0, &req) commit -> 1   */
+                           /*   then poll req.status: 1 busy, 2 done        */
+```
+
+Four things keep the EEPROM safe, and all four are calibration:
+
+* **only OK and HOLD write.** A FAULT estimate is a decayed guess and must not
+  overwrite what the sensor last reported; mode 2 (bench override) never
+  reaches the store at all;
+* **`ff_persist_hyst_pct`** = 5 %, clamped to at least 1 in code;
+* **`ff_persist_rate_s`** = 60 s, armed at power-up as well as after every
+  attempt, so a car that is started and stopped cannot write more than once a
+  minute. Worst case is one page write a minute, i.e. ~16,000 engine hours of
+  the M95160's 1e6-cycle endurance;
+* **one request at a time**: while `persist_state` is BUSY the record belongs
+  to the manager and nothing here touches it.
+
+The restore seeds **both `e_filt` and `e_key`**, not just the decay target.
+After a key cycle the state block is gone and the machine starts in FAULT with
+`hold_ticks` 0, so the first activation decays `e_filt` towards `e_key`:
+starting from 0 that would mean running the E0 fuel factor on an E85 tank for
+the ~50 s the 2 %/s slew limit needs — lean, the dangerous direction. Starting
+from the stored value errs *rich* if the tank was refilled while the car was
+off, and the sensor corrects it at the same 2 %/s. A store that reads back 0xFF
+or above 100 is ignored and the patch starts at E0.
+
+**There is no key-off commit to piggyback on.** Block 8 has exactly one stock
+client and it only ever *stages*; the write-all-blocks routine has no
+resolvable trigger; the synchronous-shutdown mode's two setters have no callers
+(`re/findings/eeprom.md` §9). Writing while the engine runs is therefore not a
+compromise — it is the only route, and it is the better one for the case #38
+cares about, because it does not depend on an orderly shutdown at all.
+
+`ff_persist_enable = 0` in the calibration removes every one of these calls;
+`tests/test_ff_diag_patch.py` asserts the mirror is byte-identical after 400
+activations with it off.
 
 ## The state machine
 
@@ -415,16 +564,26 @@ rail blends, which must drop to the gasoline map *immediately*, are docs/05
   `can_rx_poll` executing and only TouCAN C message buffer 6 modelled (IFLAG
   0x7078A4 bit 6, control word 0x707960, payload 0x707966 — `can.md` §4).
   Nothing is stubbed.
+* `tests/test_ff_diag_patch.py` (37) — D2's half over five layers: the stock
+  facts behind the slot choice, the two table edits on the applied image,
+  `measuring_var_dispatch` per id against the model, **`21 6F` end to end
+  through `logging/ecu_sim.py` on the patched image**, and the E% store through
+  the real `nvm_block_request` with the QSPI left as the emulator's zero stub.
 * The E0 proof: `test_f_1024_leaves_rk_untouched` for `rk` in
   {0, 1, 0x7FFF, 0xFFFF}, and `test_one_activation_moves_only_our_own_ram`,
   which diffs the whole 64 KB of SRAM between the stock and the patched image
-  after the same hooked site has run.
+  after the same hooked site has run. Its D2 counterpart is
+  `test_a_handler_writes_only_the_three_result_bytes`, which does the same for
+  a measuring handler: a tester cannot disturb the control path.
 
 ## Bench
 
 `test/procedure.md` — the on-chip read-back test, the DDLI recipe, the task-set
 decision from `ff_src_seen`, the E0 equivalence run, and the **#37
 fault-injection matrix** with the expected mode and F per step.
+`test/procedure_d2.md` — what VCDS group 111 must show (#39), the
+non-destructive read of EEP_CONF block 8 **before** flashing, and the
+**battery-disconnect test** that is the acceptance criterion of #38.
 `test/tolerance.json` — the limits for `tools/logcmp.py` on the E0 run.
 `logging/sessions/ff_fuel.json` — the variable list, with `patch_offset` on
 every `ff_*` entry so `med9log.py log --patch patches/ff_fuel/patch.json`

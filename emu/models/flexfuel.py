@@ -72,6 +72,7 @@ CURVE_STEP = 100
 
 CORE_OFF = 0x08    # first checksummed byte of the state block
 CORE_LEN = 0x24    # +0x08..+0x2B; the annex above it has other writers
+STATE_LEN = 0x40   # sizeof(struct ff_state)
 BLOCK_LEN = 0x40
 
 
@@ -188,6 +189,9 @@ class State:
     diag_e_pct: int = 0
     diag_f_pct: int = 0
     diag_t_degc: int = 0
+    persist_wait: int = 0
+    persist_writes: int = 0
+    persist_fails: int = 0
 
 
 def _tdiv(n: int, d: int) -> int:
@@ -232,6 +236,7 @@ class FlexFuelModel:
         st.cal_mode = c.mode if c.valid else 0
         if st.cal_ok and c.mode == 1:
             self.can_init_calls += 1    # can_init_mb(15), idempotent (can.md §7)
+        self.diag_publish()
         self.seal()
 
     def state_valid(self) -> bool:
@@ -399,8 +404,47 @@ class FlexFuelModel:
         # HOLD: E is frozen, so F is frozen too
 
         st.f_q10 = self.f_of(st.e_filt)
+        self.diag_publish()
         self.seal()
         return st
+
+    # -- the measuring block (brief D2, issue #39) ------------------------
+    def diag_publish(self) -> None:
+        """`ff_diag_publish()`: the three annex words the handlers read.
+
+        Annex, so it is outside the checksum and `block_bytes()` does not show
+        it; `full_bytes()` does.
+        """
+        st = self.state
+        st.diag_e_pct = min((st.e_filt + 8) // 16, 100)
+        st.diag_f_pct = (st.f_q10 * 100) >> 10
+        st.diag_t_degc = st.t_fuel
+
+    def triples(self) -> list[tuple[int, int, int]]:
+        """The four `(formula, A, B)` triples of measuring block 111.
+
+        Exactly what `ff_diag_e_pct`, `ff_diag_f_pct`, `ff_diag_t_degc` and
+        `ff_diag_mode` emit (patches/ff_fuel/src/ff_diag.c); the handlers check
+        the block header only, so this does too.
+        """
+        st = self.state
+        if st.magic != self.MAGIC or st.length != STATE_LEN:
+            return [(0x25, 0, 0)] * 4
+        clamp = lambda v: min(max(v, 0), 0xFF)              # noqa: E731
+        t = ((0x25, 0, 0) if st.status == 0xFF
+             else (0x05, 10, clamp(st.diag_t_degc + 100 - 40)))
+        return [(0x21, 100, clamp(st.diag_e_pct)),
+                (0x21, 100, clamp(st.diag_f_pct)),
+                t,
+                (0x36, clamp(st.persist_state), clamp(st.mode))]
+
+    def full_bytes(self) -> bytes:
+        """All 64 bytes at PATCH_RAM, annex included."""
+        st = self.state
+        return self.block_bytes() + struct.pack(
+            ">IHBBHHHHHH", st.rk_calls, st.e_persist, st.persist_state,
+            st.persist_err, st.diag_e_pct, st.diag_f_pct, st.diag_t_degc,
+            st.persist_wait, st.persist_writes, st.persist_fails)
 
     # -- the segment-synchronous half -------------------------------------
     def rk_scale(self, rk: int) -> int:

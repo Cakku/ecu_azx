@@ -77,6 +77,27 @@ can produce it), `bytes` is inline hex, `expect_blank` asserts the stock bytes
 are all 0xFF, and an explicit `old` is compared with what is really there. The
 unlock flags below are copied verbatim into the generated change.
 
+> **Added 2026-09-16 (brief D2, issue #39) — `u32_syms`.** A third source for a
+> `data` entry: a list of symbol names, resolved from the linker's `.sym` and
+> packed as big-endian u32s.
+>
+> ```json
+> {"addr": "0x000A78A8",
+>  "u32_syms": ["ff_diag_e_pct", "ff_diag_f_pct",
+>               "ff_diag_t_degc", "ff_diag_mode"],
+>  "old": "00038ec400038ec400038ec400038ec4",
+>  "why": "tbl_measuring_vars ids 2196-2199"}
+> ```
+>
+> It exists because a stock **pointer table** that has to point into our blob
+> (here the TKMWL measuring-variable handlers) cannot be written as literal
+> bytes without going stale the moment the code moves — the same reason
+> `hooks` resolves its target rather than taking a branch word. Each symbol
+> must lie inside the blob and be 4-byte aligned, and all of them are added to
+> `build.symbols`, so a test can assert what the table now points at.
+
+
+
 **2. `onchip_edit` — the second unlock flag.** The old guard refused
 0x400000-0x47FFFF outright, with the reason "not fully in our read". That is
 true of the **first 16 KB only**: 0x400000-0x403FFF is absent from the dump
