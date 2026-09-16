@@ -307,7 +307,44 @@ Id 1 (group 001 field 1) reads 0x7FCE95 and emits `(0x01, A=0xC8, B=x)`;
 `0.2 x 200 x B = 40 x B`, which is exactly the "40 rpm per count" section 5
 inferred from A alone. Checked for x = 0, 20, 75, 200 (0, 800, 3000, 8000 rpm).
 
-### 7.3 What was NOT verified
+### 7.3 Formula 0x53 is `p = ((A<<8)|B) x 0.01` bar -- CROSS-CHECKED
+
+Measuring id **500** reads **0x8031DA** (`prist_w`) and id **501** reads
+**0x8031F4** (`prsoll_w`), both with formula **0x53**.
+`re/findings/rail.md` section 2 gives both as u16 at **0.005 bar/LSB**, derived
+from the controller code. Varying 0x8031DA and reading group 106 field 1:
+
+| 0x8031DA | x 0.005 (rail.md) | A | B | (A<<8)\|B | x 0.01 |
+|---|---|---|---|---|---|
+| 0 | 0.00 | 0x00 | 0x00 | 0 | **0.00** |
+| 2000 | 10.00 | 0x03 | 0xE8 | 1000 | **10.00** |
+| 12000 | 60.00 | 0x17 | 0x70 | 6000 | **60.00** |
+| 20000 | 100.00 | 0x27 | 0x10 | 10000 | **100.00** |
+| 40000 | 200.00 | 0x4E | 0x20 | 20000 | **200.00** |
+| 65535 | 327.68 | 0x7F | 0xFF | **32767 (clamped)** | 327.67 |
+
+So the handler simply halves the raw word (0.005 -> 0.01 bar/LSB) and the
+tester multiplies by 0.01. That confirms, without a car:
+
+* **formula 0x53 = ((A<<8)\|B) x 0.01, bar** -- and it is **not in any of the
+  public formula tables consulted**, which stop well before 0x53;
+* **0x8031DA (`prist`) and 0x8031F4 (`prsoll`) really are 0.005 bar/LSB**, the
+  third row of issue **#44**;
+* the display word saturates at 32767 = **327.67 bar** (a signed-16 clamp).
+
+**Correction to the plan in #44:** group **140** does *not* contain `prsoll`.
+Group 140 is `(1005, 1006, 500, 1689)` -- field 3 is `prist` and fields 1-2 are
+0x803168/0x803164 with formula 0x5B. The group that holds **both** rail
+pressures next to each other is **231** = `(1006, 501, 500, 1689)`, i.e.
+field 2 `prsoll`, field 3 `prist`. Neither 140 nor 231 can be requested
+directly (section 12.3 of `kwp.md`); ask for **104** and read the second half
+of the answer, or for **13** to get group 140:
+
+```bash
+python3 logging/med9log.py groups --sim 231     # prints "reading group 104"
+```
+
+### 7.4 What was NOT verified
 
 Id 2 emits `(0x21, A=0x85, B = the raw byte of 0x7FEF74)`, so `100 x B / A`
 reads 100 % when the byte is 0x85 = 133 — consistent with "0x21 is the

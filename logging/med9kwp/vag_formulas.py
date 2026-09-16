@@ -42,6 +42,9 @@ _TABLE: dict[int, tuple] = {
     0x05: (lambda a, b: 0.1 * a * (b - 100), "degC", CROSSCHECKED,
            "measuring_vars.md 7.1; exact against tmot = 0.75x-48, "
            "B saturates at 243 = 143 degC"),
+    0x53: (lambda a, b: ((a << 8) | b) * 0.01, "bar", CROSSCHECKED,
+           "measuring_vars.md 7.3; exact against prist = 0.005 bar/LSB, "
+           "the word saturates at 32767 = 327.67 bar"),
     0x02: (lambda a, b: 0.002 * a * b, "%", COMMUNITY, ""),
     0x03: (lambda a, b: 0.002 * a * b, "ms", COMMUNITY, ""),
     0x06: (lambda a, b: 0.001 * a * (b - 128), "V", COMMUNITY, ""),
