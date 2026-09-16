@@ -149,6 +149,65 @@ transient dropout; but drop the **ignition** and **rail** blends to the
 gasoline map immediately, because advance is the dangerous direction.
 Power-up: start from the persisted E% (Phase 5); until then from E0.
 
+#### Added 2026-09-16 (brief D1, issues #32/#37) — implemented in `patches/ff_fuel`
+
+The whole of this section is now code: `patches/ff_fuel/src/ff_fuel.c`,
+specified by `emu/models/flexfuel.py` and compared with it tick by tick in
+`tests/test_ff_fuel_patch.py`. What was implemented, and where it deviates.
+
+**Fixed point.**
+
+| Quantity | Format | Note |
+|---|---|---|
+| `E_filt` | u16, **1/16 %**, 0..1600 | one curve breakpoint every 6.25 % = 100 counts, so `index = E_filt / 100`, `frac = E_filt % 100`, integer only |
+| `E_frac` | u16, **1/1024 of one `E_filt` count** | **new, a deviation** — see below |
+| `F` | u16, **1/1024**, clamped to [1024, 2048] **in code** | `rk = min((rk * F) >> 10, 0xFFFF)` |
+| time | activations of the periodic hook; every calibration value is physical | see below |
+
+**Deviation 1 — the sub-count `E_frac`.** §8 requires the 2 %/s slew limit to
+be expressed per activation, which at 10 ms is 0.02 % = **0.32 counts of
+1/16 %**. In integer arithmetic that truncates to zero and freezes the filter
+completely. `E_filt` therefore carries a companion `E_frac`, and the pair is one
+26-bit value in 1/16384 %. `E_filt` alone is what the curve, the logger and
+everything else read, exactly as this section specifies.
+
+**Deviation 2 — the filter gain is a time constant, not a shift.** This section
+says `K = ff_filter_k` (1/32 per tick) and §8 corrects it to ≈1/320 at 10 ms.
+FFCAL001 instead stores **`ff_filter_tau_ms` = 3000 ms**, and the patch computes
+`K = ff_tick_ms / ff_filter_tau_ms` = 1/300 per activation. Likewise
+`ff_slew_pct_s` stays 2 %/s and the patch computes the per-activation step.
+`ff_tick_ms` (10 ms, from `scheduler.md` §11) is itself a calibration value, so
+**moving the hook to another raster is one byte, not a rebuild**, and a
+calibration written for a 100 ms raster still behaves as its author intended.
+The conversion is in the C, not in `ffcal001.py`.
+
+**Deviation 3 — `frame_bad` is a latch.** The conditions listed above ("status
+in {fault, not ready}", "counter unchanged for 3 received frames") are
+*conditions*, and a condition has to hold between frames too: the Pico sends at
+10 Hz while the raster runs at 100 Hz, so nine activations out of ten see no
+frame at all. Evaluating them only on the activation that carries the bad frame
+made the mode fall straight back to OK on the next one. The rejection is
+therefore latched in `ff_state.frame_bad` and cleared only by the next good
+frame. (Found by the tick-by-tick comparison with the model, not by review.)
+
+**Additions this section did not ask for, all in the safe direction:**
+
+* the received id echo at 0x803F98 is compared against `ff_can_id`, so a frame
+  arriving on the wrong slot cannot be believed;
+* `E_raw > 100 %` is rejected as implausible;
+* `ff_mode` 0 (off) and 2 (bench override) from §4, plus a fourth safe state:
+  an FFCAL001 whose magic, version, length or checksum does not check out forces
+  mode 0, i.e. `F = 1024` and no CAN traffic at all;
+* `can_init_mb(15)` is called from the patch's own state-block initialisation
+  (`can.md` §7 step 4), so `can_rx_arm_all` is not edited.
+
+**Power-up is FAULT at E0 with F = 1024**, as specified; `e_key` (the decay
+target) is 0 until brief D2 loads it from EEPROM block 8.
+
+**The hold timer counts activations, including the one it is armed on**, so
+`ff_hold_ticks` reads 5999 immediately after the FAULT entry and the held window
+is exactly 6000 activations = 60.00 s.
+
 ### 3.3 Fuel factor
 Stoichiometry: gasoline 14.7, ethanol 9.0 by mass. For volume fraction `v`
 (the sensor reports volume %), with densities 0.745 (gasoline) and 0.789
@@ -211,6 +270,33 @@ regression test: `emu/models/injection.py`, `tests/test_injection_model.py`.
   in the angle domain by `awea_ti_to_angle` (0x41B9C0) on
   `dwi = (ti * k_nmot) >> 13` at RAM **0x803088** — that is the signal to log
   per §3.6.
+
+#### Added 2026-09-16 (brief D1, issue #32) — the curve is built, and "1.50 at E85" is a pump figure
+
+`patches/ff_fuel/ffcal001.py` builds `ff_F_curve` from the formula above through
+`emu.models.flexfuel.fuel_mass_factor`, so the calibration, the patch and the
+model cannot drift apart. **F(0) = 1024 exactly**, which is what makes E0
+bit-identical (`ffcal001.py` refuses to build a block whose first point is not
+1024, or whose curve is not monotonic, or which exceeds the 2048 ceiling the
+patch clamps to).
+
+**Correction to the parenthesis "(1.50 at E85, 1.63 at E100)".** The E100 figure
+is right — 14.7/9.0 = 1.6333 — but the formula in this section gives **1.5429**
+at a volume fraction of 0.85, not 1.50. 1.500 is the value at **v = 0.78**,
+which is exactly the "~75-81 %" that §2 quotes for what pumps sell as E85. The
+two numbers are about different things: the curve is indexed by the **sensor's**
+reading, which is the true volume fraction, so its point at 85 % must carry
+1.5429 and a tank of pump "E85" will simply land the sensor near 78 % and the
+factor near 1.50. Both are now asserted in
+`tests/test_flexfuel_model.py::TestFuelMassFormula`.
+
+Shipped curve (Q10): 1024, 1067, 1109, 1151, 1193, 1235, 1276, 1317, 1358,
+1398, 1438, 1478, 1517, 1557, 1595, 1634, 1673.
+
+The insertion point and the fixed point of the B6 note below are implemented
+unchanged: one word at 0x42247C, `rk = min((rk * F_q10) >> 10, 0xFFFF)` on RAM
+0x803038, and at F = 1024 the stub takes an early return and **does not write
+`rk` at all** — 20 instructions per injection segment.
 
 ### 3.4 Ignition
 Blend factor `f_zw(E)` from a 1D curve (0 at E0, 1 at about E40-50 where
@@ -490,6 +576,38 @@ today, covered by the 0x5E0000-0x5EFFFF checksum) with a header
 | `ff_dzw_map[8][8]` | s8 x 0.75 deg | 0 |
 | `ff_fst_map[6][6]` | u16 x 1/1024 | 1.0 |
 | `ff_prail_add[8]` | u8 x 0.1 MPa | 0 |
+
+#### Added 2026-09-16 (brief D1, issue #32) — the block exists; two names and one unit changed
+
+`patches/ff_fuel/ffcal001.py` builds it and is the authority on the layout;
+`patches/ff_fuel/src/ff_state.h` carries the same offsets and
+`tests/test_flexfuel_model.py` asserts the two agree. **FFCAL001 v1, 232 bytes
+at 0x5E2510**, header `FFCAL001` + version u16 + length u16, and a 16-bit
+checksum (bit-complement of the byte sum of `[0, length-2)`) in the last two
+bytes. All four tables this section lists but the MVP does not read yet —
+`ff_fzw_curve`, `ff_dzw_map`, `ff_fst_map`, `ff_prail_add` — are present with
+neutral values, so a later patch **extends** the block instead of moving it.
+
+Differences from the table above:
+
+* **`ff_filter_k` (32) became `ff_filter_tau_ms` (3000 ms)** and a new
+  `ff_tick_ms` (10 ms) was added, so every time constant in the block is
+  physical and the raster period is a calibration value rather than a compiled
+  constant (§3.2 note, deviation 2). `ff_timeout_ms`, `ff_hold_s` and `ff_slew`
+  (as `ff_slew_pct_s`) keep their names, values and units.
+* **Added:** `ff_mode` (0 off / 1 normal / 2 bench override, shipped 1) and
+  `ff_e_override` from §3.2's design list, `ff_stall_max` (3 frames), and the
+  five parameters brief **D2** needs — `ff_persist_enable` (0),
+  `ff_persist_hyst_pct` (5), `ff_persist_block` (8), `ff_persist_offset` (0)
+  and `ff_persist_rate_s` (60), the last four matching the EEPROM route of
+  §3.8.
+* `ff_can_id` stays, but it is documentation plus a sanity check: the receive id
+  really lives in the flash edit at 0x2BD8C, and the patch compares the id echo
+  at 0x803F98 against this value before believing a frame.
+
+Descriptor rows for `re/calibration_draft.csv` are in
+`patches/ff_fuel/ffcal001_rows.csv` (D1 must not write that file while brief D3
+owns it); the integrator appends them and re-runs `tools/draft_to_xdf.py`.
 
 ## 5. RAM
 
