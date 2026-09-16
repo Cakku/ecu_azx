@@ -148,9 +148,18 @@ seven ISR wrappers at 0x4171B0, 0x41733C, 0x4174CC, 0x41765C, 0x4177EC,
 
 ## 4. The task table
 
-`tbl_os_task_control_blocks` at **0x478634** (file 0x274634), 25 entries of
-0x24 bytes, anchored by the constant 0x004764FC at +0x04 of every entry
+`tbl_os_task_control_blocks` at **0x478634** (file 0x274634), 25 entries,
+anchored by the constant 0x004764FC at +0x04 of every entry
 (**VERIFIED-STATIC**):
+
+> **2026-09-16 (C2, issue #23) — the stride is not uniform. VERIFIED-STATIC.**
+> "25 entries of 0x24 bytes" is right about the count and about most rows, but
+> the seven ISR tasks (ids 1-7, rows at 0x4788A8, 0x4788C8, 0x4788E8,
+> 0x478908, 0x478928, 0x478948, 0x478968) are **0x20** apart, and there are
+> gaps before 0x4787DC and before 0x4789E8. Walk the table by the anchor word,
+> not by a fixed stride — `tools/ram_survey.py --stack` does, and the 25 rows
+> it recovers reproduce the table below exactly. The activation-flag bytes
+> (+0x14) span 0x7FE5FC-0x7FE644 as documented.
 
 | Offset | Field |
 |---|---|
@@ -329,6 +338,18 @@ Full 100 ms sequence (address of the `bl` -> target):
 * r1 is the task's own stack; the kernel switches r1 per task (the stack
   pointer chain lives at r13-0x1A50 in the external instance, r13-0x1A68 in
   the on-chip one).
+  > **2026-09-16 (C2, issue #23).** There is only **one** stack, at
+  > **0x7FF3C0-0x7FF76F**: the kernel stack descriptor at flash 0x09B6F8 is
+  > `{0x7FFFEC, 0x7FF770, 0x7FF730, 0x7FF3C0, 0x36C}`, `app_entry_crt0` sets
+  > r1 = 0x7FF768 = 0x7FF770-8, and `FUN_0012C25C` fills exactly
+  > 0x7FF3C0-0x7FF76B at cold start. ISRs do not switch stacks — the
+  > exception prologue starts `stwu r1,-0x48(r1)` on whatever r1 the
+  > interrupted code had — so the 0x48-byte frames come out of the same
+  > 0x3B0 bytes. The deepest static `stwu` chain from a task entry is 0x588 B
+  > (task 0x4328E4), which already exceeds that, so either those paths are
+  > mutually exclusive or the stack runs below 0x7FF3C0 into the unreferenced
+  > RAM down to 0x7FF01B. `ram_survey.py --stack`, `re/findings/ram.md`
+  > sections 4.1 and 5.
 * r2 = 0x5C9FF0 and r13 = 0x7FFFF0 throughout the application, including
   inside tasks and ISRs (`app_sda_setup_int` 0x405588 reloads them at the
   start of the on-chip exception prologue). A patch must never write r2 or

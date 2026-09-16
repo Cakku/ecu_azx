@@ -150,9 +150,31 @@ against the magic **0x11223344**; if it matches it takes five addresses from
 the default branch runs and the code directory is `tbl_code_sections` at
 0x080100. Slot +0x20 of that directory is **0x0009E3B4**, and that is the
 application entry (`app_entry_crt0`): it sets r1 = 0x7FF768, zeroes
-0x80002C-0x80007C and 0x800080-0x8000E8, and loads r13 = 0x7FFFF0 /
+0x7F802C-0x7F807B and 0x7F8080-0x7F80E7, and loads r13 = 0x7FFFF0 /
 r2 = 0x5C9FF0 (the pair already known as `app_sda_setup_b`, 0x9E3E0).
 **VERIFIED-STATIC.**
+
+> **2026-09-16 (C2, issue #23) — correction and extension. VERIFIED-STATIC.**
+> The two zero ranges were written above as "0x80002C-0x80007C and
+> 0x800080-0x8000E8"; they are in the **internal** SRAM. 0x09E3C0-0x09E434
+> computes `0x800000 - 0x7FD4 = 0x7F802C` … `0x800000 - 0x7F84 = 0x7F807C` and
+> `0x800000 - 0x7F80 = 0x7F8080` … `0x800000 - 0x7F18 = 0x7F80E8`, i.e.
+> **0x7F802C-0x7F807B** and **0x7F8080-0x7F80E7**. `re/symbols.csv` is
+> corrected too.
+>
+> These two loops are only the start. `app_entry_crt0` goes on through
+> `app_init` (0x04CCD4, reached by the thunk 0x0BA9A8) and `ram_clear_block`
+> (0x06D8F8) to fill **fourteen** ranges, including the whole of the external
+> SRAM 0x800004-0x80498F and the task stack 0x7FF3C0-0x7FF76B. The list is in
+> `re/findings/ram.md` section 3.
+>
+> **The two stack tops reconciled.** The boot stack top 0x7FEFFC (file 0x10DC)
+> is dead the moment this `blrl` lands: `app_entry_crt0` re-bases r1 to
+> 0x7FF768 and `boot_main_init` never returns (0x10F4 is `ba 0x110F0`). The
+> RAM under the old boot stack is reused as ordinary application data —
+> 0x7FE588-0x7FEFDF is in the cold-start fill list and 0x7FEF00-0x7FEFFC
+> carries dense r13 traffic. The live stack is **0x7FF3C0-0x7FF76F**, per the
+> kernel stack descriptor at flash 0x09B6F8; `ram.md` section 4.2.
 
 So the boot module never `bl`s into the application; the handover is the one
 `blrl` at 0x1307C, through a directory slot.
