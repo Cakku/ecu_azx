@@ -146,6 +146,12 @@ KNOWN = (
           "0x7FE5F8, 0x7FE64C, 0x7FE7B4..0x7FE7DC, 0x7FE818/20/28/34 -- treated "
           "as one contiguous kernel area; ram.md 4"),
     # The stack, from the kernel stack descriptor at 0x09B6F8 and crt0.
+    Known(0x7FF01C, 0x7FF3C0, "stack_overshoot_estimate", "HYPOTHESIS",
+          "the deepest static stwu chain from a task entry is 0x588 B "
+          "(0x4328E4, the 100 ms task) and one ISR frame adds 0x48, so r1 can "
+          "reach 0x7FF1A0 -- 0x220 below the descriptor limit 0x7FF3C0.  The "
+          "unreferenced RAM continues down to 0x7FF01B, which is taken as the "
+          "real stack floor; `ram_survey.py --stack`, ram.md 5"),
     Known(0x7FF3C0, 0x7FF770, "os_task_stack", "VERIFIED-STATIC",
           "kernel stack descriptor 0x09B6F8 = {0x7FFFEC, 0x7FF770, 0x7FF730, "
           "0x7FF3C0, 0x36C}; app_entry_crt0 0x09E3C4 sets r1 = 0x7FF768 = "
@@ -418,6 +424,85 @@ def indexed_bases(data: bytes, s: Survey, min_sites: int = 1) -> list:
     return out
 
 
+# ----------------------------------------------------- stack estimate (task 4)
+# tbl_os_task_control_blocks, scheduler.md 4.  CORRECTION: the stride is NOT a
+# uniform 0x24 -- the seven ISR tasks use 0x20 and there are two gaps -- so the
+# rows are found by their +0x04 anchor word instead.
+TCB_TABLE = 0x478634
+TCB_ANCHOR = 0x004764FC
+TCB_SCAN = (0x478600, 0x478C00)
+ISR_FRAME = 0x48                # exception prologue frame, scheduler.md 7
+STACK_TOP_APP = 0x7FF770        # r1 = 0x7FF768 = top-8 (app_entry_crt0)
+STACK_LIMIT = 0x7FF3C0          # kernel stack descriptor 0x09B6F8+0x0C
+
+
+def frame_size(img, insns) -> int:
+    """Largest `stwu r1,-N(r1)` / `addi r1,r1,-N` this function performs."""
+    worst = 0
+    for pc in insns:
+        w = img.word(pc)
+        if w is None:
+            continue
+        op = w >> 26
+        if op in (37, 14) and ((w >> 21) & 0x1F) == 1 and ((w >> 16) & 0x1F) == 1:
+            d = exts16(w & 0xFFFF)
+            if d < 0:
+                worst = max(worst, -d)
+    return worst
+
+
+def stack_estimate(image_path: str, max_depth: int = 400):
+    """Deepest `stwu` chain from every task entry.  Returns (rows, meta)."""
+    import callgraph as cg                       # tools/, same directory
+
+    img = cg.Image(image_path)
+    entries = cg.scan_bl_targets(img)
+    tasks = []
+    for a in range(TCB_SCAN[0], TCB_SCAN[1], 4):
+        if img.word(a) != TCB_ANCHOR:
+            continue
+        w = img.word(a - 4)
+        if w is not None and img.is_code(w) and w not in tasks:
+            tasks.append(w)
+    seeds = set(tasks) | entries
+    funcs = {}
+
+    def get(e):
+        if e not in funcs:
+            fn = cg.walk(img, e, seeds)
+            funcs[e] = (frame_size(img, fn.insns), fn.callees | fn.tailcalls,
+                        len(fn.indirect))
+        return funcs[e]
+
+    memo, onstack, indirect_hits = {}, set(), set()
+
+    def depth(e, level=0):
+        if e in memo:
+            return memo[e]
+        if e in onstack or level > max_depth:
+            return (0, [e])                       # recursion / too deep
+        onstack.add(e)
+        own, callees, nind = get(e)
+        if nind:
+            indirect_hits.add(e)
+        best, path = 0, []
+        for c in callees:
+            d, p = depth(c, level + 1)
+            if d > best:
+                best, path = d, p
+        onstack.discard(e)
+        memo[e] = (own + best, [e] + path)
+        return memo[e]
+
+    rows = []
+    for t in tasks:
+        d, path = depth(t)
+        rows.append((t, d, path))
+    rows.sort(key=lambda r: r[1], reverse=True)
+    return rows, {"tasks": len(tasks), "functions": len(funcs),
+                  "indirect": len(indirect_hits)}
+
+
 # --------------------------------------------------------------- the scanners
 @dataclass
 class Survey:
@@ -687,6 +772,8 @@ def main(argv=None) -> int:
     ap.add_argument("--runs", type=int, default=12, help="how many free runs to print")
     ap.add_argument("--min-run", type=lambda v: int(v, 0), default=16,
                     help="shortest free run to report (default 16)")
+    ap.add_argument("--stack", action="store_true",
+                    help="deepest stwu chain per task entry (task 4 of C2)")
     ap.add_argument("--measuring-vars", default="re/measuring_vars.csv",
                     help="CSV of measuring-variable RAM cells to mark as used")
     ap.add_argument("--indexed", action="store_true",
@@ -698,6 +785,39 @@ def main(argv=None) -> int:
                     help="restrict --indexed to these bases (repeatable)")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)
+
+    if args.stack:
+        rows, meta = stack_estimate(args.image)
+        print("# stack estimate: deepest chain of `stwu r1,-N(r1)` prologues "
+              "from each of the\n# %d task entries of tbl_os_task_control_blocks "
+              "(0x%06X).  Indirect calls\n# (bctrl/blrl) truncate a chain, so "
+              "this is a LOWER bound on the worst case:\n# %d of the %d "
+              "functions walked contain one."
+              % (meta["tasks"], TCB_TABLE, meta["indirect"], meta["functions"]))
+        print("%-10s %-8s %s" % ("task", "depth", "deepest chain (head)"))
+        for t, d, path in rows:
+            chain = " -> ".join("0x%06X" % a for a in path[:6])
+            print("0x%06X %-8s %s%s" % (t, "0x%X" % d, chain,
+                                        " ..." if len(path) > 6 else ""))
+        worst = rows[0][1] if rows else 0
+        print()
+        print("worst task chain          0x%X B" % worst)
+        print("+ one 0x%X B ISR frame     0x%X B" % (ISR_FRAME, worst + ISR_FRAME))
+        print("stack top (app)           0x%06X  (r1 = 0x7FF768)" % STACK_TOP_APP)
+        print("lowest r1 reached         0x%06X" % (STACK_TOP_APP - worst - ISR_FRAME))
+        print("kernel stack limit        0x%06X  (descriptor 0x09B6F8+0x0C)"
+              % STACK_LIMIT)
+        head = STACK_TOP_APP - worst - ISR_FRAME - STACK_LIMIT
+        if head >= 0:
+            print("headroom above the limit  0x%X B" % head)
+        else:
+            print("OVERSHOOT below the limit 0x%X B -- either those call paths "
+                  "are mutually\nexclusive at run time (the walk assumes every "
+                  "`bl` is taken) or the stack\nreally runs below 0x%06X.  The "
+                  "RAM is unreferenced down to 0x7FF01B, which\nis taken as the "
+                  "stack floor; see re/findings/ram.md section 5."
+                  % (-head, STACK_LIMIT))
+        return 0
 
     data = m.load_dump(args.image)
     s = Survey()
