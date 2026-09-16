@@ -58,3 +58,24 @@ does after review. You may tick checklist items in the issue body with
 4. **Open questions / hypotheses** you could not settle.
 5. **Blockers for the human** (exact commands, purchases, physical steps).
 6. **Suggested next steps** for the follow-on brief.
+
+## Added 2026-09-16 (after waves A and B)
+
+- `main` contains waves A and B. Before any reverse engineering, read the
+  `re/findings/*.md` file for your area and `re/symbols.csv`; do not redo
+  what is there, correct it in place with a dated note if it is wrong.
+- Ghidra: never open `ghidra_projects/med9` read-write from two agents. Copy
+  it to `/tmp/ghidra_<brief-id>` and import the symbols
+  (`re/findings/injection.md` §0 has the exact commands, about a minute);
+  `ghidra_scripts/decompile.py` opens a project read-only.
+- Do not regenerate `re/med9_draft.xdf` on your branch; the integrator does
+  it at merge time. Append rows to `re/calibration_draft.csv` only when your
+  brief says so.
+- Commit after every finding, not at the end. Agents that batched their
+  commits lost work when the API rate limit hit.
+- Run `python3 -m unittest discover -s tests` before your final report and
+  add tests for every new tool (`tests/common.py` has the dump-unchanged
+  base class). New Python needs nothing beyond `requirements.txt` unless the
+  brief says otherwise.
+- Patch code follows `docs/04_re_guidelines.md` §7 and the framework in
+  `patches/common/` once it exists. Nothing an agent produces is flashed.

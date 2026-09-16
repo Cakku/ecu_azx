@@ -31,6 +31,17 @@ fuel change) is the owner's responsibility and is not covered here.
   Windows machine documented.
 - Nothing has been written to the car yet.
 
+> **Update 2026-09-16.** Waves A and B of agent work are merged (`main`
+> 647efe6): Phase 1 is closed (#7-#19), the Unicorn harness and regression
+> tools exist (#21, #24), and every flex-fuel insertion point is located
+> statically (`docs/05_flexfuel_design.md` dated notes). Hardware items
+> (#1-#4, #22, #26-#28, #30-#31, #33, #45) are still pending. The next desk
+> work is wave C/D in `docs/agent_briefs/README.md`: patch framework and
+> Flash-1 source (#25/#27), static RAM survey (#23), KWP logger tested
+> against an emulated ECU (#20), the task-period question (#44), then the
+> ff_fuel MVP patch (#32/#37), diagnostics and persistence (#38/#39) and the
+> calibration definition (#41).
+
 ## 3. Principles
 
 1. **Evidence before action.** A fact is used only at the level it has been
