@@ -36,6 +36,8 @@ struct ff_state ff_state __attribute__((section(".bss.patch_state")));
 
 _Static_assert(sizeof(struct ff_state) == 0x40,
                "the state block layout in ff_state.h and README.md is 64 bytes");
+_Static_assert(FF_CORE_OFF + FF_CORE_LEN == 0x2Cu,
+               "the checksummed core must end where the annex begins");
 
 void ff_fuel_tick_a(void);
 void ff_fuel_tick_b(void);
@@ -275,9 +277,9 @@ static void ff_tick(u8 src)
     }
 
     /* mode 1: the real thing. */
-    bad = 0u;
     dlc = MED9_FN(u32 (*)(u32), MED9_CAN_RX_POLL)(15u);
     if (dlc == 8u) {
+        bad = 0u;
         /* The id echo proves the slot really carries our frame; without the
          * flash edit at 0x2BD8C or without can_init_mb it will not. */
         if (MED9_U32(MED9_CAN_RX_BUF_SPARE0 - 4u) != (u32)c.can_id)
@@ -296,7 +298,11 @@ static void ff_tick(u8 src)
         if (rx[0] > 100u || rx[7] == 1u || rx[7] == 3u
             || ff_state.stall >= c.stall_max)
             bad = 1u;
-        else {
+        /* A latch, not an event: the frame rate is 10 Hz and the raster is
+         * 100 Hz, so the condition has to survive the nine activations in
+         * between (see the note in ff_state.h). */
+        ff_state.frame_bad = bad;
+        if (!bad) {
             ff_state.age_ticks = 0u;
             if (ff_state.frames < 0xFFFFu)
                 ff_state.frames = (u16)(ff_state.frames + 1u);
@@ -306,7 +312,7 @@ static void ff_tick(u8 src)
     if (ff_state.age_ticks < 0xFFFFu)
         ff_state.age_ticks = (u16)(ff_state.age_ticks + 1u);
 
-    if (bad || ff_state.frames == 0u
+    if (ff_state.frame_bad || ff_state.frames == 0u
         || (u32)ff_state.age_ticks * (u32)c.tick_ms > (u32)c.timeout_ms)
         new_mode = (u8)FF_MODE_FAULT;
     else if (ff_state.status == 2u)

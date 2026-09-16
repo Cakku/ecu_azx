@@ -44,6 +44,7 @@ Usage::
 """
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass, field
 
 # --- modes (the values written to the state block) ---------------------------
@@ -68,6 +69,10 @@ FRAC = 1024        # sub-count resolution of e_frac
 
 CURVE_N = 17       # ff_F_curve points, one every 6.25 % = 100 counts
 CURVE_STEP = 100
+
+CORE_OFF = 0x08    # first checksummed byte of the state block
+CORE_LEN = 0x24    # +0x08..+0x2B; the annex above it has other writers
+BLOCK_LEN = 0x40
 
 
 # ---------------------------------------------------------------- the frame --
@@ -172,6 +177,9 @@ class State:
     ticks: int = 0
     e_key: int = 0
     e_frac: int = 0
+    frame_bad: int = 0
+    reserved_core0: int = 0
+    reserved_core1: int = 0
     # annex (not checksummed; D2 owns most of it)
     rk_calls: int = 0
     e_persist: int = 0
@@ -209,7 +217,7 @@ class FlexFuelModel:
 
     # -- the block header ------------------------------------------------
     MAGIC = 0x46463031          # "FF01"
-    LENGTH = 0x40
+    LENGTH = BLOCK_LEN
 
     def init_state(self) -> None:
         """What `ff_state_init()` does: zero the 64 bytes, then seed them."""
@@ -250,11 +258,23 @@ class FlexFuelModel:
         out += st.ticks.to_bytes(4, "big")
         out += st.e_key.to_bytes(2, "big")
         out += st.e_frac.to_bytes(2, "big")
-        assert len(out) == 0x20
+        out += bytes((st.frame_bad, st.reserved_core0))
+        out += st.reserved_core1.to_bytes(2, "big")
+        assert len(out) == CORE_LEN
         return bytes(out)
 
     def seal(self) -> None:
         self.state.csum = self.checksum()
+
+    def block_bytes(self) -> bytes:
+        """The 0x28 bytes of header + core, exactly as they sit at PATCH_RAM.
+
+        This is what `tests/test_ff_fuel_patch.py` compares the emulated RAM
+        against, tick by tick.  The annex (+0x2C..+0x3F) is deliberately left
+        out: the segment task and brief D2 write it, not the periodic tick.
+        """
+        st = self.state
+        return struct.pack(">IHH", st.magic, st.length, st.csum) + self.core_bytes()
 
     # -- the F curve ------------------------------------------------------
     def f_of(self, e_filt: int) -> int:
@@ -339,24 +359,25 @@ class FlexFuelModel:
 
         # --- normal operation --------------------------------------------
         self.poll_calls += 1
-        bad = False
         if rx is not None:
             assert len(rx) == 8
-            if can_id_echo is not None and can_id_echo != c.can_id:
-                bad = True
+            bad = bool(can_id_echo is not None and can_id_echo != c.can_id)
             st.stall = _sat8(st.stall + 1) if rx[3] == st.frame_ctr else 0
             st.frame_ctr, st.status = rx[3], rx[7]
             st.e_raw, st.t_fuel, st.fw_ver = rx[0], rx[1], rx[6]
             if rx[0] > 100 or rx[7] in (1, 3) or st.stall >= c.stall():
                 bad = True
-            else:
+            # a latch, not an event: it has to survive the nine activations
+            # between two 10 Hz frames (ff_state.h)
+            st.frame_bad = 1 if bad else 0
+            if not bad:
                 st.age_ticks = 0
                 st.frames = _sat16(st.frames + 1)
 
         st.age_ticks = _sat16(st.age_ticks + 1)
         timed_out = st.age_ticks * c.tick() > c.timeout_ms
 
-        if bad or timed_out or st.frames == 0:
+        if st.frame_bad or timed_out or st.frames == 0:
             new_mode = MODE_FAULT
         elif st.status == 2:
             new_mode = MODE_HOLD

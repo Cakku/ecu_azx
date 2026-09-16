@@ -43,18 +43,28 @@
  *   +20   4    ticks            tick      periodic activations since power-up
  *   +24   2    e_key            tick      decay target, 1/16 % (D2: from EEPROM)
  *   +26   2    e_frac           tick      sub-count of e_filt, 1/1024 of a count
+ *   +28   1    frame_bad        tick      1 = the last frame was rejected
+ *   +29   1    reserved_core0   tick      0
+ *   +2A   2    reserved_core1   tick      0
  *   --- annex: NOT covered by csum (other writers, or pure diagnostics) ------
- *   +28   4    rk_calls         rk hook   segment-task invocations since power-up
- *   +2C   2    e_persist        D2        E% staged for / read back from EEPROM
- *   +2E   1    persist_state    D2        0 idle 1 staged 2 committing 3 done 4 err
- *   +2F   1    persist_err      D2        last nvm_block_request return code
- *   +30   2    diag_e_pct       D2        e_filt in 1 %, for the measuring block
- *   +32   2    diag_f_pct       D2        F in %, (f_q10 * 100) >> 10
- *   +34   2    diag_t_degc      D2        fuel temperature, degC + 40
- *   +36   2    reserved0        D2
- *   +38   4    reserved1        D2
- *   +3C   4    reserved2        D2
+ *   +2C   4    rk_calls         rk hook   segment-task invocations since power-up
+ *   +30   2    e_persist        D2        E% staged for / read back from EEPROM
+ *   +32   1    persist_state    D2        0 idle 1 staged 2 committing 3 done 4 err
+ *   +33   1    persist_err      D2        last nvm_block_request return code
+ *   +34   2    diag_e_pct       D2        e_filt in 1 %, for the measuring block
+ *   +36   2    diag_f_pct       D2        F in %, (f_q10 * 100) >> 10
+ *   +38   2    diag_t_degc      D2        fuel temperature, degC + 40
+ *   +3A   2    reserved0        D2
+ *   +3C   4    reserved1        D2
  *   --- 0x40 -----------------------------------------------------------------
+ *
+ * `frame_bad` is a LATCH, not an event.  docs/05 section 3.2 lists "status in
+ * {fault, not ready}" and "counter unchanged for 3 received frames" as
+ * conditions, and a condition has to hold between frames too: the Pico sends
+ * at 10 Hz and the raster runs at 100 Hz, so nine activations out of ten see
+ * no frame at all.  Deciding FAULT only on the activation that carries the bad
+ * frame would drop back to OK on the very next one.  The latch is set and
+ * cleared only when a fresh frame is processed.
  *
  * Why the split: the checksum is recomputed at the end of every periodic
  * activation, so it may only cover fields that activation owns.  `rk_calls` is
@@ -124,21 +134,23 @@ struct ff_state {
     volatile u32 ticks;               /* +20 */
     volatile u16 e_key;               /* +24 */
     volatile u16 e_frac;              /* +26 */
+    volatile u8  frame_bad;           /* +28 */
+    volatile u8  reserved_core0;      /* +29 */
+    volatile u16 reserved_core1;      /* +2A */
     /* --- annex, not checksummed ---------------------------------------- */
-    volatile u32 rk_calls;            /* +28 */
-    volatile u16 e_persist;           /* +2C  D2 */
-    volatile u8  persist_state;       /* +2E  D2 */
-    volatile u8  persist_err;         /* +2F  D2 */
-    volatile u16 diag_e_pct;          /* +30  D2 */
-    volatile u16 diag_f_pct;          /* +32  D2 */
-    volatile u16 diag_t_degc;         /* +34  D2 */
-    volatile u16 reserved0;           /* +36  D2 */
-    volatile u32 reserved1;           /* +38  D2 */
-    volatile u32 reserved2;           /* +3C  D2 */
+    volatile u32 rk_calls;            /* +2C */
+    volatile u16 e_persist;           /* +30  D2 */
+    volatile u8  persist_state;       /* +32  D2 */
+    volatile u8  persist_err;         /* +33  D2 */
+    volatile u16 diag_e_pct;          /* +34  D2 */
+    volatile u16 diag_f_pct;          /* +36  D2 */
+    volatile u16 diag_t_degc;         /* +38  D2 */
+    volatile u16 reserved0;           /* +3A  D2 */
+    volatile u32 reserved1;           /* +3C  D2 */
 };
 
 #define FF_CORE_OFF  0x08u            /* first checksummed byte */
-#define FF_CORE_LEN  0x20u            /* +08 .. +27 inclusive   */
+#define FF_CORE_LEN  0x24u            /* +08 .. +2B inclusive   */
 
 extern struct ff_state ff_state;
 
