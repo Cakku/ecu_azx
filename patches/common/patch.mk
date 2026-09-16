@@ -63,7 +63,9 @@ endif
 # ------------------------------------------------------------------ sources --
 SRC_C ?= $(wildcard src/*.c)
 SRC_S ?= $(wildcard src/*.S)
-OBJS  := $(patsubst src/%.c,$(BUILD)/%.o,$(SRC_C)) $(patsubst src/%.S,$(BUILD)/%.o,$(SRC_S))
+# Assembly first: the trampolines are the patch's entry points, so they land at
+# the front of the blob and the hook target is easy to find in a hex dump.
+OBJS  := $(patsubst src/%.S,$(BUILD)/%.o,$(SRC_S)) $(patsubst src/%.c,$(BUILD)/%.o,$(SRC_C))
 
 ELF := $(BUILD)/$(NAME).elf
 BIN := $(BUILD)/$(NAME).bin

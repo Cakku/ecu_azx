@@ -1,0 +1,48 @@
+{
+  "name": "ff_counter",
+  "issue": 27,
+  "description": "Flash 1: increment a u32 counter and write an alive pattern in the patch RAM block, once per task_100ms activation. No stock RAM, no calibration, no behaviour change.",
+  "base_sha256": "b15590d3f1874ace3125c5d047c09a686db9b8bb498187663539ebab205609b3",
+  "requires": [],
+  "ram_status": "placeholder",
+  "ram_status_note": "PENDING #23 / brief C2: 0x807F00 is the top of the external SRAM, above the highest static reference recorded so far (0x805784, docs/02_memory_map.md section 3). It has NOT been proven unused. Replace with the block from re/findings/ram.md before anything is flashed.",
+  "build": {
+    "flash": "0x00150000",
+    "ram": "0x00807F00",
+    "ram_size": 64,
+    "blob": "build/ff_counter.bin",
+    "sym": "build/ff_counter.sym",
+    "hooks": [
+      {
+        "site": "0x0012067C",
+        "kind": "bl",
+        "target": "ff_counter_hook",
+        "old": "4bffe9b1",
+        "why": "task_100ms (0x1205A0, TCB 23): bl clr_ram_7FE889_800E18 -> ff_counter_hook trampoline, which tail-branches back to 0x11F02C (re/findings/scheduler.md section 8)"
+      }
+    ],
+    "blob_size": 96,
+    "blob_sha256": "346c52a7d02f7f2dbf2e400e62b94dfa169893fecbbb28ea75fa2dfe8d1d8659",
+    "bss_size": 8,
+    "symbols": {
+      "ff_counter_hook": "0x150000"
+    }
+  },
+  "changes": [
+    {
+      "addr": "0x150000",
+      "kind": "blob",
+      "old": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "new": "9421fff07c0802a69001000c480000158001000c7c0803a6382100104811f02e3c60008038837f00a08400042804fc0141820020388000003ca0008094857f00b08500063c8000006084fc01b085000480837f003884000190837f004e800020",
+      "why": "ff_counter code and constants (96 B of free flash)"
+    },
+    {
+      "addr": "0x12067c",
+      "kind": "hook",
+      "old": "4bffe9b1",
+      "new": "4802f985",
+      "why": "task_100ms (0x1205A0, TCB 23): bl clr_ram_7FE889_800E18 -> ff_counter_hook trampoline, which tail-branches back to 0x11F02C (re/findings/scheduler.md section 8)"
+    }
+  ],
+  "generated_by": "tools/patch_gen.py"
+}
