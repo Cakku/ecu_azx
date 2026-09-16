@@ -112,6 +112,30 @@ python3 logging/make_samples.py                # regenerate them (byte-identical
 They are synthetic — the numbers come from `make_samples.py`, not from an ECU.
 They exist to test the tooling, not to describe the engine.
 
+## 3b. RAM snapshots — `sessions/` (issue #23, added 2026-09-16 by C2)
+
+A different kind of recording: not a time series of decoded variables but a
+raw copy of the ECU's RAM, taken with KWP **RequestUpload 0x35 +
+TransferData 0x36** (62 data bytes per block, `re/findings/kwp.md` section 5).
+It exists to prove that the RAM a patch wants to use is not written by
+anything at run time — the static survey in `re/findings/ram.md` cannot see a
+pointer the code computes.
+
+* **`sessions/ram_snapshot.json`** — the *ranges* to read, produced by the
+  static survey: 63,932 bytes covering 0x7F8000-0x807FFF except the protected
+  window 0x7F9E3C-0x7FA47F, which `kwp_upload_range_check` (0x0A3160) rejects
+  with NRC 0x31. It also lists `priority_ranges` for a short first pass.
+* **`sessions/<session>.json`** — one file per recording, written by the
+  logger. Format and the six sessions to record (key-on, idle, after a drive,
+  three key cycles) are in the docstring of `tools/ram_snapshot_diff.py` and
+  in `re/findings/ram.md` section 9.
+
+```bash
+python3 tools/ram_snapshot_diff.py logging/sessions/*.json --free 64 \
+        --csv work/ramdiff.csv
+python3 tools/ram_snapshot_diff.py --self-test     # synthetic, no ECU needed
+```
+
 ## 4. Not here yet
 
 The logger itself. It needs the KWP2000/TP2.0 transport (`docs/03_tooling.md`

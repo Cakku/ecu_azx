@@ -21,6 +21,8 @@ document and `med9lib.py` together.
 | `eeprom_map.py` | Decode the SPI EEPROM block layout (EEP_CONF, file 0xB2FF0): block table, copies, RAM mirror, free space; `--clients` maps which block bytes the firmware actually uses; `--check` verifies the block checksums of a real 2 KB EEPROM read. `re/findings/eeprom.md`. |
 | `callgraph.py` | Static PowerPC call graph: every `bl` target is a function entry, each function is walked as a CFG (`--reach`, `--func`, `--callers`, `--entries`). Also extracts r2/r13-relative accesses and finds `lis`+D-form pairs that address a register range (`--xref-store`). |
 | `r2_context.py` | Decides the SDA2 base (r2) of every function from the call graph and checks every r2-relative access against it: reports references that leave the SDA2 window, land outside a mapped region, or hit 0xFF filler. Evidence for issue #8. |
+| `ram_survey.py` | Per-byte static usage survey of the two SRAMs (0x7F8000-0x807FFF): r13 D-form accesses, absolute `lis`+D-form pairs, pointer words in both flash regions, measuring-variable cells, the cold-start fills and a table of known structures. Emits `re/ram_map.csv`, a 256-byte page map and the longest reference-free runs. `--indexed` bounds the arrays those runs usually belong to; `--stack` walks the deepest `stwu` chain from each task entry. `re/findings/ram.md`. |
+| `ram_snapshot_diff.py` | Compares the RAM snapshots taken over KWP RequestUpload and classifies every byte `changed` / `constant` / `blank`. The dynamic half of issue #23; ranges in `logging/sessions/ram_snapshot.json`, format in the module docstring, `--self-test` runs it on synthetic snapshots. |
 | `sda_xref.py` | Whole-image cross-references. `--var LO [HI]` decodes every r2/r13-relative D-form load/store and prints the ones resolving into the range — the small-data accesses `callgraph.py --xref-store` cannot see. `--code ADDR...` prints every `b`/`bl` **site** targeting an address (not the enclosing function), so a flat ERCOSEK task body reads off directly. Used throughout `re/findings/rail.md` (issue #17). |
 
 Quick checks:
@@ -40,6 +42,11 @@ python3 tools/callgraph.py data/passat_azx_ori.bin \
 python3 tools/r2_context.py data/passat_azx_ori.bin --compare --violations
 python3 tools/sda_xref.py data/passat_azx_ori.bin --var 0x8031DA   # prist readers/writers
 python3 tools/sda_xref.py data/passat_azx_ori.bin --code 0x457BC8  # who calls the HDR controller
+python3 tools/ram_survey.py data/passat_azx_ori.bin --csv re/ram_map.csv
+python3 tools/ram_survey.py data/passat_azx_ori.bin --indexed --indexed-min 0x40
+python3 tools/ram_survey.py data/passat_azx_ori.bin --stack
+python3 tools/ram_snapshot_diff.py --self-test
+python3 -m emu.ext_sram_probe                # 0x7F8012 = 0x44 / 0x41 per CS1 model
 ```
 
 Regression checks before a file goes anywhere near the car

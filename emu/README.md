@@ -147,4 +147,5 @@ project.
 | `boot_trace.py` | `python3 -m emu.boot_trace`: the two-stage boot report above |
 | `zw_model.py` | brief B7: bit-exact model of the base-ignition path (`KFZW`, `zwgru_build`); `python3 -m unittest tests.test_zw_model` |
 | `start_model.py` | brief B8: bit-exact model of the start path -- the cranking fuel factor `ksta` (`%ESSTT`, 0x41A268) and the start ignition angle `zwstt` (0x431294), with the two flex-fuel insertion points S1 and Z1; `python3 -m emu.start_model` prints both tables, `python3 -m unittest tests.test_start_model` checks them against the real code |
+| `ext_sram_probe.py` | brief C2 (#23): runs `ext_sram_probe` (0x011898) under both CS1 hardware models. Plain RAM -> 0x7F8012 = 0x44 (64 KB); with a hook that folds 0x808000 onto 0x800000, i.e. a 32 KB part in the 256 KB OR1 window -> 0x41 (32 KB). `python3 -m emu.ext_sram_probe`; checked by `tests/test_ram_survey.py` |
 | `../tests/test_emu.py` | the regression tests for all of it |
