@@ -98,13 +98,20 @@ counts-only definition. `--extra-rows` is repeatable and takes the draft's own
 column format (plus any sidecar column), so a brief that produces new objects
 delivers its own rows instead of editing the draft.
 
-`re/ffcal001_draft_rows.csv` is such a file: the flex-fuel block of
-`docs/05_flexfuel_design.md` §4 laid out from 0x5E2510 as a **hypothesis**, so
-the block is visible in TunerPro before brief D1 lands. It is deliberately not
-part of the default build. **Brief D1 owns the real descriptor** and delivers
-`patches/ff_fuel/ffcal001_rows.csv`; at merge time use that one instead, and
-delete the placeholder. Until a patched image is loaded every cell of the block
-reads 255, because 0x5E2510 upwards is erased flash.
+`patches/ff_fuel/ffcal001_rows.csv` is such a file: the flex-fuel calibration
+block FFCAL001 at 0x5E2510 exactly as `patches/ff_fuel/ffcal001.py` lays it out
+(22 objects, brief D1, 2026-09-16). It is not part of the default build; the
+checked-in `re/med9_draft.xdf` was generated with
+
+```bash
+python3 tools/draft_to_xdf.py re/calibration_draft.csv -o re/med9_draft.xdf \
+        --min-confidence hypothesis --extra-rows patches/ff_fuel/ffcal001_rows.csv
+python3 tools/draft_to_xdf.py --validate re/med9_draft.xdf
+```
+
+Until a patched image is loaded every cell of the block reads 255, because
+0x5E2510 upwards is erased flash. (Brief D3's docs/05 §4 placeholder,
+`re/ffcal001_draft_rows.csv`, was removed when the real rows landed.)
 
 ### Using it in TunerPro
 

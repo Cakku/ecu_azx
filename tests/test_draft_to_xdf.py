@@ -18,7 +18,7 @@ import med9lib as m  # noqa: E402
 
 DRAFT = REPO / "re" / "calibration_draft.csv"
 NAMES = REPO / "re" / "calibration_names.csv"
-FFCAL = REPO / "re" / "ffcal001_draft_rows.csv"
+FFCAL = REPO / "patches" / "ff_fuel" / "ffcal001_rows.csv"   # brief D1's descriptor rows
 
 # One 14 x 10 u16 map whose header, axes and data were read out of the image,
 # and one signed 8-bit curve with a shared axis.
@@ -421,9 +421,10 @@ class TestCommittedSidecar(DumpUnchanged):
         self.assertEqual(kfzw.find("XDFAXIS[@id='y']/MATH").get("equation"), "X*0.25")
 
     @unittest.skipUnless(FFCAL.is_file() and DRAFT.is_file(), "CSV missing")
-    def test_the_ffcal001_placeholder_merges_and_validates(self):
-        """re/ffcal001_draft_rows.csv is the docs/05 section 4 block as a
-        hypothesis; brief D1's real one replaces it at merge time."""
+    def test_the_ffcal001_rows_merge_and_validate(self):
+        """patches/ff_fuel/ffcal001_rows.csv is the FFCAL001 block as brief D1
+        built it (ffcal001.py); the integrator merges it with --extra-rows.
+        (Brief D3's docs/05 placeholder was replaced by it on 2026-09-16.)"""
         with DRAFT.open(newline="", encoding="utf-8") as handle:
             rows = list(csv.DictReader(handle))
         before = len(rows)

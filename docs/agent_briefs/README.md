@@ -30,6 +30,13 @@ set B and which set is live is open (C4 §11.7); D1/D2 carry dated notes
 filter constants per real raster). Wave D can start once `main` is
 fast-forwarded: D1 first, D3 as the filler.
 
+**Update 2026-09-16 (wave D pair 1):** D1 (`patches/ff_fuel/`, #32 + software
+half of #37: both task sets' 10 ms tasks hooked, `onchip_edit` unlock added to
+`tools/patch_apply.py` because the fuel hook 0x42247C is on-chip flash) and D3
+(`re/calibration_names.csv`, scaled `tools/draft_to_xdf.py`, #41 naming pass)
+are merged on `integration/wave-D`; `re/med9_draft.xdf` regenerated with D1's
+FFCAL001 rows. D2 launched from `integration/wave-D`.
+
 Rule learned in wave B: **run at most two agents at a time.** Four in
 parallel hit the API rate limit and lost their work. Agents commit after
 every finding for the same reason.
