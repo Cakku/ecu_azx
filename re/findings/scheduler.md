@@ -161,6 +161,16 @@ anchored by the constant 0x004764FC at +0x04 of every entry
 > it recovers reproduce the table below exactly. The activation-flag bytes
 > (+0x14) span 0x7FE5FC-0x7FE644 as documented.
 
+> **2026-09-16 (C4, issue #44) — the anchor scan still misses twelve rows.
+> VERIFIED-STATIC, section 11.2.** The table has **37** rows, not 25. The
+> anchor word 0x004764FC is not a field of the row at all: it is the
+> terminator of the task's *process list*, which for these 25 tasks happens to
+> sit inline in the table. The other twelve tasks (ids 0, 8, 17, 18, 20, 22,
+> 25, 29, 30, 31, 34, 37) point at multi-process lists in external flash at
+> 0x0B1ED4-0x0B2A40 and carry no anchor, which is what the "gaps" above are.
+> Walk the 37 ActivateTask thunks at 0x0B091C-0x0B0AD4 instead:
+> `tools/ercosek_tasks.py --tasks`.
+
 | Offset | Field |
 |---|---|
 | +0x00 | task entry point |
@@ -229,6 +239,16 @@ settings the boot writes (`SCCR = 0x03217100`, `PLPRCR = 0x00015080`) have not
 been decoded, so the system clock this implies is an open item — but the
 *ratios* and therefore the periods do not depend on it.
 
+> **WRONG — corrected 2026-09-16 (C4, issue #44); see sections 11.1 and 12.1.**
+> The unit is **1 ms = 3508 ticks (285 ns each)**, five times finer, so this
+> whole column reads {0.2, 2, 2.2, 4, 10, 30, 80, 300} ms. The kernel
+> configuration record carries the generator's own `285 ns/tick` and
+> `3508 ticks/ms` at 0x09B75C / 0x478EC0, and `SCCR[TBS] = 1` makes the Time
+> Base the system clock / 16 = **3.5 MHz**, not 701.754 kHz. Every literal in
+> the table above is exactly `floor(t_ns / 285)`. The ratios are unaffected,
+> which is why section 5.4's *relative* ordering survived and its absolute
+> numbers did not.
+
 ### 5.3 Each raster task re-arms its own deadline
 
 This is what fixes the periods (**VERIFIED-STATIC**):
@@ -268,6 +288,15 @@ The argument for 100 ms rather than 150 ms is the check cadence:
 arrangement. The same reasoning gives 1000 ms for the 1500 ms window.
 
 ### 5.4 Summary
+
+> **SUPERSEDED — 2026-09-16 (C4, issue #44). Read section 11 instead.** Every
+> period in this table is 5x too long and the deadline timers guard different
+> rasters than assumed. The settled values, VERIFIED-STATIC from the
+> activation chain and VERIFIED-DYNAMIC from `emu/os_clock.py`:
+> 0x11EBF4 / 0x4240C8 = **1 ms**, 0x11EC34 / 0x424900 = **2 ms**,
+> 0x11EC58 / 0x424AF8 = **5 ms**, 0x1205A0 / 0x4328E4 = **10 ms**,
+> 0x120FAC / 0x45CAC4 = **20 ms**. The 50 / 100 / 200 / 1000 ms rasters are
+> tasks this table never listed (section 11.2: the table has 37 rows, not 25).
 
 | Priority | Period | External-flash task | On-chip task | Deadline timer |
 |---|---|---|---|---|
@@ -366,6 +395,17 @@ Full 100 ms sequence (address of the `bl` -> target):
 **Address: 0x12067C. Original word: `4B FF E9 B1` = `bl 0x11F02C`.
 Task: `task_100ms` (0x1205A0). Period: 100 ms (see section 5.3).**
 
+> **Corrected 2026-09-16 (C4, issue #44).** The hook site and every property
+> claimed for it below are unchanged and still VERIFIED-STATIC, but the
+> **period is 10 ms, not 100 ms** (section 11.4), and 0x1205A0 belongs to
+> **task set B**, which only runs after the switch at 0x11DA64 sets the mode
+> byte 0x7FAB55 to 2 (section 11.7). A stub hooked here therefore runs ten
+> times more often than B1 assumed — or, if set A is the live one, never.
+> Two consequences for issue #27 and for `patches/ff_counter`: the expected
+> counter slope is 100 /s, not 10 /s, and the bench procedure must first
+> establish which task set is live. The same-priority alternative in set A is
+> `0x4328E4`, whose flat `bl` list offers equivalent sites.
+
 ```
 00120674  4B F9 D9 D9  bl 0x0BE04C
 00120678  48 00 03 FD  bl 0x120A74
@@ -420,13 +460,20 @@ Not settled here, and deliberately not guessed. What did fall out:
 
 | Question | Status |
 |---|---|
-| Decode `SCCR = 0x03217100` / `PLPRCR = 0x00015080` to get the real system clock, and confirm TB = 701.754 kHz | open — needs `documents/MPC561RM.pdf`, which is not in the repo (`documents/SOURCES.md` lists it; only `pico2_pinout.*` are present) |
-| Confirm 100 ms / 1000 ms rather than 150 ms / 1500 ms | open — one dynamic run, or the periods of the OS alarm that activates the tasks |
-| Which ISR activates each raster task (nothing writes the TCB flag bytes with an r13-relative store; activation goes through the TCB pointer) | open |
-| What the seven ISR tasks (ids 1-7) are bound to | open — B6/B7 |
-| Are `0x6FC048`/`0x6FC04C` really SIMASK2/SIMASK3? | open — needs the manual |
+| Decode `SCCR = 0x03217100` / `PLPRCR = 0x00015080` to get the real system clock, and confirm TB = 701.754 kHz | **CLOSED 2026-09-16 (C4) — section 12.1/12.2.** TBS = 1 -> TB = system clock / 16 = **3.5 MHz**; MF = DIVF = 0, so the part runs 1:1 on its 56 MHz clock input. TB is **not** 701.754 kHz |
+| Confirm 100 ms / 1000 ms rather than 150 ms / 1500 ms | **CLOSED 2026-09-16 (C4) — section 11.** Neither: the two tasks are **10 ms** and **20 ms**, from the alarm-1 cycle and the /2 divider |
+| Which ISR activates each raster task (nothing writes the TCB flag bytes with an r13-relative store; activation goes through the TCB pointer) | **CLOSED 2026-09-16 (C4) — sections 11.2-11.4.** `os_ActivateTask` (0x475E8C) is the only writer of the counter bytes; the fast rasters come from the time table on Time Base reference A, the slow ones from alarm 1 plus the divider chain 0x40BEF0 |
+| What the seven ISR tasks (ids 1-7) are bound to | open — B6/B7. C4 adds: they are activated from the ISR wrappers at 0x40A9F0-0x40ACDC and 0x417C40-0x417D18, not from any timer |
+| Are `0x6FC048`/`0x6FC04C` really SIMASK2/SIMASK3? | **CLOSED 2026-09-16 (C4) — section 12.3.** Yes; MPC561RM's USIU register map names 0x2FC048/0x2FC04C exactly that |
+| Which of the two task sets (A: 0x4328E4/0x45CAC4, B: 0x1205A0/0x120FAC) is live with the engine running | open — one bench log of the raster counters, section 11.7 |
 
 #### Added 2026-09-15 (integration, after brief B9) — the period of TCB 11 (0x45CAC4) is in doubt
+
+> **RESOLVED 2026-09-16 (C4, issue #44) — section 11.4.** The period of
+> 0x45CAC4 is **20 ms**: alarm 1 fires every 35087 ticks = 10 ms, activates
+> the 10 ms task 0x4328E4, whose body runs the divider chain 0x40BEF0 whose
+> /2 branch activates 0x45CAC4. Nothing about the priority-0x08 analogy was
+> needed. A 20 ms rail-pressure controller is exactly what B9 expected.
 
 B9 (`re/findings/rail.md` §7 and its open-items table) found that the on-chip
 task entered at **0x45CAC4** (TCB 11, priority 0x08, 161 `bl`) contains the
@@ -441,3 +488,388 @@ did not see (an alarm or an ISR chain). **Status: OPEN, HYPOTHESIS for 0x45CAC4
 withdrawn to "period unknown, <= 1500 ms".** Resolution needs one dynamic run
 (A5 harness or a bench log). Until then, treat every latency estimate that
 depends on this task's period (B6 options C/D, B9 §7) as unknown.
+
+---
+
+## 11. Added 2026-09-16 (brief C4, issue #44) — the activation chain, and the periods are settled
+
+Agent C4, `docs/agent_briefs/C4_task_periods.md`. Reproduce everything below
+with
+
+```bash
+./.venv/bin/python3 tools/ercosek_tasks.py data/passat_azx_ori.bin
+./.venv/bin/python3 -m emu.os_clock --set a --seconds 5
+./.venv/bin/python3 -m emu.os_clock --set b --seconds 5
+./.venv/bin/python3 -m unittest tests.test_ercosek_tasks
+```
+
+**Summary: the table of section 5.4 is wrong by a factor of 5, in the same
+direction for every raster.** The tick unit, not the chain, was the error:
+1 ms is **3508** Time Base ticks, not 701.754. The chain itself is now read
+out end to end, so every period is **VERIFIED-STATIC** and reproduced
+**VERIFIED-DYNAMIC** by the emulator.
+
+| Raster | Task set A (installed by `os_init`) | Task set B | Period |
+|---|---|---|---|
+| 1 ms | id 21 `0x4240C8` | id 33 `0x11EBF4` | 3508 ticks |
+| 2 ms | id 24 `0x424900` | id 36 `0x11EC34` | 7016 |
+| 5 ms | id 26 `0x424AF8` | id 38 `0x11EC58` | 17540 |
+| **10 ms** | **id 19 `0x4328E4`** | id 32 `0x1205A0` | 35087 |
+| **20 ms** | **id 23 `0x45CAC4`** | id 35 `0x120FAC` | 70174 |
+| 50 ms | id 25 (list `0x0B1EE4`) | id 37 (list `0x0B28A0`) | 175435 |
+| 100 ms | id 18 (list `0x0B1FC0`) | id 31 (list `0x0B28BC`) | 350870 |
+| 200 ms | id 22 (list `0x0B231C`) | id 34 (list `0x0B29CC`) | 701740 |
+| 1000 ms | id 17 (list `0x0B24DC`) | id 30 (list `0x0B29F8`) | 3508700 |
+
+### 11.1 The tick unit: 1 ms = 3508 Time Base ticks (285 ns each)
+
+Section 5.2 read the literal 7017 as 10 ms and concluded TB = 701.754 kHz.
+Five independent facts say it is 2 ms and TB = 3.5 MHz, the first of them
+decisive on its own:
+
+0. **The firmware converts microseconds to Time Base ticks by dividing by
+   285, in executable code.** `0x12BBE4`, feeding `os_SetRelAlarm(0, …)`:
+
+   ```
+   0012BBE4  lwz   r12,-0x4BA8(r13)   ; 0x7FB448, a timeout in microseconds
+   0012BBE8  mulli r12,r12,0x3E8      ; x 1000            -> nanoseconds
+   0012BBEC  li    r11,0x11D          ; 285
+   0012BBF0  divwu r4,r12,r11         ; / 285 ns          -> Time Base ticks
+   0012BBF4  li    r3,0 ; li r5,0
+   0012BBFC  bl    0x476EE8           ; os_SetRelAlarm(0, ticks, one-shot)
+   ```
+
+   `0x011D = 285` appears as an immediate **exactly once in the whole image**,
+   here. 0x7FB448 is loaded with 0x11940 = 72000 at 0x12BB10, i.e. 72 ms, and
+   72000 x 1000 / 285 = 252631 ticks. So `ticks = t_ns / 285` is not an
+   inference about a data table: it is what the CPU does.
+   **VERIFIED-STATIC.**
+1. **The ERCOSEK generator wrote the same constant into the kernel
+   configuration record.** `tbl_os_kernel_config` (external `0x09B6BC`,
+   on-chip `0x478E20` — the same record; the stack descriptor C2 found at
+   `0x09B6F8` is at +0x3C of both) carries at **+0xA0..+0xAC** the quartet
+
+   ```
+   0x09B75C / 0x478EC0 :  0000DAC0  00000010  00000DB4  0000011D
+                          = 56000    = 16      = 3508    = 285
+   ```
+
+   i.e. *system clock 56000 kHz*, *Time Base divider 16*, *3508 ticks per
+   millisecond*, *285 ns per tick*. **VERIFIED-STATIC** (the words are in the
+   dump, twice); the reading of the four fields is HYPOTHESIS, but everything
+   else below agrees with it.
+2. **Every timing literal in the image is `floor(t_ns / 285)`** — exactly, for
+   all of them, with no exception:
+
+   | Literal | /285 ns | Literal | /285 ns |
+   |---|---|---|---|
+   | 701 | **0.2 ms** | 35087 | **10 ms** |
+   | 3508 | **1 ms** | 105263 | **30 ms** |
+   | 7017 | **2 ms** | 280701 | **80 ms** |
+   | 7719 | **2.2 ms** | 1052631 | **300 ms** |
+   | 14035 | **4 ms** | | |
+
+   Under section 5.2's unit the same set reads {1, 5, 10, 11, 20, 50, 150,
+   400, 1500} ms; both look plausible in isolation, which is why B1's reading
+   survived a whole wave. Facts 0 and 1 are what decide between them.
+3. **The hardware agrees.** `SCCR = 0x03217100` has **TBS = 1** (bit 6), and
+   MPC561RM section 8.11.1 Table 8-9 plus Table 8-2 make that "time base
+   source is the system clock divided by **16**" — see section 12 below. With
+   `sys_clock_hz = 56 000 000` (`can.md` section 3, itself pinned by the
+   TouCAN PRESDIV 6 / 16 Tq timing giving exactly the 500 kbit/s of the VW
+   powertrain bus) the Time Base runs at **3.5 MHz**, so 35087 ticks is
+   10.025 ms — never 50 ms.
+4. The 0.25 % gap between the generator's 285 ns and the real 285.714 ns is
+   the usual truncation: every raster runs **0.25 % slow** against its nominal
+   name (a "10 ms" task is 10.025 ms). Irrelevant for control, but it matters
+   for a counter-slope check on the bench.
+
+### 11.2 `os_ActivateTask` at 0x475E8C, and the 37 task descriptors
+
+`0x475E8C` is the OSEK `ActivateTask` primitive (the checked API wrapper
+`0x4770F0`, called only from 0x11DB28, ends in the same body). It takes the
+task handle in r3, and its tail at `0x476058` does exactly
+
+```
+00476058  lbz  r12,0(r28)      ; r28 = [handle+0x0C] = the activation counter
+0047605C  addi r12,r12,1
+00476060  stb  r12,0(r28)
+```
+
+so the "activation flag byte" of section 4 is an activation **counter** and
+`0x475E8C` is its only writer — which answers section 10's "nothing writes the
+TCB flag bytes with an r13-relative store". **VERIFIED-STATIC.**
+
+The generated per-task wrappers are a table of 37 three-instruction thunks at
+**0x0B091C-0x0B0AD4**, stride 0xC:
+
+```
+000B09AC  3C600048  lis  r3,0x48
+000B09B0  806387FC  lwz  r3,-0x7804(r3)   ; r3 = [0x4787FC] = 0x4787E4
+000B09B4  483C54D8  b    0x475E8C          ; ActivateTask(task 23 = 0x45CAC4)
+```
+
+Walking those 37 constants recovers the **complete** descriptor table, which
+is bigger and differently shaped than section 4 records. Corrections:
+
+* The handle (the OSEK `TaskType`) is **not** the row start; it is the address
+  of the *core* record:
+
+  | Offset from handle | Field |
+  |---|---|
+  | +0x00 | pointer to the task's **process list** |
+  | +0x04 | priority |
+  | +0x08 | maximum activations (always 1) |
+  | +0x0C | address of the activation counter byte (0x7FE5FC-0x7FE644) |
+  | +0x10 | task id |
+  | +0x14 | 0 |
+  | +0x18 | pointer back to the handle (the word every thunk loads) |
+
+  Section 4's field list is the same record read from 8 bytes earlier.
+* The **process list** is an array of function pointers terminated by
+  `0x004764FC`. Section 4's "+0x04 = 0x004764FC (common)" is that terminator:
+  the on-chip tasks have a one-element list `{entry, 0x4764FC}` inline in the
+  table, so their handle is row+8 and the anchor scan finds them. The other
+  twelve tasks point at multi-process lists in external flash at
+  **0x0B1ED4-0x0B2A77** (up to 214 processes each), have no `0x4764FC` word
+  in the table, and are therefore **missed by the anchor scan** — that is the
+  whole of the "gaps before 0x4787DC and before 0x4789E8" that C2 recorded.
+  `0x004764FC` is `os_TerminateTask`.
+* There are **37** tasks, not 25: ids 0-9, 15-26 and 28-42 (10-14 and 27 are
+  unused), one activation-counter byte each, two bytes apart, filling
+  0x7FE5FC-0x7FE645 exactly.
+
+### 11.3 The fast rasters: Time Base **reference A** and a cyclic time table
+
+Section 3.1 found reference B. There is a second, independent timer:
+`os_time_table_dispatch` at **0x4768C0** runs off **TBREF0 (0x6FC204)**,
+reference A.
+
+```
+004768DC  lwz  r3,-0x1A10(r13)     ; current entry
+004768E0  lwz  r11,-0x1A08(r13)    ; accumulated deadline T
+004768E4  lwz  r10,4(r3)           ; delta of this entry
+004768E8  addi r9,r3,8             ; next entry
+004768EC  add  r11,r11,r10 ; stw r11,-0x1A08(r13)
+004768F4  lwz  r30,0(r3) ; mtlr r30
+004768FC  stw  r9,-0x1A10(r13)
+00476900  blrl                     ; call the action
+00476904  ... TBSCR |= 0x88 ; stw r12,4(r31)         ; TBREF0 = T
+0047691C  mftb r3 ; subf. r11,r3,r11 ; ble 0x4768DC  ; already due -> next
+```
+
+So a time table is a cyclic array of 8-byte `{action, delta}` records; the
+action of record *k* runs at `sum(delta[0..k-1])`, and `0x47820C`
+(`os_time_table_wrap`: `[-0x1A10] = [-0x1A0C]`) is the end marker.
+`0x478034` (`os_start_time_table`) and `0x478218` (`os_switch_time_table`)
+install one; the state is `[r13-0x1A10]` = current entry, `[r13-0x1A0C]` =
+base, `[r13-0x1A08]` = accumulated deadline. **VERIFIED-STATIC.**
+
+Two tables exist, both 18 entries, both a 35080-tick (50 ms) cycle built out
+of ten 3508-tick (1 ms) steps:
+
+| Activations per cycle | Table A `0x478EE4` | Table B `0x478F80` |
+|---|---|---|
+| 10 | id 21 `0x4240C8` -> **1 ms** | id 33 `0x11EBF4` -> **1 ms** |
+| 5 | id 24 `0x424900` -> **2 ms** | id 36 `0x11EC34` -> **2 ms** |
+| 2 | id 26 `0x424AF8` -> **5 ms** | id 38 `0x11EC58` -> **5 ms** |
+
+Their descriptors `{0, base, base}` are at `0x478F74` (A) and `0x479010` (B).
+`os_init` installs **A** (`bl 0x478218` at 0x11B130 with r3 = 0x478F74).
+
+### 11.4 The slow rasters: alarm 1 and a chain of five dividers
+
+The **alarm callback vector** is at **0x478DF8** (kernel config +0x68, which
+becomes K+0x60); it has three entries:
+
+| Alarm | Callback | Armed by |
+|---|---|---|
+| 0 | `0x0B0934` = ActivateTask(id 42, `0x12BC40`) | `os_SetRelAlarm(0, 7719, 7719)` at 0x12CF5C (**2.2 ms**); `(0, 280701, 0)` at 0x12B19C / 0x135810 (**80 ms** one-shot) |
+| 1 | **`0x443F74`** = `os_raster_select` | `os_SetRelAlarm(1, 701, 35087)` at 0x11B15C — first shot 0.2 ms, cycle **10 ms** |
+| 2 | `0x40C1D8` (`b 0x46080`) | `os_SetRelAlarm(2, 7017, 0)` at 0xA7A34 (**2 ms** one-shot) |
+
+`os_raster_select` (0x443F74) picks the task set from one RAM byte:
+
+```
+00443F80  lbz   r3,-0x549B(r13)            ; 0x7FAB55
+00443F84  cmpwi r3,0 ; bne 0x443F9C
+00443F8C  lis r3,0x48 ; lwz r3,-0x7844(r3) ; bl 0x475E8C   ; id 19 = 0x4328E4
+00443F9C  cmpwi r3,2 ; bne 0x443FB0
+00443FA4  lis r3,0x48 ; lwz r3,-0x7568(r3) ; bl 0x475E8C   ; id 32 = 0x1205A0
+```
+
+**So `0x4328E4` and `0x1205A0` are the same raster in two builds, and their
+period is alarm 1's cycle = 35087 ticks = 10 ms.** `os_init` writes 0 to
+0x7FAB55 at 0x11B148, so set A is live from reset; 0x11DAF4 writes 2 and at
+the same time switches the time table to B (`bl 0x478218` at 0x11DAEC with
+r3 = 0x479010), gated on the byte 0x7FEB5E.
+
+The 10 ms task's body then runs the divider chain — `bl 0x40BEF0` at
+0x432BBC inside `0x4328E4`, `bl 0x40C064` at 0x1206AC inside `0x1205A0`,
+both unconditional members of the flat `bl` list — five identical blocks of
+
+```
+0040BF8C  lwz    r12,-0x3D20(r13)
+0040BF90  addic. r3,r12,-1 ; stw r3,-0x3D20(r13) ; bne +0x18
+0040BF9C  li     r12,2     ; stw r12,-0x3D20(r13)
+0040BFA4  lis r3,0x48 ; lwz r3,-0x7804(r3) ; bl 0x475E8C     ; id 23 = 0x45CAC4
+```
+
+| Counter | Divider | Set A | Set B | Period |
+|---|---|---|---|---|
+| 0x7FC2D0 | /2 | id 23 **`0x45CAC4`** | id 35 `0x120FAC` | **20 ms** |
+| 0x7FC2D4 | /5 | id 25 | id 37 | 50 ms |
+| 0x7FC2D8 | /10 | id 18 | id 31 | 100 ms |
+| 0x7FC2DC | /20 | id 22 | id 34 | 200 ms |
+| 0x7FC2E0 | /100 | id 17 | id 30 | 1000 ms |
+
+The counters are seeded staggered — `{1, 6, 8, 0x18, 0x5E}` at 0x1344D0-
+0x1344F4 — so the slow rasters land in different 10 ms slots.
+**VERIFIED-STATIC.**
+
+The tail of `0x40BEF0` (0x40BFB0-0x40C040) recomputes alarm 1's cycle every
+fifth call through `os_set_alarm_cycle(1, …)` at `0x476E94`:
+`cycle = (0x80 + (V-100)/2) * 35087 / 128`, clamped to [0x890F, 0xAB53], from
+the byte `V` at 0x7FCE95. So the 10 ms raster — and with it every divided
+raster — can be **stretched to 12.5 ms**. At `V <= 100` (its cold-start
+value) the cycle is the nominal 35087. This is the only source of raster
+jitter in the image; what `V` is was not chased (it is written outside the
+scheduler).
+
+### 11.5 The deadline windows now make sense
+
+With the corrected unit every `os_set_deadline_timer` window is 1.5x or 2x the
+period of the raster it guards, which it was not before:
+
+| Timer | Window | Guards | Ratio |
+|---|---|---|---|
+| 2 | 7017 = 2 ms | the 1 ms raster (re-armed in its own epilogue, 0x42408C / 0x11EBF0) | 2x |
+| 3 | 14035 = 4 ms | the 2 ms raster (0x4248AC / 0x11ED74) | 2x |
+| 0 | 105263 = 30 ms | the 20 ms raster | 1.5x |
+| 1 | 1052631 = 300 ms | the 200 ms raster | 1.5x |
+
+and section 5.3's `/5` divider in the 2 ms epilogue (0x11ED78, 0x4248B0)
+checks timer 0 every **10 ms**, three times per 30 ms window, instead of once
+per window. **HYPOTHESIS** for which raster each timer guards; VERIFIED-STATIC
+for the windows and for the check cadence.
+
+### 11.6 The emulated cross-check (VERIFIED-DYNAMIC)
+
+`emu/os_clock.py` runs `os_time_table_dispatch`, `os_raster_select` and both
+divider chains out of the dump against a virtual Time Base (`mftb` rewritten
+*in emulator memory only* to read a scratch cell the driver advances to
+whatever the code programs into TBREF0; `os_ActivateTask` and
+`os_set_alarm_cycle` stubbed to a `blr` plus a hook that does what their tails
+do). Five simulated seconds, task set A:
+
+```
+flag      id  entry     activations   period (ticks)   period (ms)
+007FE61C  21  004240C8         5002             3508      1.000
+007FE622  24  00424900         2501             7016      2.000
+007FE626  26  00424AF8         1001            17540      4.999
+007FE618  19  004328E4          500            35087     10.000
+007FE620  23  0045CAC4          250            70174     20.000
+007FE624  25  000C78F4           99           175435     49.999
+007FE616  18  000FB974           50           350870     99.998
+007FE61E  22  00115AE0           24           701740    199.996
+007FE614  17  0005BD3C            5          3508700    999.980
+```
+
+Set B gives the same nine periods on flags 0x7FE632 / 0x7FE638 / 0x7FE63C /
+0x7FE630 / 0x7FE636 / 0x7FE63A / 0x7FE62E / 0x7FE634 / 0x7FE62C. There is no
+jitter: every gap equals every other gap for the same task.
+
+### 11.7 What one bench log must still record
+
+Two things the dump cannot answer:
+
+1. **Which task set runs with the engine turning.** Set A (`0x4328E4`,
+   `0x45CAC4`) is installed by `os_init`; `0x11DA64` — a process of the
+   priority-0 init task — switches to set B if the byte 0x7FEB5E is non-zero
+   (written 1 at 0x0BDB28, 0 at 0x1341C4, both alongside a state byte at
+   0x7FCED8). Set A's process lists are much longer (214 against 67 processes
+   at 100 ms), which suggests A is the normal one, but that is **HYPOTHESIS**.
+2. **The absolute rate**, i.e. the 56 MHz of `can.md` section 3.
+
+One log settles both. The raster counters are 32-bit words in
+0x7FD740-0x7FD7A0; the five that matter are
+
+| Cell | Incremented by | Expected rate |
+|---|---|---|
+| 0x7FD75C | set A 1 ms, at `0x424078` | 1000 /s |
+| 0x7FD754 | set A 10 ms, at `0x4328C8` | 100 /s |
+| 0x7FD760 | set B 1 ms, at `0x11EBE0` | 1000 /s |
+| 0x7FD778 | set B 2 ms, at `0x11ED5C` | 500 /s |
+| 0x7FD758 | set B 10 ms, at `0x120584` | 100 /s |
+
+C3's `wave_b_confirm.json` already logs the three set-B cells; **0x7FD754 and
+0x7FD75C should be added to it**, because if set A is the live one the three
+set-B counters stay frozen and the log proves nothing about the periods. Read
+any pair of these counters twice, N seconds apart, at idle:
+
+* set B live and this section right -> 0x7FD760 gains ~1000 N, 0x7FD778
+  ~500 N, 0x7FD758 ~100 N (0.25 % low, and lower still if the load byte
+  0x7FCE95 stretches the cycle);
+* section 5.4 right instead -> one fifth of that (200 / 100 / 20 per second);
+* set A live -> the three set-B counters do not move at all, and 0x7FD75C /
+  0x7FD754 carry the 1000 /s and 100 /s instead.
+
+A 2 % tolerance separates the two hypotheses, so any logger that timestamps to
+50 ms and runs for 10 s does it.
+
+## 12. Added 2026-09-16 (brief C4) — the clock registers, from MPC561RM
+
+`documents/MPC561RM.pdf`, extracted with
+`pdftotext -layout documents/MPC561RM.pdf -` (method: `re/findings/fr_index.md`).
+This closes two of section 10's open items.
+
+### 12.1 `SCCR = 0x03217100` (0x6FC280, MPC561RM section 8.11.1, Figure 8-16)
+
+Bits are numbered MSB = 0.
+
+| Bits | Field | Value | Meaning |
+|---|---|---|---|
+| 0 | DBCT | 0 | timers follow the clock mode in limp mode |
+| 1:2 | COM | 00 | CLKOUT enabled, full-strength buffer |
+| 3 | DCSLR | 0 | clock switching on loss of lock during reset enabled |
+| 4 | MFPDL | 0 | MF / DIVF stay writable |
+| 5 | LPML | 0 | LPM / CSRC stay writable |
+| **6** | **TBS** | **1** | **time base source = system clock / 16** |
+| 7 | RTDIV | 1 | RTC and PIT clock divided by 256 |
+| 8 | STBUC | 0 | do not switch to the backup ring oscillator |
+| 9 | CQDS | 0 | |
+| 10 | PRQEN | 1 | switch to the DFNH frequency on an interrupt |
+| 11 | RTSEL | 0 | OSCM is the RTC/PIT source |
+| 12 | BUCS | 0 | the system clock is not the backup clock |
+| 13:14 | EBDF | 00 | CLKOUT = GCLK2 / 1 |
+| 15 | LME | 1 | limp mode enabled |
+| 16:17 | EECLK | 01 | ENGCLK full-strength output |
+| 18:23 | ENGDIV | 0b110001 = 49 | ENGCLK = VCO/2 / 50 |
+| 25:27 | DFNL | 000 | low frequency = /2 (unused, PRQEN = 1) |
+| 29:31 | DFNH | 000 | **system clock = FREQsysmax / 1** |
+
+Table 8-2 ("TMBCLK Divisions") gives division 16 whenever TBS = 1, and section
+6.1.6 says the decrementer — which is coherent with the Time Base — "is
+clocked by the TMBCLK clock", one increment per TMBCLK. So
+
+> **Time Base frequency = system clock / 16 = 56 MHz / 16 = 3.5 MHz,
+> one tick = 285.714 ns.** VERIFIED (manual + the register value in the dump).
+
+### 12.2 `PLPRCR = 0x00015080` (0x6FC284, section 8.11.2, Figure 8-17)
+
+MF (bits 0:11) = 0 and DIVF (bits 27:31) = 0, and
+`System Frequency = OSCCLK / (DIVF+1) x (MF+1) / 2^DFNH` (section 8.5), so the
+part runs in **1:1 mode: system clock = the oscillator/EXTCLK input**, and the
+56 MHz of `can.md` section 3 is the board's clock input, not a PLL product.
+The bit the boot sets and polls at 0x116FC/0x11704 (0x8000 = bit 16) is
+**SPLSS**, the sticky loss-of-lock bit: write 1 to clear, then wait for it to
+stay 0. Note that the boot at 0x116DC-0x116F0 writes MF and DIVF from
+registers, so 0x00015080 is the settled value, not a literal in the code.
+
+### 12.3 `0x6FC048` / `0x6FC04C` are SIMASK2 / SIMASK3 — confirmed
+
+MPC561RM's USIU register map lists `0x2F C048 Interrupt Mask2 Register
+(SIMASK2)` and `0x2F C04C Interrupt Mask3 Register (SIMASK3)`; with the ISB=1
+relocation those are 0x6FC048 / 0x6FC04C. Section 3.3's names move from
+HYPOTHESIS to **VERIFIED** (manual). The neighbours 0x6FC040 / 0x6FC044 are
+SIPEND2 / SIPEND3 and 0x6FC050 / 0x6FC054 are SISR2 / SISR3.

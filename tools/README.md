@@ -26,6 +26,7 @@ document and `med9lib.py` together.
 | `patch_gen.py` | Turn a patch's `build` section into its `changes` list: resolve hook targets from the `.sym` file, encode the I-form branch words (reach and alignment checked), assert the stock bytes under the blob are 0xFF. `changes` is generated, never hand-edited. |
 | `patch_apply.py` | The only tool that modifies an image. Checks `base_sha256`, the forbidden regions and every `old`; writes the `new` bytes to a copy; fixes and verifies the checksums; proves the identification block is unchanged; requires a clean `bindiff`. Writes nothing if any of that fails. |
 | `ram_survey.py` | Per-byte static usage survey of the two SRAMs (0x7F8000-0x807FFF): r13 D-form accesses, absolute `lis`+D-form pairs, pointer words in both flash regions, measuring-variable cells, the cold-start fills and a table of known structures. Emits `re/ram_map.csv`, a 256-byte page map and the longest reference-free runs. `--indexed` bounds the arrays those runs usually belong to; `--stack` walks the deepest `stwu` chain from each task entry. `re/findings/ram.md`. |
+| `ercosek_tasks.py` | Brief C4 (#44). Decodes the whole ERCOSEK activation chain: the 37 task descriptors behind the ActivateTask thunk table (0x0B091C), both cyclic time tables (0x478EE4 / 0x478F80) and both raster divider chains (0x40BEF0 / 0x40C064), and prints every raster period in Time Base ticks and milliseconds. `--tasks`, `--timetable`, `--dividers`, `--periods`, `--json`. `re/findings/scheduler.md` section 11. |
 | `ram_snapshot_diff.py` | Compares the RAM snapshots taken over KWP RequestUpload and classifies every byte `changed` / `constant` / `blank`. The dynamic half of issue #23; ranges in `logging/sessions/ram_snapshot.json`, format in the module docstring, `--self-test` runs it on synthetic snapshots. |
 
 Quick checks:
@@ -49,7 +50,9 @@ python3 tools/ram_survey.py data/passat_azx_ori.bin --csv re/ram_map.csv
 python3 tools/ram_survey.py data/passat_azx_ori.bin --indexed --indexed-min 0x40
 python3 tools/ram_survey.py data/passat_azx_ori.bin --stack
 python3 tools/ram_snapshot_diff.py --self-test
+python3 tools/ercosek_tasks.py data/passat_azx_ori.bin --periods   # every raster
 python3 -m emu.ext_sram_probe                # 0x7F8012 = 0x44 / 0x41 per CS1 model
+python3 -m emu.os_clock --set a --seconds 5  # the same periods, emulated
 ```
 
 Building and applying a patch (`docs/06_patch_pipeline.md`, issue #25). The

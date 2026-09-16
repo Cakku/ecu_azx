@@ -450,6 +450,19 @@ else                          prist = PT1(u16@0x5D521C = 26214 (0.4 in Q16), 0x8
 
 ## 7. Raster: all of `%HDR*` runs in **one** task, and the period is doubtful
 
+> **SETTLED 2026-09-16 (C4, issue #44) — the period of 0x45CAC4 is 20 ms.
+> VERIFIED-STATIC, and VERIFIED-DYNAMIC under `emu/os_clock.py`.**
+> `re/findings/scheduler.md` §11.4: ERCOSEK alarm 1 fires every 35087 Time
+> Base ticks = 10 ms and activates the 10 ms task 0x4328E4, whose body runs
+> the divider chain `os_raster_divider_a` (0x40BEF0) at 0x432BBC; that chain's
+> /2 counter (0x7FC2D0, reload 2) activates task id 23, whose only process is
+> **0x45CAC4**. B1's 1000 ms came from a tick unit that was five times too
+> coarse — 1 ms is 3508 ticks of 285 ns, not 701.754 ticks. So the whole
+> `%HDR*` chain, the `%AWEA` angle maps and B6's `rkti_pre` run at **50 Hz**,
+> which is what a rail-pressure PI controller needs, and the latency note in
+> §13 and in B6 options C/D is closed: one ethanol update reaches `frt`
+> within one 20 ms period. The paragraph below is kept for the record.
+
 Every process above is called exactly once, from one flat `bl` list:
 
 ```
@@ -815,7 +828,7 @@ do, with no new path and no DTC.
 | Question | Status |
 |---|---|
 | Absolute meaning of VAG display format 0x53 (would confirm 0.005 bar/LSB from outside the image) | open — one VCDS log of group 106 against a known rail pressure settles it |
-| The period of the on-chip task at 0x45CAC4. B1 has it as 1000 ms (HYPOTHESIS); the entire rail-pressure controller, `%AWEA`'s angle maps and `rkti_pre` live in it, which a 1 Hz raster cannot support | **open, and it matters** — see §7 |
+| The period of the on-chip task at 0x45CAC4. B1 has it as 1000 ms (HYPOTHESIS); the entire rail-pressure controller, `%AWEA`'s angle maps and `rkti_pre` live in it, which a 1 Hz raster cannot support | **SETTLED 2026-09-16 (C4, #44): 20 ms**, VERIFIED-STATIC from the activation chain (alarm 1 at 10 ms -> task 0x4328E4 -> the /2 divider 0x40BEF0) and VERIFIED-DYNAMIC from `emu/os_clock.py`. See §7 and `scheduler.md` §11 |
 | `0x7FEA48` / `0x5D3CDC = 2600`: the sense of the 13 bar gate on the window model, and whether the angle clamp is live in normal operation | **SETTLED — see §14.** The gate is `prist > 13.0 bar`; in normal running the angle clamp, the driver cut-off and the charge limit are all disarmed |
 | Percent scaling of the u8 `rl` (0x7FEF74) that indexes `KFWBHO1SW`; the axis tops out at 107 counts | open |
 | Which FR name belongs to which `KFPRSOL*` variant (the mode bits of 0x7FB69A were not decoded) | HYPOTHESIS — the addresses and the selection logic are VERIFIED-STATIC, the names are guesses |
