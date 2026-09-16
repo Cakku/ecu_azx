@@ -58,7 +58,7 @@ python3 -m unittest tests.test_patch_framework        # from the repo root
 | | |
 |---|---|
 | **Hook** | `0x12067C`, one word, `bl 0x11F02C` -> `bl 0x150000` |
-| **Task** | `task_100ms` (0x1205A0, TCB 23) — `re/findings/scheduler.md` §8 |
+| **Task** | `task_100ms` (0x1205A0, TCB 23) — `re/findings/scheduler.md` §8. **Name kept, period corrected 2026-09-16 (C4, #44): a 10 ms raster of task set B**, see below |
 | **Trampoline** | `HOOK_TAIL` (`patches/common/hooks.S`): saves LR only, 16-byte frame |
 | **Tail** | `ba 0x11F02C` — the stock leaf still runs, in the same task, in order |
 | **RAM** | 8 bytes used of the 0x100-byte block at `PATCH_RAM` = 0x7FFB00 |
@@ -102,10 +102,18 @@ nothing else.
 * LR is already saved by the task prologue;
 * it is a single word, inside checksum block 0x120000-0x12FFFF.
 
-**The period is a HYPOTHESIS.** Only "<= 150 ms" is VERIFIED-STATIC. This flash
-is also the measurement: `test/procedure.md` §4 turns the counter's slope into
-the answer, which settles the open item in `scheduler.md` §10 and one box of
-issue #44.
+**The period is settled — and it is 10 ms, not 100 ms** (brief C4, issue #44,
+2026-09-16; `re/findings/scheduler.md` §11, VERIFIED-STATIC from the activation
+chain and VERIFIED-DYNAMIC from `emu/os_clock.py`). The OS tick unit B1 used
+was 5x too coarse; the hook site and every register property above are
+unchanged. Consequences: the counter runs at **100 counts/s** (~6000 per
+minute), and `0x1205A0` belongs to **task set B**, which the firmware only runs
+after the switch at 0x11DA64 (`scheduler.md` §11.7). If task set A is the live
+one, this hook **never executes** and `ff_alive` stays unset — a clean,
+diagnosable outcome, not a hazard, and the reason `test/procedure.md` §4 now
+reads five raster counters *before* judging the slope. Should set A be live,
+the hook moves to the equivalent flat `bl` list in `0x4328E4` (same 10 ms
+raster, same dead-register property) — a one-word change and a new build.
 
 ## Blob disassembly
 

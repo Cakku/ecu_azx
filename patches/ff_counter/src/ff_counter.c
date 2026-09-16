@@ -14,11 +14,12 @@
  *   re/findings/scheduler.md section 8 has the evidence for the site.
  *
  * What it measures
- *   `ticks` counts activations of that task.  Read over the logger it gives
- *   the task's real period: +1 per 100 ms confirms the hypothesis of
- *   scheduler.md section 5.3, +1 per 150 ms refutes it.  Only "<= 150 ms" is
- *   VERIFIED-STATIC today, so this flash doubles as the period measurement
- *   (test/procedure.md, issue #44).
+ *   `ticks` counts activations of that task.  Brief C4 (2026-09-16,
+ *   re/findings/scheduler.md section 11) settled the raster at 10 ms, so the
+ *   expected slope is +100 per second; the task belongs to task set B, and if
+ *   set A turns out to be the live one this hook never runs at all.  Either
+ *   way this flash doubles as the measurement (test/procedure.md section 4,
+ *   issue #44).
  *
  * Cold start
  *   Nothing zeroes our .bss: there is no startup code for a patch, and the

@@ -34,6 +34,17 @@ and `re/findings/scheduler.md` §5 and §8 (check whether C4 settled the
 - Periodic hook: **0x12067C** in `task_100ms` (100 ms HYPOTHESIS, <= 150 ms
   verified). Alternative with a VERIFIED 20 ms period: 0x11EC44 `bl 0x630C0`
   in `task_20ms`.
+  > **Integration note 2026-09-16 (C4 merged, `scheduler.md` §11-§12,
+  > `docs/05` §8):** all rasters are 10x faster than the names say. 0x12067C
+  > (`task_100ms`, 0x1205A0) is a **10 ms** raster; `task_20ms` 0x11EC34 is
+  > **2 ms**; the true 100 ms raster is task-set-A id 18 / set-B id 31
+  > (`tools/ercosek_tasks.py --periods`). Both hook candidates above belong to
+  > **task set B**, and which set is live is still open (§11.7; a hook in a
+  > dead set never runs). Wait for the five-counter bench read, or hook the
+  > set-A twin 0x4328E4 (10 ms) instead — state the choice and why. Express
+  > every tick constant per real raster period: at 10 ms the §3.2 filter needs
+  > `K ≈ 1/320` (or run it from a true 100 ms task) and the 2 %/s slew is
+  > 0.02 %/activation. `can_rx_poll` at 10 ms is fine (Pico frame is 100 ms).
 - New calibration: FFCAL001 at **0x5E2510** (0xFF up to 0x5FFFFF; checksum
   block 0x5E0000-0x5EFFFF; address it with `lis 0x5E` like stock code).
   Layout per docs/05 §4: header `FFCAL001`, version u16, length u16, then
