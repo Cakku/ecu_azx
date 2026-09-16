@@ -88,6 +88,16 @@ single instruction. Code at 0x15xxxx addresses calibration with
 > * **Do not rely on retention.** Persist the ethanol estimate in the SPI
 >   EEPROM (`re/findings/eeprom.md` section 5, block 8 payload offset +0).
 >
+> The `MEMORY` block of the skeleton in section 2 spells the address out for
+> readability. The real script, `patches/common/patch.ld` (brief C1), takes
+> `PATCH_RAM` / `PATCH_RAM_SIZE` from the build and deliberately has **no**
+> defaults, so a missing value fails the link instead of silently placing the
+> block somewhere else. Integrator: keep the two in step, and do not
+> reintroduce an `X = DEFINED(X) ? X : default;` idiom — under `ld.lld` the
+> script assignment wins while addresses are computed and `--defsym` only
+> rewrites the symbol table afterwards, so the default would be linked in
+> silently (C1, 2026-09-16).
+>
 > **Two placements that the earlier version of this table suggested are now
 > refuted (VERIFIED-STATIC):**
 >

@@ -476,6 +476,14 @@ PATCH_RAM_SIZE = 0x100          /* 256 bytes */
   checksum the patch must zero the block and set defaults. Do not rely on RAM
   retention for anything the engine needs — persist the ethanol value in the
   EEPROM (eeprom.md section 5, block 8 offset +0).
+  > C1's `ff_counter` already detects its own cold start, with a **u16**
+  > marker (0xFC01). That leaves a 1-in-65,536 chance that the uninitialised
+  > half-word already reads the marker and the counter is never zeroed. With
+  > the block undefined at power-on rather than zeroed, that risk is real
+  > rather than theoretical, so the header specified above uses a **u32**
+  > magic plus a length and a checksum. Widening the existing marker is two
+  > lines; it is the integrator's call, and C1 flagged it as outside its own
+  > brief (2026-09-16).
 * **Address it absolutely.** `tools/blobdis.py --check-sda` fails on *any*
   reference to r2 or r13, including as a base register, so patch code must
   build the address with `lis r11,0x80 ; addi r11,r11,-0x500` (= 0x7FFB00) and
