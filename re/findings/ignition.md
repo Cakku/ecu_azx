@@ -273,6 +273,18 @@ loop. VERIFIED-STATIC.
 
 ## 8. ZWMIN, ZWSEL/ZWOUT and the hardware output (VERIFIED-STATIC)
 
+> **Added 2026-09-16 (D3, issue #41).** The *producer* of `0x7FD32B` /
+> `0x7FD32C` that this section consumes is **`FUN_00458E74` (0x458E74),
+> `%ZWMIN`**. It searches its own 16-point speed axis 0x5C7A36 (key 0x7FD5F4)
+> and reads five 16 × 12 s8 maps with that key and the shared `rl` key
+> 0x7FD84C: 0x5D5BCB (default, `cand_KFZWMN`), 0x5D5C8B (`cand_KFZWMNUM`),
+> 0x5D5D4B (`cand_KFZWMNST` — the branch that otherwise takes `zwstt`),
+> 0x5D5E0B (`cand_KFZWMS`) and 0x5C7973 (`cand_KFZWMNLB`, all −24.75 degCA,
+> on the same `0x40` bit this table already lists). Full account and the
+> reason every label stays HYPOTHESIS: `re/findings/calibration_names.md` §4.
+> The `DAT_007fd317` the ZWSEL row below adds for the second bank comes from
+> the 16 × 12 s8 map **0x5C7772** (`FUN_00431140`; `calibration_names.md` §3).
+
 | Step | Function | What it does |
 |---|---|---|
 | ZWMIN select | `FUN_0041d440` (0x41D440) | `zwmin = DAT_007fd32b` or `DAT_007fd32c` when `DAT_007fd306 & 0x40`; result in **0x7FD32A** |
@@ -563,6 +575,16 @@ DAT_0080208e = (latch) ? KFDZK(y, x) : 0;
 | debounce counts | 0x5D5BBE / 0x5D5BBF | u8 | `TSWZK` / `TSWZKR` |
 | resulting delta | 0x80208E | s8 RAM | fed straight into `FUN_0041d10c` |
 | latch bits | 0x7FD31B bits 0/1, 0x7F9424 bit 0 | | |
+
+> **Added 2026-09-16 (D3, issue #41): the axes of these three maps.** The keys
+> `FUN_000f436c` passes are 0x7FD820 (rows) and 0x7FD84C (columns), and
+> `tools/sda_xref.py --var` finds exactly one writer for each: the central axis
+> process `FUN_000BDB58`, which computes them as
+> `axis_search_u16_hint(0x5C8982, nmot_w)` at 0x0BDB98 and
+> `axis_search_u16_hint(0x5C89E0, rl_w)` at 0x0BDBAC. So the three maps are
+> over **nmot_w 520…6520 rpm (16 points, data at 0x5C8984)** and **rl_w
+> 10.2…103.9 % (12 points, data at 0x5C89E2)** — VERIFIED-STATIC, and the same
+> grid as four more ignition deltas. `re/findings/calibration_names.md` §3.
 
 `DAT_0080208e` is one of the terms `FUN_0041d10c` adds (§4), so the stock
 software already has an additive, RAM-borne ignition delta that is computed
