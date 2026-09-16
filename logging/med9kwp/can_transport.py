@@ -173,10 +173,15 @@ def open_link(cfg: BusConfig, *, accept: Iterable[int] | None = None) -> CanLink
     except Exception as exc:
         raise CanUnavailable(
             f"could not open {cfg.describe()}: {exc}\n"
-            "  gs_usb/candleLight: check the adapter is plugged in and that "
-            "libusb is installed (`brew install libusb`)\n"
-            "  slcan:  the device node is /dev/tty.usbmodem*, not /dev/cu.*\n"
-            "  socketcand: is socketcand running on the Pi "
-            "(pi_can_setup/README.md section 4)?"
+            "  gs_usb/candleLight: needs the optional backend --\n"
+            "      brew install libusb && pip install 'python-can[gs-usb]'\n"
+            "    then check the adapter is plugged in (`system_profiler "
+            "SPUSBDataType | grep -i can`)\n"
+            "  slcan: needs pyserial (`pip install pyserial`); the device node "
+            "is /dev/tty.usbmodem*, not /dev/cu.*\n"
+            "  socketcand: needs no extra package -- is socketcand running on "
+            "the Pi? (pi_can_setup/README.md section 4)\n"
+            "  no hardware at all: use `--sim`, or `--bus virtual:med9` with "
+            "logging/ecu_sim.py running."
         ) from exc
     return CanLink(bus, accept=accept, describe=cfg.describe())
