@@ -209,7 +209,7 @@ class TestSessionFiles(unittest.TestCase):
         self.assertEqual(by_name["ff_reserved"].address, ram + 6)
 
     def test_symbols_resolve_from_symbols_csv(self):
-        self.assertEqual(med9log._resolve_symbol("raster_setB_1ms_count"),
+        self.assertEqual(med9log._resolve_symbol("cnt_raster_1ms_b"),
                          (0x7FD760, 4))
         self.assertEqual(med9log._resolve_symbol("nmot_w"), (0x7FEE74, 2))
 

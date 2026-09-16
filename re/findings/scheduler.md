@@ -290,8 +290,11 @@ arrangement. The same reasoning gives 1000 ms for the 1500 ms window.
 ### 5.4 Summary
 
 > **SUPERSEDED — 2026-09-16 (C4, issue #44). Read section 11 instead.** Every
-> period in this table is 5x too long and the deadline timers guard different
-> rasters than assumed. The settled values, VERIFIED-STATIC from the
+> period in this table is too long: the tick unit was 5x too coarse (section
+> 11.1) and the deadline windows are 2x their rasters rather than equal to
+> them (section 11.5), so the verified rows are **10x** off (10 ms -> 1 ms,
+> 20 ms -> 2 ms) and the two hypothesis rows further still (100 ms -> 10 ms,
+> 1000 ms -> 20 ms). [Wording clarified at integration, 2026-09-16.] The settled values, VERIFIED-STATIC from the
 > activation chain and VERIFIED-DYNAMIC from `emu/os_clock.py`:
 > 0x11EBF4 / 0x4240C8 = **1 ms**, 0x11EC34 / 0x424900 = **2 ms**,
 > 0x11EC58 / 0x424AF8 = **5 ms**, 0x1205A0 / 0x4328E4 = **10 ms**,
@@ -503,9 +506,13 @@ with
 ./.venv/bin/python3 -m unittest tests.test_ercosek_tasks
 ```
 
-**Summary: the table of section 5.4 is wrong by a factor of 5, in the same
-direction for every raster.** The tick unit, not the chain, was the error:
-1 ms is **3508** Time Base ticks, not 701.754. The chain itself is now read
+**Summary: the table of section 5.4 is wrong in the same direction for every
+raster — 10x for the rows it had verified (1 ms and 2 ms, not 10 and 20).**
+The tick unit, not the chain, was the error: 1 ms is **3508** Time Base ticks,
+not 701.754 (a factor of 5), and the deadline windows read as periods are 2x
+the periods (section 11.5), which together give the 10x. [Integration note
+2026-09-16: an earlier wording here said "factor of 5" for the periods; the
+per-address values in this section were always the 10x ones.] The chain itself is now read
 out end to end, so every period is **VERIFIED-STATIC** and reproduced
 **VERIFIED-DYNAMIC** by the emulator.
 
