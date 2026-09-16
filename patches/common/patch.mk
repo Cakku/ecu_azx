@@ -49,6 +49,11 @@ _jq = $(shell $(PYTHON) -c "import json,sys;print(json.load(open('$(PATCH_JSON)'
 PATCH_FLASH    ?= $(call _jq,flash)
 PATCH_RAM      ?= $(call _jq,ram)
 PATCH_RAM_SIZE ?= $(call _jq,ram_size)
+# Flatten: `?=` leaves a recursive variable, which would re-run the interpreter
+# on every one of the half-dozen uses below.
+PATCH_FLASH    := $(strip $(PATCH_FLASH))
+PATCH_RAM      := $(strip $(PATCH_RAM))
+PATCH_RAM_SIZE := $(strip $(PATCH_RAM_SIZE))
 
 ifeq ($(strip $(PATCH_FLASH)),)
 $(error no "build".flash in $(PATCH_JSON) and no PATCH_FLASH on the command line)
