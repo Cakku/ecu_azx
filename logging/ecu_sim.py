@@ -95,6 +95,10 @@ IO_STRUCT = 0x807800
 IO_BUFFER = 0x807900
 IO_BUFFER_MAX = 0x100
 
+#: patches/ff_fuel's calibration block; its magic is how a patched image
+#: is recognised (patches/ff_fuel/src/ff_state.h).
+FFCAL001_BASE = 0x5E2510
+
 #: wire sub-function -> (internal session number, required security state)
 SESSION_MAP = {
     0x81: (0, None),
@@ -141,6 +145,17 @@ class AnimatedRam:
     ramp_period: float = 20.0
     idle_rpm: float = 800.0
     peak_rpm: float = 3000.0
+    #: True when the loaded image carries patches/ff_fuel (FFCAL001 at
+    #: 0x5E2510).  Then 0x7FFB00 holds a live `struct ff_state` driven by
+    #: `emu/models/flexfuel.py` instead of ff_counter's Flash-1 counter, so
+    #: `21 6F` (measuring block 111) answers with moving numbers -- the
+    #: rehearsal for issue #39.  The two patches are never co-flashed.
+    flexfuel: bool = False
+    #: ethanol the simulated Pico reports, in %
+    flexfuel_e_pct: int = 85
+    #: seconds of head start, so a one-shot `groups` request already shows a
+    #: settled estimate instead of the first activation after power-up
+    flexfuel_warm_s: float = 60.0
     #: which OS task set is live, "A" or "B" (re/findings/scheduler.md 11-12,
     #: brief C4): os_init installs set A and 0x11DA64 switches to set B when
     #: 0x7FEB5E != 0.  The counters of the other set stay frozen -- and so does
@@ -148,6 +163,26 @@ class AnimatedRam:
     live_task_set: str = "B"
     #: static values written once at power-on: {address: (bytes)}
     statics: dict = field(default_factory=dict)
+
+    #: the reference model, created lazily so a stock image never builds one
+    _ff: object = None
+    _ff_ticks: int = 0
+
+    def flexfuel_block(self, t: float) -> bytes:
+        """`struct ff_state` as the patch would have written it by time `t`."""
+        from emu.models.flexfuel import Cal, FlexFuelModel, frame
+        if self._ff is None:
+            self._ff = FlexFuelModel(Cal())
+            self._ff_ticks = 0
+        want = int((t + self.flexfuel_warm_s) * 100.0)   # the 10 ms raster
+        want = min(want, self._ff_ticks + 8000)          # bound the work
+        while self._ff_ticks < want:
+            self._ff_ticks += 1
+            rx = (frame(e_pct=self.flexfuel_e_pct, t_fuel_c=25,
+                        counter=(self._ff_ticks // 10) & 0xFF)
+                  if self._ff_ticks % 10 == 0 else None)
+            self._ff.tick(rx)
+        return self._ff.full_bytes()
 
     def rpm(self, t: float) -> float:
         phase = (t % self.ramp_period) / self.ramp_period
@@ -181,9 +216,12 @@ class AnimatedRam:
         # a set-B task, so with set A live it never runs and the block stays
         # untouched -- the case the bench procedure has to be able to tell from
         # a failed flash.
-        emu.write(0x7FFB00, struct.pack(">I", int(t * 100) if set_b else 0))
-        emu.write(0x7FFB04, struct.pack(">H", 0xFC01 if set_b else 0))
-        emu.write(0x7FFB06, struct.pack(">H", 0))                 # reserved
+        if self.flexfuel:
+            emu.write(0x7FFB00, self.flexfuel_block(t if set_b else 0.0))
+        else:
+            emu.write(0x7FFB00, struct.pack(">I", int(t * 100) if set_b else 0))
+            emu.write(0x7FFB04, struct.pack(">H", 0xFC01 if set_b else 0))
+            emu.write(0x7FFB06, struct.pack(">H", 0))             # reserved
 
     def power_on(self, emu) -> None:
         for addr, value in self.statics.items():
@@ -239,6 +277,11 @@ class Med9Handlers:
         self.session_timeouts = 0
         self.table = self._read_table()
         self.log: list[str] = []
+        #: A patched image is detected, not declared: FFCAL001 at 0x5E2510 is
+        #: only there if patches/ff_fuel was applied, and then 0x7FFB00 carries
+        #: `struct ff_state` rather than ff_counter's block (brief D2, #39).
+        if self.emu.read(FFCAL001_BASE, 8) == b"FFCAL001":
+            self.ram.flexfuel = True
         self.power_on()
 
     # -- setup -------------------------------------------------------------
@@ -386,10 +429,15 @@ class EcuSimulator:
                  address: int = 0x01, delay_ms: float = 0.0,
                  drop_ack: int = 0, seed: int | None = None,
                  session_timeout_s: float | None = None, animate: bool = True,
+                 dump: str = DUMP,
                  trace: list[str] | None = None, verbose: bool = False):
         self.link = link
+        #: `dump` is how a PATCHED image is driven end to end: the handlers are
+        #: the firmware's own, so `21 <group>` on patches/ff_fuel's image runs
+        #: the patch's measuring handlers (brief D2, issue #39).
         self.handlers = handlers or Med9Handlers(
-            seed=seed, animate=animate, session_timeout_s=session_timeout_s)
+            dump, seed=seed, animate=animate,
+            session_timeout_s=session_timeout_s)
         self.server = Tp20Server(link, address=address,
                                  params=Tp20Params(),
                                  delay_s=delay_ms / 1000.0, trace=trace)
