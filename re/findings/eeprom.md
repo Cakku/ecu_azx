@@ -580,3 +580,106 @@ found. This is a **correction to the reading implied in
    RAM and 0x41 when 0x808000 is folded onto 0x800000 — so the byte's meaning
    is VERIFIED-DYNAMIC; only the hardware answer is still open.
    `logging/sessions/ram_snapshot.json` asks C3's logger to read it first.*
+
+---
+
+## 8. The request record and the result codes (D2, 2026-09-16, #38)
+
+Section 3.1 gives the call shapes but calls the sixth argument a "handle" and
+says only "poll it". It is not a word — it is a **9-byte request record that
+the manager keeps a pointer to**, so it must outlive the call. Everything
+below is VERIFIED-STATIC from the disassembly of `nvm_block_request`
+(0x06131C) and the queue pump `nvm_queue_pump` (0x060A68).
+
+### 8.1 How the call shape is chosen
+
+`nvm_block_request` does **not** switch on `mode` alone. At 0x06136C-0x0613AC
+it builds a table index out of four booleans and reads one byte from a
+16-entry table at **0x06199C**:
+
+```
+idx  = 8*(len != 0) + 4*(handle != 0) + 2*(buf != 0) + (mode & 1)
+byte = *(u8 *)(0x06199C + idx)          ; 0 -> return 0x81 (illegal shape)
+case = byte & 0x0F                      ; jump table at 0x06146C, 11 entries
+```
+
+| idx | len | handle | buf | mode | byte | case | target | meaning |
+|---:|---|---|---|---|---|---|---|---|
+| 2 | 0 | 0 | ptr | 0 | 0x51 | 1 | 0x06174C | checksum the caller's buffer into the mirror |
+| 3 | 0 | 0 | ptr | 1 | 0x62 | 2 | 0x061840 | copy the **whole** block out of the mirror |
+| 4 | 0 | ptr | 0 | 0 | 0x43 | 3 | 0x061498 | **commit**: queue "checksum + write all copies" |
+| **10** | >0 | 0 | ptr | 0 | 0x46 | 6 | 0x0616C4 | **stage**: copy `len` bytes into the mirror at `off` |
+| **11** | >0 | 0 | ptr | 1 | 0x67 | 7 | 0x0617E0 | **read back**: copy `len` bytes out of the mirror at `off` |
+| 12 | >0 | ptr | 0 | 0 | 0x48 | 8 | 0x061498 | queued read of `len` bytes from the device |
+| 14/15 | >0 | ptr | ptr | 0/1 | 0x09/0x0A | 9/10 | 0x061498 | queued read/write of `len` bytes |
+| 0,1,5,8,9,13 | | | | | 0x00 | — | — | **rejected, returns 0x81** |
+
+**Correction to the read-back call in brief D2's own text and in §5**: reading
+one byte back is `nvm_block_request(8, off, 1, **1**, &dst, 0)` — *mode 1*.
+With mode 0 the same arguments are the **stage** shape and would overwrite the
+mirror with whatever `dst` happened to contain. The two differ only in that
+one bit.
+
+Cases 6, 7, 1, 2 are synchronous: they run inside the manager's own nesting
+critical section (`mtspr 81` / `mtspr 80` around a depth counter at 0x7FCDB4
+and the saved MSR[EE] at 0x7FCDB8) and return **2** immediately. Only the
+`handle != 0` shapes are queued.
+
+### 8.2 The request record, 9 bytes
+
+The queued path at 0x0615C4 fills the caller's record and enqueues *the
+pointer*:
+
+```
++0  u32  buf        (the caller's buffer; 0 for a commit)
++4  u8   blk
++5  u8   off
++6  u8   len
++7  u8   case       (the low nibble above: 3 = commit)
++8  u8   status     <- 1 as soon as it is queued
+```
+
+The queue is 4 slots of u32 at **0x7FC434** with a write index at
+**0x7FCC61** and a read index at **0x7FCC60**, both masked with
+`queue_len - 1` (queue length 4, from 0xB3195). If the slot is already taken
+the call returns **0x40** and nothing is queued. So:
+
+* **the record must not be a stack temporary** — the pump dereferences it
+  milliseconds later. A patch keeps it in its own RAM block.
+* one request at a time per record: re-using a record whose `status` is still
+  1 would corrupt the in-flight request.
+
+### 8.3 Result codes
+
+`nvm_state_complete` (0x0612B4, the pump's state 0x25) clears the queue slot,
+advances the read index and copies the byte at **0x7FCC95** into
+`record+8`. The four writers of 0x7FCC95 give the whole code set:
+
+| value | written at | meaning |
+|---|---|---|
+| 1 | 0x061640 (the enqueue itself) | queued, still in flight |
+| **2** | 0x06115C, 0x061284 | **finished successfully** |
+| 0x80 | 0x0611D4, 0x06129C | device read/write failed |
+| 0x82 | 0x060C60, 0x060F38 | checksum/verify failed |
+
+and `nvm_block_request` itself returns 2 (synchronous shape done), 1 (queued),
+0x40 (queue full), 0x81 (illegal shape / no mirror) or 0x83 (blocked by the
+0x7F9E3C flag).
+
+**So a patch polls `record+8`: 1 = busy, 2 = done, anything else = failed.**
+
+### 8.4 Who pumps the queue
+
+`FUN_00061944` pumps `nvm_queue_pump` and is called from the background task
+of *both* task sets — `FUN_001205A0` (set B) and `FUN_004328E4` (set A), which
+are exactly the two tasks `patches/ff_fuel` hooks. A commit issued from the
+flex-fuel 10 ms tick therefore completes on its own, in the same task, a few
+activations later; the patch never has to pump anything.
+
+Reproduce:
+
+```bash
+python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x6131C --addr 0x6131C --len 0x280
+python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x612B4 --addr 0x612B4 --len 0x70
+python3 tools/find_abs_refs.py data/passat_azx_ori.bin --target 0x7FCC95
+```
