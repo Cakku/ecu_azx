@@ -30,6 +30,20 @@ set B and which set is live is open (C4 §11.7); D1/D2 carry dated notes
 filter constants per real raster). Wave D can start once `main` is
 fast-forwarded: D1 first, D3 as the filler.
 
+**Update 2026-09-16 (wave D pair 1):** D1 (`patches/ff_fuel/`, #32 + software
+half of #37: both task sets' 10 ms tasks hooked, `onchip_edit` unlock added to
+`tools/patch_apply.py` because the fuel hook 0x42247C is on-chip flash) and D3
+(`re/calibration_names.csv`, scaled `tools/draft_to_xdf.py`, #41 naming pass)
+are merged on `integration/wave-D`; `re/med9_draft.xdf` regenerated with D1's
+FFCAL001 rows. **D2** (`patches/ff_fuel/src/ff_diag.c`: VCDS group 111 with
+TKMWL ids 2196-2199, E% persistence in EEP_CONF block 8 through
+`nvm_block_request` only, #39 + #38 software halves; `eeprom.md` corrected:
+read-back is mode 1, the handle is a 9-byte record, and there is **no key-off
+commit** in the image) is merged too. **Wave D is complete on
+`integration/wave-D`**; the human merges it into `main`. Nothing is flashable
+yet: `ram_status` stays `static` until the #23 snapshots, and whether KESSv2
+writes the on-chip flash (the fuel hook 0x42247C) is the first bench question.
+
 Rule learned in wave B: **run at most two agents at a time.** Four in
 parallel hit the API rate limit and lost their work. Agents commit after
 every finding for the same reason.
@@ -75,7 +89,7 @@ C1 and C2 are independent (C1 uses a placeholder RAM address if C2 is not
 merged yet). C3 and C4 are independent of each other and of pair 1; C3 picks
 up C2's `ram_snapshot.json` and C1's counter address if they are merged.
 
-## Wave D — startable now (wave C merged 5c5123a); D1 + D3 first, D2 after D1
+## Wave D — done on `integration/wave-D` (D1 + D3, then D2)
 
 | Order | Brief | Issues | Needs |
 |---|---|---|---|

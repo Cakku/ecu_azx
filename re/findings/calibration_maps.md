@@ -304,6 +304,23 @@ column is empty for every row, and the XDF uses placeholders
 is the hook a later brief needs: once A2/A3/B6-B9 name a consumer, every map
 it reads inherits a candidate FR label.
 
+> **Corrections, 2026-09-16 (D3, issue #41).** Two statements above are now
+> out of date. (a) `name_or_blank` is no longer empty for every row: waves
+> B6-B9 named 78 objects in place. (b) Names and scaling are not kept there any
+> more, because **`enumerate_maps.py` writes `name_or_blank` empty on every
+> regeneration**, so anything added to the draft by hand is lost the next time
+> the detector runs. The hand knowledge lives in the sidecar
+> `re/calibration_names.csv` (157 objects with unit, scale, offset, FR module
+> and two confidence tags), which `tools/draft_to_xdf.py` merges on `addr`; the
+> 78 draft names are duplicated there and a test asserts the two never
+> disagree. The sidecar also corrects the shape of the six `KFPRSOL*` maps,
+> whose `x_n`/`y_n` §5 leaves empty because the row length comes from a memory
+> load. See `re/README.md` and `re/findings/calibration_names.md`.
+>
+> The statement that **no scaling is applied** is also superseded: 98 objects
+> now carry a physical conversion, each tagged with how sure we are of it.
+> Everything else is still `equation="X"`.
+
 Only the 44 helper functions are pushed into `re/symbols.csv`
 (`export_symbols.py`), with `VERIFIED-STATIC` in the plate comment. The 1,066
 tables are deliberately **not** labelled in Ghidra by default — they would add

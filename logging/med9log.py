@@ -297,7 +297,9 @@ def connection(args):
     if args.sim:
         from ecu_sim import EcuSimulator
         channel = f"med9sim{os.getpid()}"
-        sim = EcuSimulator.on_virtual_bus(channel, seed=0x12345678)
+        sim = EcuSimulator.on_virtual_bus(
+            channel, seed=0x12345678,
+            **({"dump": args.sim_dump} if args.sim_dump else {}))
         stack = contextlib.ExitStack()
         stack.enter_context(sim.background())
         spec = f"virtual:{channel}"
@@ -541,7 +543,9 @@ def cmd_probe(args) -> int:
     if args.sim:
         from ecu_sim import EcuSimulator
         channel = f"med9sim{os.getpid()}"
-        sim = EcuSimulator.on_virtual_bus(channel, seed=0x12345678)
+        sim = EcuSimulator.on_virtual_bus(
+            channel, seed=0x12345678,
+            **({"dump": args.sim_dump} if args.sim_dump else {}))
         stack.enter_context(sim.background())
         spec = f"virtual:{channel}"
     else:
@@ -600,6 +604,11 @@ def _add_bus_args(p) -> None:
                         "socketcand:pi.local:29536:can0 (default gs_usb:0)")
     p.add_argument("--sim", action="store_true",
                    help="talk to logging/ecu_sim.py on an in-process virtual bus")
+    p.add_argument("--sim-dump", metavar="IMAGE", default=None,
+                   help="firmware image the simulator runs (default the stock "
+                        "dump). Point it at work/<patch>.bin to rehearse a "
+                        "patched ECU, e.g. measuring block 111 of "
+                        "patches/ff_fuel")
     p.add_argument("--address", type=lambda s: int(s, 0), default=0x01,
                    help="module logical address (default 0x01, engine)")
     p.add_argument("--rx-id", type=lambda s: int(s, 0), default=0x300,

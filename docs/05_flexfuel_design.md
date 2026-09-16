@@ -149,6 +149,65 @@ transient dropout; but drop the **ignition** and **rail** blends to the
 gasoline map immediately, because advance is the dangerous direction.
 Power-up: start from the persisted E% (Phase 5); until then from E0.
 
+#### Added 2026-09-16 (brief D1, issues #32/#37) — implemented in `patches/ff_fuel`
+
+The whole of this section is now code: `patches/ff_fuel/src/ff_fuel.c`,
+specified by `emu/models/flexfuel.py` and compared with it tick by tick in
+`tests/test_ff_fuel_patch.py`. What was implemented, and where it deviates.
+
+**Fixed point.**
+
+| Quantity | Format | Note |
+|---|---|---|
+| `E_filt` | u16, **1/16 %**, 0..1600 | one curve breakpoint every 6.25 % = 100 counts, so `index = E_filt / 100`, `frac = E_filt % 100`, integer only |
+| `E_frac` | u16, **1/1024 of one `E_filt` count** | **new, a deviation** — see below |
+| `F` | u16, **1/1024**, clamped to [1024, 2048] **in code** | `rk = min((rk * F) >> 10, 0xFFFF)` |
+| time | activations of the periodic hook; every calibration value is physical | see below |
+
+**Deviation 1 — the sub-count `E_frac`.** §8 requires the 2 %/s slew limit to
+be expressed per activation, which at 10 ms is 0.02 % = **0.32 counts of
+1/16 %**. In integer arithmetic that truncates to zero and freezes the filter
+completely. `E_filt` therefore carries a companion `E_frac`, and the pair is one
+26-bit value in 1/16384 %. `E_filt` alone is what the curve, the logger and
+everything else read, exactly as this section specifies.
+
+**Deviation 2 — the filter gain is a time constant, not a shift.** This section
+says `K = ff_filter_k` (1/32 per tick) and §8 corrects it to ≈1/320 at 10 ms.
+FFCAL001 instead stores **`ff_filter_tau_ms` = 3000 ms**, and the patch computes
+`K = ff_tick_ms / ff_filter_tau_ms` = 1/300 per activation. Likewise
+`ff_slew_pct_s` stays 2 %/s and the patch computes the per-activation step.
+`ff_tick_ms` (10 ms, from `scheduler.md` §11) is itself a calibration value, so
+**moving the hook to another raster is one byte, not a rebuild**, and a
+calibration written for a 100 ms raster still behaves as its author intended.
+The conversion is in the C, not in `ffcal001.py`.
+
+**Deviation 3 — `frame_bad` is a latch.** The conditions listed above ("status
+in {fault, not ready}", "counter unchanged for 3 received frames") are
+*conditions*, and a condition has to hold between frames too: the Pico sends at
+10 Hz while the raster runs at 100 Hz, so nine activations out of ten see no
+frame at all. Evaluating them only on the activation that carries the bad frame
+made the mode fall straight back to OK on the next one. The rejection is
+therefore latched in `ff_state.frame_bad` and cleared only by the next good
+frame. (Found by the tick-by-tick comparison with the model, not by review.)
+
+**Additions this section did not ask for, all in the safe direction:**
+
+* the received id echo at 0x803F98 is compared against `ff_can_id`, so a frame
+  arriving on the wrong slot cannot be believed;
+* `E_raw > 100 %` is rejected as implausible;
+* `ff_mode` 0 (off) and 2 (bench override) from §4, plus a fourth safe state:
+  an FFCAL001 whose magic, version, length or checksum does not check out forces
+  mode 0, i.e. `F = 1024` and no CAN traffic at all;
+* `can_init_mb(15)` is called from the patch's own state-block initialisation
+  (`can.md` §7 step 4), so `can_rx_arm_all` is not edited.
+
+**Power-up is FAULT at E0 with F = 1024**, as specified; `e_key` (the decay
+target) is 0 until brief D2 loads it from EEPROM block 8.
+
+**The hold timer counts activations, including the one it is armed on**, so
+`ff_hold_ticks` reads 5999 immediately after the FAULT entry and the held window
+is exactly 6000 activations = 60.00 s.
+
 ### 3.3 Fuel factor
 Stoichiometry: gasoline 14.7, ethanol 9.0 by mass. For volume fraction `v`
 (the sensor reports volume %), with densities 0.745 (gasoline) and 0.789
@@ -211,6 +270,33 @@ regression test: `emu/models/injection.py`, `tests/test_injection_model.py`.
   in the angle domain by `awea_ti_to_angle` (0x41B9C0) on
   `dwi = (ti * k_nmot) >> 13` at RAM **0x803088** — that is the signal to log
   per §3.6.
+
+#### Added 2026-09-16 (brief D1, issue #32) — the curve is built, and "1.50 at E85" is a pump figure
+
+`patches/ff_fuel/ffcal001.py` builds `ff_F_curve` from the formula above through
+`emu.models.flexfuel.fuel_mass_factor`, so the calibration, the patch and the
+model cannot drift apart. **F(0) = 1024 exactly**, which is what makes E0
+bit-identical (`ffcal001.py` refuses to build a block whose first point is not
+1024, or whose curve is not monotonic, or which exceeds the 2048 ceiling the
+patch clamps to).
+
+**Correction to the parenthesis "(1.50 at E85, 1.63 at E100)".** The E100 figure
+is right — 14.7/9.0 = 1.6333 — but the formula in this section gives **1.5429**
+at a volume fraction of 0.85, not 1.50. 1.500 is the value at **v = 0.78**,
+which is exactly the "~75-81 %" that §2 quotes for what pumps sell as E85. The
+two numbers are about different things: the curve is indexed by the **sensor's**
+reading, which is the true volume fraction, so its point at 85 % must carry
+1.5429 and a tank of pump "E85" will simply land the sensor near 78 % and the
+factor near 1.50. Both are now asserted in
+`tests/test_flexfuel_model.py::TestFuelMassFormula`.
+
+Shipped curve (Q10): 1024, 1067, 1109, 1151, 1193, 1235, 1276, 1317, 1358,
+1398, 1438, 1478, 1517, 1557, 1595, 1634, 1673.
+
+The insertion point and the fixed point of the B6 note below are implemented
+unchanged: one word at 0x42247C, `rk = min((rk * F_q10) >> 10, 0xFFFF)` on RAM
+0x803038, and at F = 1024 the stub takes an early return and **does not write
+`rk` at all** — 20 instructions per injection segment.
 
 ### 3.4 Ignition
 Blend factor `f_zw(E)` from a 1D curve (0 at E0, 1 at about E40-50 where
@@ -404,6 +490,32 @@ block (VCDS-readable) or via the DDLI logger, and later as OBD PID 0x52 if the
 OBD handler is extended. No DTC is raised by the patch in the MVP; a fault
 only switches the mode.
 
+> **2026-09-16 — brief D2, issue #39: implemented, and the slots are named.**
+> `patches/ff_fuel` publishes four values in **VCDS measuring block 111**
+> (`21 6F` over KWP). Evidence for every number:
+> `re/findings/measuring_vars.md` §8, reproducible with
+> `python3 tools/measuring_vars.py data/passat_azx_ori.bin --free`.
+>
+> | Field | Value | Measuring id | Formula | Reads |
+> |---|---|---|---|---|
+> | 1 | `E_filt`, whole % | **2196** | 0x21, A = 100 -> the value is B | `ff_diag_e_pct` |
+> | 2 | `F`, % (100 = 1.000) | **2197** | 0x21, A = 100 | `ff_diag_f_pct` |
+> | 3 | `T_fuel`, degC | **2198** | 0x05, A = 10 -> `B - 100` (CROSS-CHECKED, §7.1) | `ff_diag_t_degc` |
+> | 4 | `256 * persist_state + mode` | **2199** | 0x36, a plain count | `ff_state.mode` |
+>
+> The ids are the **last four entries of `tbl_measuring_vars`** (0x0A78A8, one
+> contiguous 16-byte edit); all four point at the "not available" stub today
+> and no group names them. Group 111 and its `+0x7F` echo 238 are both empty,
+> so the whole 25-byte answer to `21 6F` belongs to the patch. Groups **108**
+> and **109** are equally free and are left for the ignition (§3.4) and rail
+> (§3.6) blends.
+>
+> `f_zw` is **not** published: it does not exist yet. A handler that reads a
+> reserved zero would be a field that lies. When §3.4 lands, take group 108.
+>
+> Still true: **no DTC is raised.** A fault only switches the mode, and the
+> mode is field 4. OBD PID 0x52 is untouched.
+
 ### 3.8 Persistence (Phase 5)
 Store `E_filt` in EEPROM via the ECU's own EEPROM block handler or in
 battery-backed RAM if the external SRAM is permanently powered (to be
@@ -475,6 +587,50 @@ fuel.
 > (`re/findings/variants.md`). There is no stock variant byte to reuse for a
 > map-set switch and no coding bit the fuelling path reads.
 
+> **2026-09-16 — brief C2, issue #23: Fallback B is REFUTED.** The external
+> SRAM is ordinary `.bss`: `ram_clear_block` (0x06D8F8), called from `app_init`
+> (0x04CCD4), zeroes 0x800004-0x80498F at every cold start, and
+> 0x804990-0x807FFF is the flash driver's programming copy
+> (`re/findings/ram.md` §3, `re/findings/eeprom.md` §6). Only the four bytes
+> the probe itself saves survive. **EEPROM block 8 is the only route**; do not
+> revive the battery-backed-RAM branch.
+
+> **2026-09-16 — brief D2, issue #38: implemented, with three corrections.**
+> Code: `patches/ff_fuel/src/ff_diag.c` (`ff_persist_init`, `ff_persist_tick`).
+> Calibration: `ff_persist_enable` = 1, block 8, offset 0, hysteresis 5 %,
+> rate 60 s. Bench procedure: `patches/ff_fuel/test/procedure_d2.md` part B.
+>
+> 1. **The read-back call above has the wrong mode.** It is
+>    `nvm_block_request(8, 0, 1, **1**, &dst, 0)`. With mode 0 the identical
+>    argument list is the *stage* shape and overwrites the mirror with whatever
+>    the destination buffer happened to contain. The shape is chosen by a
+>    16-entry table at 0x6199C indexed by
+>    `8*(len!=0) + 4*(handle!=0) + 2*(buf!=0) + mode`
+>    (`re/findings/eeprom.md` §8.1).
+> 2. **The "handle" is a 9-byte record, not a word**, and the manager keeps a
+>    *pointer* to it in a 4-slot queue, so it must be stable storage — the
+>    patch keeps it in its own RAM block at 0x7FFB44. `+8` is the status: 1
+>    queued, **2 done**, 0x80 device failure, 0x82 checksum failure (§8.2-8.3).
+> 3. **"Commit at key-off" is not available.** Block 8 has exactly one stock
+>    client and it never commits; the write-all-blocks routine has no
+>    resolvable trigger; the synchronous-shutdown flag's two setters have no
+>    callers (`re/findings/eeprom.md` §9). So the patch commits *while the
+>    engine runs*, rate-limited to one page write per minute and gated on a
+>    5 % hysteresis and on mode OK/HOLD. The stored value is then at most one
+>    minute old and does not depend on an orderly shutdown at all — which is
+>    strictly better than a key-off flush for the case #38 cares about, a
+>    battery disconnect.
+>
+> The restore seeds **both** `e_filt` and `e_key`. Seeding only the decay
+> target would leave the first 50 s of a cold start on the E0 fuel factor with
+> an E85 tank — lean, the dangerous direction. A store that reads back 0xFF or
+> above 100 is ignored and the patch starts at E0.
+>
+> Still open, and the first thing part B of the procedure does: **nothing
+> proves the factory leaves block 8 payload +0 at 0xFF.** `ff_persist_offset`
+> and `ff_persist_block` are calibration bytes precisely so that a bench read
+> can move the store without a rebuild.
+
 ## 4. New calibration data
 
 All new parameters live in one block inside 0x5E2510-0x5EFFFF (all 0xFF
@@ -490,6 +646,38 @@ today, covered by the 0x5E0000-0x5EFFFF checksum) with a header
 | `ff_dzw_map[8][8]` | s8 x 0.75 deg | 0 |
 | `ff_fst_map[6][6]` | u16 x 1/1024 | 1.0 |
 | `ff_prail_add[8]` | u8 x 0.1 MPa | 0 |
+
+#### Added 2026-09-16 (brief D1, issue #32) — the block exists; two names and one unit changed
+
+`patches/ff_fuel/ffcal001.py` builds it and is the authority on the layout;
+`patches/ff_fuel/src/ff_state.h` carries the same offsets and
+`tests/test_flexfuel_model.py` asserts the two agree. **FFCAL001 v1, 232 bytes
+at 0x5E2510**, header `FFCAL001` + version u16 + length u16, and a 16-bit
+checksum (bit-complement of the byte sum of `[0, length-2)`) in the last two
+bytes. All four tables this section lists but the MVP does not read yet —
+`ff_fzw_curve`, `ff_dzw_map`, `ff_fst_map`, `ff_prail_add` — are present with
+neutral values, so a later patch **extends** the block instead of moving it.
+
+Differences from the table above:
+
+* **`ff_filter_k` (32) became `ff_filter_tau_ms` (3000 ms)** and a new
+  `ff_tick_ms` (10 ms) was added, so every time constant in the block is
+  physical and the raster period is a calibration value rather than a compiled
+  constant (§3.2 note, deviation 2). `ff_timeout_ms`, `ff_hold_s` and `ff_slew`
+  (as `ff_slew_pct_s`) keep their names, values and units.
+* **Added:** `ff_mode` (0 off / 1 normal / 2 bench override, shipped 1) and
+  `ff_e_override` from §3.2's design list, `ff_stall_max` (3 frames), and the
+  five parameters brief **D2** needs — `ff_persist_enable` (0),
+  `ff_persist_hyst_pct` (5), `ff_persist_block` (8), `ff_persist_offset` (0)
+  and `ff_persist_rate_s` (60), the last four matching the EEPROM route of
+  §3.8.
+* `ff_can_id` stays, but it is documentation plus a sanity check: the receive id
+  really lives in the flash edit at 0x2BD8C, and the patch compares the id echo
+  at 0x803F98 against this value before believing a frame.
+
+Descriptor rows for `re/calibration_draft.csv` are in
+`patches/ff_fuel/ffcal001_rows.csv` (D1 must not write that file while brief D3
+owns it); the integrator appends them and re-runs `tools/draft_to_xdf.py`.
 
 ## 5. RAM
 

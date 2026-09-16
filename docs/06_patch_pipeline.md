@@ -53,6 +53,74 @@ section; `tools/patch_gen.py` (or `make gen`) turns it into `changes`:
   `tools/patch_apply.py` print a do-not-flash warning.
 * `requires` is recorded but not yet enforced by any tool.
 
+#### Added 2026-09-16 (brief D1, issue #32) — `build.data` and the `onchip_edit` flag
+
+`patches/ff_fuel` needed two things the framework did not have. Both are
+generic; `patches/ff_counter` is unaffected.
+
+**1. `build.data` — flat byte ranges that are not code.** A patch that ships a
+new calibration block, or edits a table, declares it next to the hooks and
+`tools/patch_gen.py` turns it into a change with the `old` bytes read out of
+the stock image:
+
+```json
+"data": [
+  {"addr": "0x005E2510", "file": "build/ffcal001.bin", "expect_blank": true,
+   "why": "FFCAL001"},
+  {"addr": "0x0002BD8C", "bytes": "000000ec", "old": "000007ff",
+   "calibration_edit": true, "why": "tbl_can_rx slot 15: id 0x7FF -> 0x0EC"}
+]
+```
+
+`file` is read relative to the patch directory (so the patch's own generator
+can produce it), `bytes` is inline hex, `expect_blank` asserts the stock bytes
+are all 0xFF, and an explicit `old` is compared with what is really there. The
+unlock flags below are copied verbatim into the generated change.
+
+> **Added 2026-09-16 (brief D2, issue #39) — `u32_syms`.** A third source for a
+> `data` entry: a list of symbol names, resolved from the linker's `.sym` and
+> packed as big-endian u32s.
+>
+> ```json
+> {"addr": "0x000A78A8",
+>  "u32_syms": ["ff_diag_e_pct", "ff_diag_f_pct",
+>               "ff_diag_t_degc", "ff_diag_mode"],
+>  "old": "00038ec400038ec400038ec400038ec4",
+>  "why": "tbl_measuring_vars ids 2196-2199"}
+> ```
+>
+> It exists because a stock **pointer table** that has to point into our blob
+> (here the TKMWL measuring-variable handlers) cannot be written as literal
+> bytes without going stale the moment the code moves — the same reason
+> `hooks` resolves its target rather than taking a branch word. Each symbol
+> must lie inside the blob and be 4-byte aligned, and all of them are added to
+> `build.symbols`, so a test can assert what the table now points at.
+
+
+
+**2. `onchip_edit` — the second unlock flag.** The old guard refused
+0x400000-0x47FFFF outright, with the reason "not fully in our read". That is
+true of the **first 16 KB only**: 0x400000-0x403FFF is absent from the dump
+(`docs/02_memory_map.md` §2), while **0x404000-0x47FFFF is in the dump** at
+file 0x200000+ and is covered by the code descriptor table at file 0x0A0000,
+so `checksum.py fix` re-checksums a hook there correctly. But brief B6's fuel
+hook (0x42247C, `rksplit`) and D1's task-set-A raster hook (0x432940) both live
+there, so the guard is now split:
+
+| Range | Unlocked by |
+|---|---|
+| 0x000000-0x00FFFF boot block / immobiliser | nothing |
+| 0x1C0000-0x1DFFFF stock calibration | `"calibration_edit": true` |
+| 0x400000-0x403FFF the 16 KB not in our read | nothing |
+| 0x404000-0x47FFFF on-chip flash | `"onchip_edit": true` |
+| 0x1CEE20-0x1CEE6F identification block | nothing, ever |
+
+A flag unlocks exactly one range. `onchip_edit` additionally prints a warning
+on **every** apply, because the block checksums being right does not prove that
+**KESSv2 protocol 179 writes the on-chip flash at all** — that is an open
+question for the bench (issue #32). Read the image back and compare before
+trusting any on-chip write.
+
 ## 2. Build
 
 ```
@@ -122,7 +190,7 @@ to copy.
 | Code and constants | 0x150000-0x1AFFFF (external flash, low alias; also reachable as 0x550000+) | 384 KB of 0xFF inside the 64 KB checksum blocks 0x150000.. 0x1AFFFF; recompute checksums |
 | Extra code if needed | 0x144954-0x14FFFF | tail of block 0x140000-0x14FFFF |
 | New calibration | 0x5E2510-0x5EFFFF | inside calibration block 0x5E0000-0x5EFFFF; addressed through the high alias like the rest of the calibration |
-| Never | 0x000000-0x00FFFF (boot, immobiliser pairing 0x6C00), 0x1C0000-0x1DFFFF (stock calibration, except deliberate map edits), 0x400000-0x47FFFF (on-chip flash: not fully in our read) | |
+| Never | 0x000000-0x00FFFF (boot, immobiliser pairing 0x6C00), 0x1C0000-0x1DFFFF (stock calibration, except deliberate map edits), 0x400000-0x403FFF (the 16 KB of on-chip flash that is not in our read) | 0x404000-0x47FFFF **is** in our read and is checksummed; it needs `"onchip_edit": true` per change (see §1, 2026-09-16) |
 | **RAM** | **0x7FFB00-0x7FFBFF (256 B)**, inside the reference-free internal-SRAM region 0x7FF770-0x7FFFEB | VERIFIED-STATIC that no instruction in the image names any byte of 0x7FF770-0x7FFFEB; **dynamic confirmation pending #23**. Address it absolutely (`lis`/`addi`), never through r13. Not cleared at cold start, so the patch needs a magic + checksum header. See below. |
 
 Branch reach: `b/bl` have ±32 MB range, so any placement is reachable with a
@@ -244,8 +312,9 @@ all** unless every one of these passes:
 
 1. the stock file's SHA-256 matches `base_sha256`;
 2. no change lands in a forbidden region — 0x000000-0x00FFFF and
-   0x400000-0x47FFFF never, 0x1C0000-0x1DFFFF only if the change carries
-   `"calibration_edit": true`. The check folds every CPU alias to one
+   0x400000-0x403FFF never, 0x1C0000-0x1DFFFF only if the change carries
+   `"calibration_edit": true`, 0x404000-0x47FFFF only with
+   `"onchip_edit": true` (added 2026-09-16, §1). The check folds every CPU alias to one
    canonical address first, so the calibration cannot be reached through
    0x5Cxxxx to get around it;
 3. every change's `old` bytes are really there (so a patched image is refused,

@@ -405,6 +405,31 @@ def group_entries(dump, gt):
             yield g, ids
 
 
+#: `kwp21_group_read` (0x3583C) rejects a group above this and answers the
+#: requested group *and* group+0x7F in one 25-byte response (kwp.md 12.3).
+MAX_REQUESTABLE_GROUP = 0x7F
+GROUP_ECHO = 0x7F
+
+
+def free_slots(dump, gt, ptrs, stub):
+    """What a patch may take over: unreferenced ids and empty groups.
+
+    Returns ``(spare_ids, free_groups)``.  A **spare id** points at the "not
+    available" stub *and* is not named by any group, so nothing in the image
+    can reach it today.  A **free group** is directly requestable (1..0x7F),
+    has all four fields zero, and so does the group 0x7F above it, which
+    `21 <group>` returns as the second half of the same response — so the whole
+    25-byte answer belongs to the patch.
+    """
+    referenced = {i for _g, ids in group_entries(dump, gt) for i in ids if i}
+    spare = [i for i, p in enumerate(ptrs) if p == stub and i not in referenced]
+    empty = {g for g in range(255)
+             if not any(dump.half(gt + f * 0x1FE + g * 2) for f in range(4))}
+    free = [g for g in range(1, MAX_REQUESTABLE_GROUP + 1)
+            if g in empty and (g + GROUP_ECHO) in empty]
+    return spare, free
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -418,6 +443,8 @@ def main():
                     help="print the full analysis of one variable id")
     ap.add_argument("--all", action="store_true",
                     help="also emit the 'not implemented' slots")
+    ap.add_argument("--free", action="store_true",
+                    help="list the ids and groups a patch may take over")
     a = ap.parse_args()
 
     dump = Dump(a.file)
@@ -462,6 +489,19 @@ def main():
               f"entry(field, group) = base + field*0x1FE + group*2")
         for g, ids in group_entries(dump, gt):
             print(f"  group {g:3d}: " + " ".join(f"{i:5d}" for i in ids))
+
+    if a.free:
+        gt = a.group_table if a.group_table is not None else R2_APP + GROUP_TABLE_R2_OFF
+        spare, free = free_slots(dump, gt, ptrs, stub)
+        print(f"\nspare variable ids (stub handler AND named by no group): "
+              f"{len(spare)} of {count}")
+        print(f"  highest four: {spare[-4:]}  -> table words "
+              + ", ".join(f"{base + 4 * i:#08x}" for i in spare[-4:]))
+        print(f"free groups (1..{MAX_REQUESTABLE_GROUP}, empty, and their "
+              f"+{GROUP_ECHO:#x} echo empty too): {free}")
+        for g in free:
+            print(f"  group {g:3d} (0x{g:02X}) words: "
+                  + ", ".join(f"{gt + f * 0x1FE + g * 2:#08x}" for f in range(4)))
 
     if a.csv:
         with open(a.csv, "w", newline="") as fh:

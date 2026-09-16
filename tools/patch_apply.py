@@ -6,7 +6,9 @@ section 5).  It never touches its input, never writes to `data/`, and writes
 nothing at all unless every check below passes:
 
  1. the stock file's SHA-256 matches `base_sha256` in patch.json;
- 2. no change lands in a forbidden region (see FORBIDDEN);
+ 2. no change lands in a forbidden region (see FORBIDDEN) unless it carries
+    that region's explicit unlock flag - `calibration_edit` for the stock
+    calibration, `onchip_edit` for the on-chip flash 0x404000-0x47FFFF;
  3. every change's `old` bytes are really there;
  4. the `new` bytes are written to a copy;
  5. `checksum.fix` rewrites the affected block descriptors and
@@ -39,12 +41,30 @@ import checksum as cs  # noqa: E402
 import med9lib as m  # noqa: E402
 
 # CPU ranges no patch may touch (docs/06_patch_pipeline.md section 3).
-# `calibration_edit: true` on a change unlocks the calibration range only.
+# The last field is the per-change flag that unlocks the range, or None when
+# nothing unlocks it.  A flag unlocks exactly one range: `calibration_edit`
+# never opens the on-chip flash and `onchip_edit` never opens the calibration.
 FORBIDDEN = (
-    (0x000000, 0x010000, "boot block and immobiliser pairing", False),
-    (0x1C0000, 0x1E0000, "stock calibration", True),
-    (0x400000, 0x480000, "on-chip flash (not fully in our read)", False),
+    (0x000000, 0x010000, "boot block and immobiliser pairing", None),
+    (0x1C0000, 0x1E0000, "stock calibration", "calibration_edit"),
+    # The first 16 KB of the on-chip flash is genuinely absent from the dump
+    # (docs/02_memory_map.md section 2), so nothing can be written there.
+    (0x400000, 0x404000, "16 KB of on-chip flash that is not in our read", None),
+    # 0x404000-0x47FFFF *is* in our read (file 0x200000+) and is covered by the
+    # code descriptor table at file 0x0A0000, so a hook there re-checksums
+    # correctly.  It still needs an explicit flag, because it is the region
+    # that carries the KWP / flash-programming services and because whether
+    # KESSv2 writes it has not been demonstrated (docs/06 section 1).
+    (0x404000, 0x480000, "on-chip flash", "onchip_edit"),
 )
+# Ranges whose unlock flag leaves a warning on every apply, even when used
+# correctly: `flag -> text`.
+UNLOCK_WARNINGS = {
+    "onchip_edit": "writes the MPC561 on-chip flash (0x404000-0x47FFFF). The "
+                   "block checksums are handled, but a KESSv2 write of this "
+                   "region has not been demonstrated: read the image back and "
+                   "compare before trusting it.",
+}
 # Never changes, whatever the flags say.
 IDENT_START, IDENT_END = 0x1CEE20, 0x1CEE70      # CPU, end exclusive
 
@@ -71,26 +91,46 @@ def canonical_cpu(addr: int) -> int:
 
     The calibration is reachable as 0x1Cxxxx and as 0x5Cxxxx; a guard that only
     knew one of them would be trivial to walk around.
+
+    An address that no file offset backs (the missing 16 KB of on-chip flash,
+    RAM, the peripherals) has no canonical alias; it is returned unchanged so
+    that `check_region` can refuse it with a readable message instead of a
+    ValueError from med9lib.
     """
-    return m.file_to_cpu(m.cpu_to_file(addr))
+    try:
+        return m.file_to_cpu(m.cpu_to_file(addr))
+    except ValueError:
+        return addr
 
 
-def check_region(addr: int, size: int, calibration_edit: bool) -> None:
+def check_region(addr: int, size: int, change: dict | bool | None = None) -> list[str]:
+    """Refuse a change in a forbidden range; return the warnings it earns.
+
+    `change` is the change dict (its unlock flags are read from it).  A bare
+    bool is accepted for backwards compatibility and means `calibration_edit`.
+    """
+    if isinstance(change, bool) or change is None:
+        change = {"calibration_edit": bool(change)}
     lo = canonical_cpu(addr)
     hi = lo + size                                   # exclusive
-    for start, end, what, unlockable in FORBIDDEN:
+    warnings: list[str] = []
+    for start, end, what, flag in FORBIDDEN:
         if lo < end and hi > start:
-            if unlockable and calibration_edit:
+            if flag and change.get(flag):
+                if flag in UNLOCK_WARNINGS:
+                    warnings.append(f"change at {addr:#08x}+{size:#x} "
+                                    + UNLOCK_WARNINGS[flag])
                 continue
-            extra = "" if unlockable else " (not unlockable)"
+            extra = "" if flag else " (not unlockable)"
             raise ApplyError(
                 f"change at {addr:#08x}+{size:#x} lands in {start:#08x}-{end - 1:#08x}, "
                 f"the {what}{extra}"
-                + ("; add \"calibration_edit\": true to the change if that is "
-                   "really intended" if unlockable else ""))
+                + (f"; add \"{flag}\": true to the change if that is "
+                   "really intended" if flag else ""))
     if lo < IDENT_END and hi > IDENT_START:
         raise ApplyError(f"change at {addr:#08x}+{size:#x} touches the "
                          f"identification block {IDENT_START:#08x}-{IDENT_END - 1:#08x}")
+    return warnings
 
 
 def apply_patch(stock_path: Path, patch_dir: Path) -> tuple[bytearray, dict, list[str]]:
@@ -132,7 +172,7 @@ def apply_patch(stock_path: Path, patch_dir: Path) -> tuple[bytearray, dict, lis
         if old and len(old) != len(new):
             raise ApplyError(f"change #{i} at {addr:#08x}: old is {len(old)} B "
                              f"but new is {len(new)} B")
-        check_region(addr, len(new), bool(ch.get("calibration_edit")))
+        warnings.extend(check_region(addr, len(new), ch))
         off = m.cpu_to_file(addr)
         if old:
             there = bytes(data[off:off + len(old)])
