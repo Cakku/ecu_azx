@@ -310,14 +310,14 @@ it reads inherits a candidate FR label.
 > more, because **`enumerate_maps.py` writes `name_or_blank` empty on every
 > regeneration**, so anything added to the draft by hand is lost the next time
 > the detector runs. The hand knowledge lives in the sidecar
-> `re/calibration_names.csv` (117 objects with unit, scale, offset, FR module
+> `re/calibration_names.csv` (157 objects with unit, scale, offset, FR module
 > and two confidence tags), which `tools/draft_to_xdf.py` merges on `addr`; the
 > 78 draft names are duplicated there and a test asserts the two never
 > disagree. The sidecar also corrects the shape of the six `KFPRSOL*` maps,
 > whose `x_n`/`y_n` §5 leaves empty because the row length comes from a memory
 > load. See `re/README.md` and `re/findings/calibration_names.md`.
 >
-> The statement that **no scaling is applied** is also superseded: 92 objects
+> The statement that **no scaling is applied** is also superseded: 98 objects
 > now carry a physical conversion, each tagged with how sure we are of it.
 > Everything else is still `equation="X"`.
 

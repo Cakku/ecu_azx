@@ -17,16 +17,16 @@ bytes of the dump with `tools/med9lib.py`.
 
 | | before | after |
 |---|---|---|
-| objects with a name | 78 | **117** |
-| … tagged `static` | 54 | 16 |
-| … tagged `hypothesis` | 24 | 101 |
-| objects with a unit | 0 | **111** |
-| objects with a non-identity scale on the value or an axis | 0 | **92** |
-| … scaling tagged `static` | — | 103 |
-| … scaling tagged `hypothesis` | — | 14 |
+| objects with a name | 78 | **157** |
+| … tagged `static` | 54 | 24 |
+| … tagged `hypothesis` | 24 | 133 |
+| objects with a unit | 0 | **146** |
+| objects with a non-identity scale on the value or an axis | 0 | **98** |
+| … scaling tagged `static` | — | 118 |
+| … scaling tagged `hypothesis` | — | 39 |
 
-By kind: 48 scalars, 25 `map_2d_data`, 14 `map_2d_shared`, 10
-`curve_1d_shared`, 10 axes, 5 `map_2d`, 5 `curve_1d`.
+By kind: 82 scalars, 25 `map_2d_data`, 17 `map_2d_shared`, 10
+`curve_1d_shared`, 10 axes, 8 `map_2d`, 5 `curve_1d`.
 
 **The `static` count went down on purpose.** The draft had one `confidence`
 column doing two jobs, and waves B6-B9 used it for both: `KFZW` was `static`
@@ -37,7 +37,7 @@ confidence in the *object* stays in the draft, and two new columns judge the
 `hypothesis` here even when the map behind it is fully understood; it becomes
 `static` only when the role is read out of the disassembly **and** the FR
 declares exactly one label with that role and matching axes. Nothing was
-un-learned — 103 of the 117 rows carry a `static` scaling, which is the number
+un-learned — 118 of the 157 rows carry a `static` scaling, which is the number
 that says how much of this is real.
 
 ## 1. Where the knowledge lives now
