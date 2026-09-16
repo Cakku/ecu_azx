@@ -62,7 +62,7 @@ every finding for the same reason.
 The hardware-dependent leftovers of wave B were collected into #44 (confirm
 by logging) and #45 (bench edits).
 
-## Wave C — startable now, two at a time
+## Wave C — done (merged 5c5123a)
 
 | Pair | Brief | Issues | Produces |
 |---|---|---|---|
@@ -75,7 +75,7 @@ C1 and C2 are independent (C1 uses a placeholder RAM address if C2 is not
 merged yet). C3 and C4 are independent of each other and of pair 1; C3 picks
 up C2's `ram_snapshot.json` and C1's counter address if they are merged.
 
-## Wave D — after wave C is merged
+## Wave D — startable now (wave C merged 5c5123a); D1 + D3 first, D2 after D1
 
 | Order | Brief | Issues | Needs |
 |---|---|---|---|
@@ -83,9 +83,20 @@ up C2's `ram_snapshot.json` and C1's counter address if they are merged.
 | 2 | [D2 Diagnostics and persistence](D2_diagnostics_and_persistence.md) | #39 #38 | D1 merged |
 | any | [D3 Calibration definition](D3_calibration_definition.md) | #41 | alone on `re/calibration_draft.csv`; a filler when only one slot is in use |
 
+While D1 and D3 run in parallel, **D3 owns `re/calibration_draft.csv`**: D1
+does not edit it and instead delivers its FFCAL001 descriptor rows in
+`patches/ff_fuel/ffcal001_rows.csv` (same columns), which the integrator
+appends at merge time. D1 also has to decide the periodic hook without the
+bench answer to the task-set question (C4 §11.7): hook the 10 ms tasks of
+both sets if the set-A twin 0x4328E4 offers an equally clean site, else keep
+the site a build parameter and document both.
+
 Still hardware-only (no brief): #1-#4, #22, #26-#28, #30-#31, #33, #45, the
 runtime half of #23 and #44, the generator test of #29, and the calibration
 work of #34-#36 (their code halves follow D1 once the E0 logs exist).
+Issue bookkeeping after wave C (2026-09-16): #25 closed; #27, #20, #44 have
+their completed rows ticked; #11 carries the period correction; no milestone
+is complete yet (every remaining Phase 2/3 item needs the bench).
 
 ## How to launch one
 
