@@ -115,6 +115,7 @@ class Known:
     tag: str
     source: str
     dynamic: bool = False               # written at run time, not statically
+    candidate: bool = False             # named, but believed free (see ram.md)
 
 
 # Every entry carries the file/finding it comes from.  Keep this table and
@@ -149,10 +150,12 @@ KNOWN = (
           "kernel stack descriptor 0x09B6F8 = {0x7FFFEC, 0x7FF770, 0x7FF730, "
           "0x7FF3C0, 0x36C}; app_entry_crt0 0x09E3C4 sets r1 = 0x7FF768 = "
           "0x7FF770-8 and the stack grows down; ram.md 4"),
-    Known(0x7FF770, 0x7FFFEC, "os_isr_stack_or_reserved", "HYPOTHESIS",
-          "same descriptor, first word 0x7FFFEC; the only region of internal "
-          "SRAM with no static reference at all -- second stack or reserve; "
-          "ram.md 4"),
+    Known(0x7FF770, 0x7FFFEC, "free_above_stack", "HYPOTHESIS",
+          "0x87C B above the stack top named by the same kernel descriptor "
+          "(first word 0x7FFFEC = top of OS RAM). Zero references of any kind, "
+          "no cold-start fill, and the memory-test descriptor 0x5C2E50 lists "
+          "it as testable while it excludes the stack and the kernel area. "
+          "RECOMMENDED patch RAM; ram.md 6", candidate=True),
     Known(0x7FFFF0, 0x800000, "r13_sda_anchor", "VERIFIED-STATIC",
           "r13 = 0x7FFFF0 (file 0x10E0, 0x986AC, 0x9E3E0, 0x405588)"),
     # External SRAM.
@@ -170,6 +173,249 @@ KNOWN = (
           "the same copy overruns 0x807FFF; with a 32 KB part the CS1 window "
           "aliases 0x808000-0x808687 onto 0x800000-0x800687", dynamic=True),
 )
+
+
+# ------------------------------------------------- indexed-region hunt (task 2)
+# A base address that a `lis`+`addi` pair puts in a register names one byte in
+# the survey, but the code usually walks a whole structure from it.  This is a
+# small forward abstract interpreter over the owning function: it tracks the
+# integer value of every register it can, and reports the largest offset the
+# code reaches from the base, either as a constant displacement or as
+# loop_count * stride.  Calibrated on the two regions whose extent is known
+# independently: the KWP programming copy to 0x804800 (0x3E88 B, from its flash
+# source bounds) and `can_rx_shadow` 0x803EE4 (22 x 12 B, from can.md 4).
+
+X_LOAD = {23: 4, 55: 4, 87: 1, 119: 1, 279: 2, 311: 2, 343: 2, 375: 2}
+X_STORE = {151: 4, 183: 4, 215: 1, 247: 1, 407: 2, 439: 2}
+
+
+@dataclass
+class Extent:
+    base: int
+    site: int
+    max_disp: int = 0          # largest constant displacement reached, + width
+    loop_bytes: int = 0        # loop_count * stride, when both are known
+    indexed: bool = False      # an X-form access whose index is not a constant
+    neighbour: int = 0         # bytes to the next statically referenced byte
+    note: str = ""
+
+    @property
+    def size(self) -> int:
+        return max(self.max_disp, self.loop_bytes)
+
+    @property
+    def tag(self) -> str:
+        if self.loop_bytes:
+            return "indexed region (extent HYPOTHESIS, loop-bounded)"
+        if self.indexed:
+            return "indexed region (extent UNBOUNDED, <= neighbour)"
+        return "indexed region (extent HYPOTHESIS, displacement-bounded)"
+
+
+def _const_step(regs: dict, w: int) -> None:
+    """Apply one instruction to the constant-register map (best effort).
+
+    Field names follow the PowerPC book: for D-form ``rt`` is bits 6:10 (D or
+    S) and ``ra`` is bits 11:15; for the X-form logical/shift instructions the
+    *destination* is ``ra`` and the source is ``rt``.
+    """
+    op = w >> 26
+    rt, ra, rb = (w >> 21) & 0x1F, (w >> 16) & 0x1F, (w >> 11) & 0x1F
+    if op == 15:                                             # lis / addis
+        v = (w & 0xFFFF) << 16
+        if ra == 0:
+            regs[rt] = v
+        elif ra in regs:
+            regs[rt] = regs[ra] + v
+        else:
+            regs.pop(rt, None)
+        return
+    if op == 14:                                             # addi / li
+        if ra == 0:
+            regs[rt] = exts16(w & 0xFFFF)
+        elif ra in regs:
+            regs[rt] = regs[ra] + exts16(w & 0xFFFF)
+        else:
+            regs.pop(rt, None)
+        return
+    if op == 7:                                              # mulli rD,rA,SIMM
+        if ra in regs:
+            regs[rt] = regs[ra] * exts16(w & 0xFFFF)
+        else:
+            regs.pop(rt, None)
+        return
+    if op == 24:                                             # ori rA,rS,UIMM
+        if rt in regs:
+            regs[ra] = regs[rt] | (w & 0xFFFF)
+        else:
+            regs.pop(ra, None)
+        return
+    if op == 21:                                             # rlwinm rA,rS,SH,MB,ME
+        sh, mb, me = rb, (w >> 6) & 0x1F, (w >> 1) & 0x1F
+        if rt in regs and me == 31 and mb == 32 - sh and sh:  # srwi rA,rS,32-SH
+            regs[ra] = (regs[rt] & 0xFFFFFFFF) >> (32 - sh)
+        else:
+            regs.pop(ra, None)
+        return
+    if op == 31:
+        xo = (w >> 1) & 0x3FF
+        if xo == 444:                                        # or rA,rS,rB (mr)
+            if rt == rb and rt in regs:
+                regs[ra] = regs[rt]
+            elif rt in regs and rb in regs:
+                regs[ra] = regs[rt] | regs[rb]
+            else:
+                regs.pop(ra, None)
+            return
+        if xo in (40, 40 | 512):                             # subf rD,rA,rB
+            if ra in regs and rb in regs:
+                regs[rt] = regs[rb] - regs[ra]
+            else:
+                regs.pop(rt, None)
+            return
+        if xo in (266, 266 | 512):                           # add rD,rA,rB
+            if ra in regs and rb in regs:
+                regs[rt] = regs[ra] + regs[rb]
+            else:
+                regs.pop(rt, None)
+            return
+        if xo == 824:                                        # srawi rA,rS,SH
+            if rt in regs:
+                regs[ra] = regs[rt] >> rb
+            else:
+                regs.pop(ra, None)
+            return
+        if xo == 202:                                        # addze rD,rA
+            if ra in regs:
+                regs[rt] = regs[ra]
+            else:
+                regs.pop(rt, None)
+            return
+        if xo in (235, 235 | 512, 75):                       # mullw / mulhw
+            if ra in regs and rb in regs:
+                regs[rt] = regs[ra] * regs[rb]
+            else:
+                regs.pop(rt, None)
+            return
+        if xo in (0, 32, 467, 512, 4):        # cmp/cmpl/mtspr/mcrxr/tw: no GPR
+            return
+        if xo in X_STORE:                                    # stores write no GPR
+            return
+        regs.pop(rt, None)
+        return
+    if op in LOADS or op in STORES:
+        if op in LOADS:
+            regs.pop(rt, None)
+
+
+def hunt_extent(data: bytes, base: int, site: int, window: int = 96) -> Extent:
+    """Walk forward from the instruction at `site` that produced `base`."""
+    ex = Extent(base=base, site=site)
+    try:
+        fo = m.cpu_to_file(site)
+    except ValueError:
+        return ex
+    w0 = struct.unpack_from(">I", data, fo)[0]
+    holder = (w0 >> 21) & 0x1F                # register that now holds `base`
+    off = {holder: 0}                         # reg -> offset from base
+    regs: dict = {}                           # reg -> absolute constant
+    ctr = None
+    # Prime the constant map from the instructions before the site: loop counts
+    # are usually computed before the destination pointer is formed.
+    back = min(window, fo // 4)
+    for i in range(back, 0, -1):
+        try:
+            regs_w = struct.unpack_from(">I", data, fo - 4 * i)[0]
+        except struct.error:
+            break
+        _const_step(regs, regs_w)
+    for i in range(1, window + 1):
+        try:
+            w = struct.unpack_from(">I", data, fo + 4 * i)[0]
+        except struct.error:
+            break
+        op = w >> 26
+        rt, ra, rb = (w >> 21) & 0x1F, (w >> 16) & 0x1F, (w >> 11) & 0x1F
+        if op == 19:                                       # blr / bctr / rfi
+            xo = (w >> 1) & 0x3FF
+            if xo in (16, 528) and not (w & 1):
+                break
+        if op == 31 and ((w >> 1) & 0x3FF) == 50:
+            break
+        if op == 18 and (w & 1):                           # bl: volatiles die
+            for r in range(3, 13):
+                off.pop(r, None)
+                regs.pop(r, None)
+            _const_step(regs, w)
+            continue
+        if op == 31 and ((w >> 1) & 0x3FF) == 467 and ((w >> 11) & 0x3FF) == 0x120:
+            ctr = regs.get(rt)                             # mtctr rS
+        # offset propagation
+        if op == 14 and ra in off:                         # addi rD,rBase,k
+            off[rt] = off[ra] + exts16(w & 0xFFFF)
+        elif op == 31 and ((w >> 1) & 0x3FF) == 444 and rt == rb and rt in off:
+            off[ra] = off[rt]                              # mr rA,rS
+        elif op == 31 and ((w >> 1) & 0x3FF) == 266 and ra in off:
+            off[rt] = off[ra]                              # add rD,rBase,rIdx
+            ex.indexed = True
+        # memory accesses
+        got = access_kind(op, rt) if op in LOADS or op in STORES else None
+        if got and ra in off:
+            _kind, width = got
+            d = off[ra] + exts16(w & 0xFFFF)
+            ex.max_disp = max(ex.max_disp, d + width)
+            if op in (33, 35, 37, 39, 41, 43, 45):          # update forms
+                stride = exts16(w & 0xFFFF)
+                off[ra] = off[ra] + stride
+                if ctr and stride > 0:
+                    ex.loop_bytes = max(ex.loop_bytes, ctr * stride)
+        if op == 31:
+            xo = (w >> 1) & 0x3FF
+            if xo in X_STORE or xo in X_LOAD:
+                if ra in off or rb in off:
+                    ex.indexed = True
+        _const_step(regs, w)
+        if op == 14 and ra in off:                         # keep addi in regs
+            regs.pop(rt, None)
+    return ex
+
+
+def referenced(s: Survey, addr: int) -> bool:
+    i = addr - RAM_LO
+    return bool(s.read[i] or s.write[i] or s.addr[i] or s.aread[i]
+                or s.awrite[i] or s.aaddr[i] or s.ptr[i] or s.ptrcal[i])
+
+
+def neighbour_bound(s: Survey, base: int) -> int:
+    """Distance from `base` to the next *other* statically referenced byte.
+
+    A contiguous structure starting at `base` cannot be longer than this
+    without overlapping something the code already names, so it is a hard
+    upper bound on an otherwise unbounded indexed region.
+    """
+    a = base + 1
+    while a < RAM_HI and not referenced(s, a):
+        a += 1
+    return a - base
+
+
+def indexed_bases(data: bytes, s: Survey, min_sites: int = 1) -> list:
+    """Every RAM base formed by an absolute lis+addi, with its bounded extent."""
+    out = []
+    for target, lst in s.sites.items():
+        sites = [a for a, _mn, kind, how in lst if how == "abs" and kind == "addr"]
+        if len(sites) < min_sites:
+            continue
+        best = None
+        for site in sites:
+            ex = hunt_extent(data, target, site)
+            if best is None or ex.size > best.size or (ex.indexed and not best.indexed):
+                best = ex
+        best.neighbour = neighbour_bound(s, target)
+        best.note = f"{len(sites)} lis+addi site(s)"
+        out.append(best)
+    out.sort(key=lambda e: e.base)
+    return out
 
 
 # --------------------------------------------------------------- the scanners
@@ -277,28 +523,83 @@ def scan_pointers(data: bytes, s: Survey) -> list:
     return hits
 
 
-# Start-up / memory-test coverage, from disassembly and the descriptor lists at
-# 0x5C2E14 / 0x5C2E24 / 0x5C2E50 / 0x5C2E78 (re/findings/eeprom.md 6).
-INIT_RANGES = (
-    (0x7F802C, 0x7F807C, "crt0 zero loop 1 (executed)"),
-    (0x7F8080, 0x7F80E8, "crt0 zero loop 2 (executed)"),
-    (0x7F8104, 0x7F8234, "memtest descriptor 0x5C2E14 (no consumer found)"),
-    (0x7F8104, 0x7F8369, "memtest descriptor 0x5C2E24 (no consumer found)"),
-    (0x7FAAD0, 0x7FE0BD, "memtest descriptor 0x5C2E50 (no consumer found)"),
-    (0x7FF770, 0x7FFFED, "memtest descriptor 0x5C2E50 (no consumer found)"),
-    (0x7F8490, 0x7FAAC1, "memtest descriptor 0x5C2E50 (no consumer found)"),
-    (0x800000, 0x807FF9, "memtest descriptor 0x5C2E78 (no consumer found)"),
+# Every RAM range the cold-start path fills with a constant, with the function
+# that does it.  Derived by walking the 160 functions reachable from
+# `app_entry_crt0` (0x09E3B4) and extracting the `lis`+`addi` bounds of each
+# `stwu rV,4(rP)` / `bdnz` fill loop; see re/findings/ram.md section 3.
+# CORRECTION to re/findings/eeprom.md section 6: the external SRAM *is*
+# cleared, from 0x800004 to 0x80498F.
+COLDSTART_FILLS = (
+    (0x7F802C, 0x7F807C, "app_entry_crt0 0x09E3B4 @ 0x09E3D0"),
+    (0x7F8080, 0x7F80E8, "app_entry_crt0 0x09E3B4 @ 0x09E410"),
+    (0x7F80EC, 0x7F80FC, "FUN_0012C25C @ 0x12C348"),
+    (0x7F8104, 0x7F8233, "app_init 0x04CCD4 @ 0x04CD8C"),
+    (0x7F8490, 0x7FA630, "app_init 0x04CCD4 @ 0x04CF94"),
+    (0x7FA630, 0x7FAAC0, "app_init 0x04CCD4 @ 0x04CFCC"),
+    (0x7FAAC4, 0x7FB330, "app_init 0x04CCD4 @ 0x04CEDC"),
+    (0x7FB330, 0x7FDA90, "app_init 0x04CCD4 @ 0x04CDC4"),
+    (0x7FDA90, 0x7FE0C0, "ram_clear_block 0x06D8F8 @ 0x06DAC0"),
+    (0x7FE588, 0x7FEFE0, "app_init 0x04CCD4 @ 0x04CDFC"),
+    (0x7FF3C0, 0x7FF76C, "FUN_0012C25C @ 0x12C40C (the task stack)"),
+    (0x800004, 0x800D08, "app_init 0x04CCD4 @ 0x04CF1C"),
+    (0x800D08, 0x803620, "ram_clear_block 0x06D8F8 @ 0x06DB24"),
+    (0x803620, 0x804990, "ram_clear_block 0x06D8F8 @ 0x06DB88"),
+)
+
+# The four start/end lists at 0x5C2E14 / 0x5C2E24 / 0x5C2E50 / 0x5C2E78 with
+# the 0xAAAAAAAA / 0x55555555 patterns.  No instruction reads them
+# (re/findings/eeprom.md 6); kept for reference only, they are NOT counted as
+# coverage.
+MEMTEST_DESCRIPTORS = (
+    (0x7F8104, 0x7F8234, "0x5C2E14"),
+    (0x7F8104, 0x7F8369, "0x5C2E24"),
+    (0x7FAAD0, 0x7FE0BD, "0x5C2E50"),
+    (0x7FF770, 0x7FFFED, "0x5C2E50"),
+    (0x7F8490, 0x7FAAC1, "0x5C2E50"),
+    (0x800004, 0x807FF9, "0x5C2E78"),
 )
 
 
 def scan_init(s: Survey) -> None:
-    for lo, hi, _why in INIT_RANGES:
+    for lo, hi, _why in COLDSTART_FILLS:
         for a in range(max(lo, RAM_LO), min(hi, RAM_HI)):
             s.init[a - RAM_LO] = 1
 
 
-def known_at(addr: int) -> list:
-    return [k for k in KNOWN if k.start <= addr < k.end]
+def scan_measuring_vars(s: Survey, path: str) -> int:
+    """Mark the RAM cells of `re/measuring_vars.csv` (A3, issue #20).
+
+    A measuring variable is read by the KWP 0x21 handlers through a table, so
+    the cell may have no ordinary reference of its own; treat every cell as
+    used.  Missing file = skip (the scan is still valid, just less complete).
+    """
+    n = 0
+    try:
+        fh = open(path, encoding="utf-8")
+    except OSError:
+        return -1
+    with fh:
+        header = fh.readline()
+        if "ram_addr" not in header:
+            return -1
+        for line in fh:
+            parts = line.split(",")
+            if len(parts) < 3:
+                continue
+            try:
+                addr = int(parts[1], 16)
+                size = max(int(parts[2]), 1)
+            except ValueError:
+                continue
+            if RAM_LO <= addr < RAM_HI:
+                s.bump(s.addr, addr, size)
+                n += 1
+    return n
+
+
+def known_at(addr: int, blocking_only: bool = False) -> list:
+    return [k for k in KNOWN if k.start <= addr < k.end
+            and not (blocking_only and k.candidate)]
 
 
 # ------------------------------------------------------------------- reporting
@@ -363,7 +664,8 @@ def free_runs(s: Survey, min_len: int = 16) -> list:
     for a in range(RAM_LO, RAM_HI):
         i = a - RAM_LO
         used = (s.read[i] or s.write[i] or s.addr[i] or s.aread[i] or s.awrite[i]
-                or s.aaddr[i] or s.ptr[i] or s.ptrcal[i] or known_at(a))
+                or s.aaddr[i] or s.ptr[i] or s.ptrcal[i]
+                or known_at(a, blocking_only=True))
         if not used and start is None:
             start = a
         elif used and start is not None:
@@ -385,6 +687,15 @@ def main(argv=None) -> int:
     ap.add_argument("--runs", type=int, default=12, help="how many free runs to print")
     ap.add_argument("--min-run", type=lambda v: int(v, 0), default=16,
                     help="shortest free run to report (default 16)")
+    ap.add_argument("--measuring-vars", default="re/measuring_vars.csv",
+                    help="CSV of measuring-variable RAM cells to mark as used")
+    ap.add_argument("--indexed", action="store_true",
+                    help="hunt indexed/auto-increment regions from every "
+                         "lis+addi RAM base (task 2 of brief C2)")
+    ap.add_argument("--indexed-min", type=lambda v: int(v, 0), default=0x10,
+                    help="only print extents of at least this many bytes")
+    ap.add_argument("--base", type=lambda v: int(v, 0), action="append",
+                    help="restrict --indexed to these bases (repeatable)")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)
 
@@ -394,10 +705,37 @@ def main(argv=None) -> int:
     n_abs = scan_absolute(data, s)
     ptrs = scan_pointers(data, s)
     scan_init(s)
+    n_mv = scan_measuring_vars(s, args.measuring_vars)
 
     rows = line_rows(s, args.line)
     runs = free_runs(s, args.min_run)
     runs_sorted = sorted(runs, key=lambda r: r[1] - r[0], reverse=True)
+
+    if args.indexed:
+        want = set(args.base) if args.base else None
+        print("# indexed-region hunt: every RAM base built by an absolute "
+              "lis+addi, with\n# the largest offset the owning code reaches "
+              "from it.  Heuristic: the walk\n# is linear, so a loop count "
+              "taken from the wrong side of a branch can be\n# off by one "
+              "iteration.  Calibration: 0x804800 -> 0x3E80 (true 0x3E88).")
+        print("# Only bases followed by unreferenced space matter for "
+              "placement, so the\n# default listing is sorted by the "
+              "neighbour bound (the free run that starts\n# just after the "
+              "base).  A base with a large neighbour bound AND a non-zero\n"
+              "# extent is a region that reaches into that free run.")
+        print("%-10s %-10s %-8s %-10s %s"
+              % ("base", "site", "extent", "neighbour", "kind / note"))
+        found = indexed_bases(data, s)
+        found.sort(key=lambda e: e.neighbour, reverse=True)
+        for ex in found:
+            if want is not None and ex.base not in want:
+                continue
+            if want is None and ex.neighbour < args.indexed_min:
+                continue
+            print("0x%06X 0x%06X %-8s %-10s %s  [%s]" % (
+                ex.base, ex.site, "0x%X" % ex.size, "0x%X" % ex.neighbour,
+                ex.tag, ex.note))
+        return 0
 
     if not args.quiet:
         print(f"# ram_survey {args.image}")
@@ -408,6 +746,8 @@ def main(argv=None) -> int:
         n_cal = sum(1 for _s, _v, k in ptrs if k == "cal")
         print(f"# pointer words in flash       : {len(ptrs)} "
               f"({len(ptrs) - n_cal} in code, {n_cal} in the calibration block)")
+        print(f"# measuring-variable cells      : "
+              f"{n_mv if n_mv >= 0 else 'not loaded (' + args.measuring_vars + ')'}")
         touched = sum(1 for i in range(RAM_SIZE)
                       if s.read[i] or s.write[i] or s.addr[i] or s.aread[i]
                       or s.awrite[i] or s.aaddr[i] or s.ptr[i] or s.ptrcal[i])
@@ -422,9 +762,44 @@ def main(argv=None) -> int:
         for k in range(0, len(pm), 64):
             print(f"  0x{RAM_LO + k * PAGE:06X}  {pm[k:k + 64]}")
         print()
-        print(f"longest reference-free runs (>= {args.min_run} B):")
+        print(f"longest reference-free runs (>= {args.min_run} B); `prev` is the "
+              f"last referenced\nbyte before the run and the extent its owner "
+              f"reaches -- a run inside that\nextent is an indexed array, not "
+              f"free space:")
         for lo, hi in runs_sorted[:args.runs]:
-            print(f"  0x{lo:06X}-0x{hi - 1:06X}  {hi - lo:6d} B")
+            prev = lo - 1
+            while prev > RAM_LO and not referenced(s, prev):
+                prev -= 1
+            ex = None
+            for site, _mn, kind, how in s.sites.get(prev, []):
+                if how == "abs" and kind == "addr":
+                    cand = hunt_extent(data, prev, site)
+                    if ex is None or cand.size > ex.size:
+                        ex = cand
+            if ex is None:
+                info = "prev 0x%06X (no lis+addi base)" % prev
+            else:
+                reach = prev + ex.size
+                info = ("prev 0x%06X extent 0x%X -> 0x%06X%s"
+                        % (prev, ex.size, reach,
+                           "  ** COVERS THIS RUN **" if reach > lo else ""))
+            print(f"  0x{lo:06X}-0x{hi - 1:06X}  {hi - lo:6d} B   {info}")
+        print()
+        print("cold-start constant fills (evidence in re/findings/ram.md 3):")
+        for lo, hi, why in COLDSTART_FILLS:
+            print(f"  0x{lo:06X}-0x{hi - 1:06X}  {hi - lo:6d} B   {why}")
+        gaps, a = [], RAM_LO
+        covered = sorted(COLDSTART_FILLS)
+        for lo, hi, _ in covered:
+            if lo > a:
+                gaps.append((a, lo))
+            a = max(a, hi)
+        if a < RAM_HI:
+            gaps.append((a, RAM_HI))
+        print("NOT filled at cold start (undefined at power-on):")
+        for lo, hi in gaps:
+            if hi - lo >= 4:
+                print(f"  0x{lo:06X}-0x{hi - 1:06X}  {hi - lo:6d} B")
         print()
         print("known structures:")
         for k in sorted(KNOWN, key=lambda k: k.start):
