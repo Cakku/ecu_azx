@@ -1,5 +1,10 @@
 # ff_fuel bench and car procedure (issues #32 and #37)
 
+> **2026-09-16 (brief D2).** The diagnostics half of the patch — VCDS
+> measuring block **111** (#39) and the E% store in EEP_CONF block 8
+> (#38) — has its own procedure in [`procedure_d2.md`](procedure_d2.md).
+> Run this file first: §1 and §2 here are its prerequisites.
+
 Written **before** any flash, as `docs/04_re_guidelines.md` §7 requires: what
 will be read, what the numbers must be, and what each outcome means. Nothing
 below has been run on an ECU. Every expectation here is a prediction from
