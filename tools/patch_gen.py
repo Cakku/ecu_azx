@@ -11,7 +11,18 @@ target symbol, encodes the branch word and rewrites `changes`:
                "blob": "build/ff_counter.bin", "sym": "build/ff_counter.sym",
                "hooks": [{"site": "0x12067C", "kind": "bl",
                           "target": "ff_counter_hook", "old": "4bffe9b1",
-                          "why": "..."}]}}
+                          "why": "..."}],
+               "data": [{"addr": "0x5E2510", "file": "build/ffcal001.bin",
+                         "expect_blank": true, "why": "..."},
+                        {"addr": "0x2BD8C", "bytes": "000000ec",
+                         "old": "000007ff", "why": "..."}]}}
+
+A `data` entry is a flat byte range that is not code: a new calibration block
+(`file`, built by the patch's own generator) or a small table edit (`bytes`).
+Its `old` is read from the stock image; `expect_blank` additionally asserts
+that the stock bytes are all 0xFF, and an explicit `old` is compared against
+what is really there.  Unlock flags (`calibration_edit`, `onchip_edit`) are
+copied through to the change so `tools/patch_apply.py` sees them.
 
 Branch encoding, I-form (docs/06, PowerPC UISA):
 
@@ -51,6 +62,10 @@ FREE_FLASH_END = 0x1B0000          # exclusive
 # On-chip + external SRAM (docs/02_memory_map.md section 3).
 RAM_START = 0x7F8000
 RAM_END = 0x808000                 # exclusive
+
+# Per-change flags that unlock a guarded region in tools/patch_apply.py; they
+# are declared on a hook or a data entry and copied into the change verbatim.
+UNLOCK_FLAGS = ("calibration_edit", "onchip_edit")
 
 BRANCH_KINDS = {                   # name -> (absolute, link)
     "b": (False, False),
@@ -196,14 +211,58 @@ def generate(patch_dir: Path, stock_path: Path = DEFAULT_STOCK) -> tuple[dict, l
         notes.append(f"hook {site:#08x}: {old_kind} {old_target:#08x} -> "
                      f"{kind} {target:#08x} ({target_name}), word "
                      f"{old.hex()} -> {word:08x}")
-        changes.append({
+        change = {
             "addr": f"{site:#08x}",
             "kind": "hook",
             "old": old.hex(),
             "new": f"{word:08x}",
             "why": hook.get("why") or
                    f"{old_kind} {old_target:#08x} -> {target_name} trampoline",
-        })
+        }
+        for flag in UNLOCK_FLAGS:
+            if hook.get(flag):
+                change[flag] = True
+        changes.append(change)
+
+    # --- one change per data block ---------------------------------------
+    for i, item in enumerate(build.get("data", [])):
+        addr = _int(item["addr"])
+        if "file" in item:
+            new = (patch_dir / item["file"]).read_bytes()
+        elif "bytes" in item:
+            new = bytes.fromhex(str(item["bytes"]))
+        else:
+            raise PatchError(f"data #{i} at {addr:#08x} has neither 'file' nor 'bytes'")
+        if not new:
+            raise PatchError(f"data #{i} at {addr:#08x} is empty")
+        off = m.cpu_to_file(addr)
+        old = bytes(stock[off:off + len(new)])
+        if len(old) != len(new):
+            raise PatchError(f"data #{i} at {addr:#08x}+{len(new):#x} runs past "
+                             f"the end of the dump")
+        if item.get("expect_blank") and set(old) != {0xFF}:
+            first = next(j for j, b in enumerate(old) if b != 0xFF)
+            raise PatchError(f"data #{i}: the stock image is not blank at "
+                             f"{addr + first:#08x} (found {old[first]:#04x})")
+        want_old = item.get("old")
+        if want_old is not None and old != bytes.fromhex(str(want_old)):
+            raise PatchError(f"data #{i} at {addr:#08x}: the stock bytes are "
+                             f"{old.hex()}, patch.json says {want_old}")
+        if old == new:
+            raise PatchError(f"data #{i} at {addr:#08x} writes what is already there")
+        change = {
+            "addr": f"{addr:#08x}",
+            "kind": "data",
+            "old": old.hex(),
+            "new": new.hex(),
+            "why": item.get("why") or f"{len(new)} B of patch data",
+        }
+        for flag in UNLOCK_FLAGS:
+            if item.get(flag):
+                change[flag] = True
+        changes.append(change)
+        notes.append(f"data {addr:#08x}: {len(new)} B"
+                     + (f" from {item['file']}" if "file" in item else ""))
 
     build["blob_size"] = len(blob)
     build["blob_sha256"] = hashlib.sha256(blob).hexdigest()
