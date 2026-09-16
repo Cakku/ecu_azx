@@ -17,13 +17,39 @@ A patch is a directory `patches/<name>/` with:
     {"addr": "0x150000", "old": "ff…", "new": "<blob>", "why": "code"} ] }
 ```
 
-- `src/*.c`, `patch.ld`, `Makefile` (or the Python driver) that produce the
-  blob and regenerate `patch.json`.
+- `src/*.c`, `src/*.S`, `Makefile` (three lines: `NAME` plus
+  `include ../common/patch.mk`) that produce the blob and regenerate
+  `patch.json`. The linker script is shared: `patches/common/patch.ld`.
 - `test/`: emulator unit test and the bench procedure with expected log lines.
 - `README.md`: what it does, hooks used, RAM used, calibration added.
 
 Applying a patch checks the old bytes, writes the new ones, recomputes
 checksums, verifies, and writes a diff report. Never edit the binary by hand.
+
+#### Added 2026-09-16 (brief C1, issue #25) — the `build` section
+
+`changes` is **generated, never hand-edited**: it has to agree with the
+compiler's output byte for byte. What a patch author writes is the `build`
+section; `tools/patch_gen.py` (or `make gen`) turns it into `changes`:
+
+```json
+{ "name": "ff_counter", "issue": 27, "base_sha256": "b15590d3…",
+  "requires": [], "ram_status": "placeholder",
+  "build": {
+    "flash": "0x00150000", "ram": "0x00807F00", "ram_size": 64,
+    "blob": "build/ff_counter.bin", "sym": "build/ff_counter.sym",
+    "hooks": [ {"site": "0x0012067C", "kind": "bl", "target": "ff_counter_hook",
+                "old": "4bffe9b1", "why": "…"} ] },
+  "changes": [ "…generated…" ] }
+```
+
+* `flash` / `ram` / `ram_size` are also what `patch.mk` passes to the linker,
+  so the descriptor and the placement cannot drift apart.
+* `hooks[].target` is resolved from the `.sym` file; `kind` is `b`, `bl`, `ba`
+  or `bla` and decides AA/LK.
+* `ram_status` is `verified`, `placeholder` or `example`. Anything but
+  `verified` makes `tools/patch_apply.py` print a do-not-flash warning.
+* `requires` is recorded but not yet enforced by any tool.
 
 ## 2. Build
 
@@ -50,6 +76,42 @@ ASSERT(SIZEOF(.data) == 0, "no initialised data allowed")
 
 Always disassemble `patch.bin` with `objdump -D -b binary -m powerpc:common
 -EB --adjust-vma=0x150000` and read it before injecting.
+
+#### Added 2026-09-16 (brief C1, issue #25) — the real build
+
+The skeleton above is now `patches/common/patch.ld`, shared by every patch and
+driven by `patches/common/patch.mk`:
+
+```bash
+cd patches/ff_counter && make check && make dump && make gen && make apply
+```
+
+Differences from the skeleton, each of them load-bearing:
+
+* **No `MEMORY` block and no defaults.** `PATCH_FLASH`, `PATCH_RAM` and
+  `PATCH_RAM_SIZE` are required `--defsym`s.
+  **Correction, VERIFIED-STATIC 2026-09-16:** the usual
+  `PATCH_RAM = DEFINED(PATCH_RAM) ? PATCH_RAM : <default>;` idiom does **not**
+  make `--defsym` an override in `ld.lld` 23.1.1. The script assignment wins
+  while addresses are computed and `--defsym` only rewrites the symbol table
+  afterwards, so the blob is linked at the default while the ELF claims
+  otherwise — a silent wrong answer. `patches/common/patch.ld` therefore
+  defines no defaults and an undefined `PATCH_*` fails the link.
+* `.rodata` is its own output section, and `.sdata`/`.srodata` are declared
+  only so that `ASSERT(SIZEOF(…) == 0)` can fail the link if they are not empty.
+* `/DISCARD/` must **not** contain `.got`/`.got2`/`.plt` (lld segfaults,
+  `03_tooling.md` §3.1), so `make check` compares the blob size with the
+  linker's `__patch_flash_size` instead — an orphan section in the binary is
+  caught by arithmetic rather than by hope.
+* `.bss` is `(NOLOAD)` and starts with `KEEP(*(.bss.patch_state))`, so a
+  patch's documented state block is at exactly `PATCH_RAM`.
+* `llvm-objdump` has no `-b binary`; use `make dump`
+  (`tools/blobdis.py --addr … --check-sda`).
+
+Trampolines come from `patches/common/hooks.S` (`HOOK_TAIL`, `HOOK_FULL`),
+stock addresses from the generated `patches/common/med9_stock.h`, integer types
+from `patches/common/types.h`. `patches/examples/hello_patch/` is the template
+to copy.
 
 ## 3. Placement policy
 
@@ -83,6 +145,21 @@ Register discipline in trampolines: preserve r0, r3-r12, CR, LR, CTR and XER
 as the hooked site expects (EABI volatile set); never touch r1 alignment,
 r2, r13, r14-r31 unless saved; no FP registers.
 
+Both trampolines are written once, in `patches/common/hooks.S` (2026-09-16,
+brief C1): `HOOK_FULL` saves that whole set in an 80-byte frame, and
+`HOOK_TAIL` saves only LR in a 16-byte frame for a site where the volatile set
+is provably dead — which is the case between two argument-less `bl` in a flat
+ERCOSEK raster task (`re/findings/scheduler.md` §7). Both end by
+tail-branching to the original target, so the stock call still happens and
+exactly one flash word changes.
+
+The tail branch is `ba` (AA=1), not `b`. **VERIFIED-STATIC 2026-09-16:** the
+GNU/LLVM PowerPC assembler reads a *numeric* branch operand as a
+**displacement**, so `b 0x0011F02C` assembles to 0x4811F02C — a branch to
+pc + 0x11F02C — and `.set` does not help; only a linker-resolved undefined
+symbol produces the intended relative word. `ba 0x0011F02C` (0x4811F02E) takes
+the target address literally and needs no relocation.
+
 ## 5. Verification steps for every build
 
 1. `checksum.py verify -q` -> `ALL OK (65 blocks)`.
@@ -98,10 +175,36 @@ r2, r13, r14-r31 unless saved; no FP registers.
 5. Disassembly of every hook site shows the intended instruction and target.
 6. For bench: expected log lines written down before flashing.
 
-The apply step itself (`patches/` and its driver, issue #5 / #23) does not
-exist yet. When it does, it must call `bindiff.diff(stock, patched, patch_json)`
-and refuse to write a file whose report has `ok == False`; the function returns
-`(ranges, report)` so the report can be stored next to the build.
+#### The apply step (added 2026-09-16, brief C1, issue #25)
+
+It exists now, and it is the only place an image is ever modified:
+
+```bash
+python3 tools/patch_apply.py data/passat_azx_ori.bin patches/ff_counter \
+        -o work/ff_counter.bin            # --dry-run, --json
+```
+
+It never touches its input, never writes to `data/`, and writes **nothing at
+all** unless every one of these passes:
+
+1. the stock file's SHA-256 matches `base_sha256`;
+2. no change lands in a forbidden region — 0x000000-0x00FFFF and
+   0x400000-0x47FFFF never, 0x1C0000-0x1DFFFF only if the change carries
+   `"calibration_edit": true`. The check folds every CPU alias to one
+   canonical address first, so the calibration cannot be reached through
+   0x5Cxxxx to get around it;
+3. every change's `old` bytes are really there (so a patched image is refused,
+   and so is the wrong base image);
+4. `checksum.fix` then `checksum.verify` -> ALL OK (65 blocks);
+5. the identification block 0x1CEE20-0x1CEE6F is byte-identical — this one
+   cannot be unlocked by any flag;
+6. `bindiff.diff(stock, patched, patch_json)` returns `report["ok"]`, i.e. every
+   changed byte is a listed change or a descriptor word.
+
+Outputs next to `-o`: `<name>.bin`, `<name>.diff.json` (the bindiff report kept
+with the build) and `<name>.sha256`. A patch whose `ram_status` is not
+`verified` produces a loud do-not-flash warning; that is the state
+`patches/ff_counter` is in until the RAM survey (#23) lands.
 
 ## 6. Flash and roll back
 

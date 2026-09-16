@@ -1,0 +1,48 @@
+{
+  "name": "ff_counter",
+  "issue": 27,
+  "description": "Flash 1: increment a u32 counter and write an alive pattern in the patch RAM block, once per task_100ms activation. No stock RAM, no calibration, no behaviour change.",
+  "base_sha256": "b15590d3f1874ace3125c5d047c09a686db9b8bb498187663539ebab205609b3",
+  "requires": [],
+  "ram_status": "placeholder",
+  "ram_status_note": "PENDING #23 / brief C2. 0x807F00 is KNOWN BAD, not merely unproven: FUN_0008A12C copies 0x3E88 bytes from flash 0x081A00 to RAM 0x804800 during a KWP programming session and the ECU then executes that copy (bl 0x806EA0 at 0x0861B0). 0x804800+0x3E88 = 0x808688, so 0x807F00 is inside the destination, 0x3700 bytes in. VERIFIED-STATIC 2026-09-16 by disassembling 0x08A12C and 0x0861B0 (brief C1, confirming brief C2). It survives here only because this brief was told to keep the placeholder until C2 merges, and because nothing may be flashed while ram_status is not 'verified'. ADOPT INSTEAD, from brief C2 / re/findings/ram.md: ram 0x007FFB00, ram_size 256 - inside 0x7FF770-0x7FFFEB, internal SRAM with no static reference, above the downward-growing task stack and outside the KWP protected window 0x7F9E3C-0x7FA47F. Verified on branch agent/C1 that this is a one-line change: the blob stays 96 bytes, make check passes, and the code addresses it absolutely as 'lis r3,0x80 ; addi r4,r3,-0x500' with no r13.",
+  "build": {
+    "flash": "0x00150000",
+    "ram": "0x00807F00",
+    "ram_size": 64,
+    "blob": "build/ff_counter.bin",
+    "sym": "build/ff_counter.sym",
+    "hooks": [
+      {
+        "site": "0x0012067C",
+        "kind": "bl",
+        "target": "ff_counter_hook",
+        "old": "4bffe9b1",
+        "why": "task_100ms (0x1205A0, TCB 23): bl clr_ram_7FE889_800E18 -> ff_counter_hook trampoline, which tail-branches back to 0x11F02C (re/findings/scheduler.md section 8)"
+      }
+    ],
+    "blob_size": 96,
+    "blob_sha256": "346c52a7d02f7f2dbf2e400e62b94dfa169893fecbbb28ea75fa2dfe8d1d8659",
+    "bss_size": 8,
+    "symbols": {
+      "ff_counter_hook": "0x150000"
+    }
+  },
+  "changes": [
+    {
+      "addr": "0x150000",
+      "kind": "blob",
+      "old": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "new": "9421fff07c0802a69001000c480000158001000c7c0803a6382100104811f02e3c60008038837f00a08400042804fc0141820020388000003ca0008094857f00b08500063c8000006084fc01b085000480837f003884000190837f004e800020",
+      "why": "ff_counter code and constants (96 B of free flash)"
+    },
+    {
+      "addr": "0x12067c",
+      "kind": "hook",
+      "old": "4bffe9b1",
+      "new": "4802f985",
+      "why": "task_100ms (0x1205A0, TCB 23): bl clr_ram_7FE889_800E18 -> ff_counter_hook trampoline, which tail-branches back to 0x11F02C (re/findings/scheduler.md section 8)"
+    }
+  ],
+  "generated_by": "tools/patch_gen.py"
+}
