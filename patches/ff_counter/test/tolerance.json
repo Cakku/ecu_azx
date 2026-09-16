@@ -1,0 +1,33 @@
+{
+  "_comment": [
+    "Tolerances for `tools/logcmp.py` on the stock-vs-Flash-1 comparison",
+    "(docs/06_patch_pipeline.md section 7). Flash 1 changes NOTHING the engine",
+    "can see, so every number below is pure run-to-run repeatability of the bench",
+    "scenario in procedure.md - not a budget the patch is allowed to spend.",
+    "",
+    "The variables are the stock ones of issue #44, named as in re/symbols.csv;",
+    "the FR name and the scaling are in the per-variable comments there. Log them",
+    "in the physical units of logging/README.md section 1, not in raw counts.",
+    "",
+    "ff_ticks and ff_alive are deliberately NOT listed: they exist only in the",
+    "Flash-1 log, so logcmp lists them as uncompared. Do not pass --strict to",
+    "this comparison, or that alone will fail it.",
+    "",
+    "These limits are a STARTING POINT derived from the signals' idle behaviour,",
+    "not from two recorded runs. Record two stock runs of the same scenario first",
+    "and tighten every line to what the ECU actually repeats (docs/05 E0 test);",
+    "a tolerance wider than the repeatability proves nothing."
+  ],
+  "default": { "max_abs": 1.0, "mean_abs": 0.5, "interp": "linear" },
+  "vars": {
+    "nmot_w":            { "max_abs": 60.0, "mean_abs": 20.0, "_unit": "rpm, 0.25/LSB, 0x7FEE74" },
+    "rl_for_fuel":       { "max_abs": 4.0,  "mean_abs": 1.0,  "_unit": "%, 100/4096, 0x7FED38" },
+    "ti_sum":            { "max_abs": 0.40, "mean_abs": 0.10, "_unit": "ms, 1 us/LSB, 0x8030C4" },
+    "tmot_w":            { "max_abs": 2.0,  "mean_abs": 0.8,  "_unit": "degC, 0x802228" },
+    "cand_mw_tmot":      { "max_abs": 2.0,  "mean_abs": 0.8,  "_unit": "degC, VCDS 001/2, 0x8021EF" },
+    "prist_w":           { "max_abs": 8.0,  "mean_abs": 2.0,  "_unit": "bar, 0.005/LSB, 0x8031DA; rail control ripple at idle dominates" },
+    "prsoll_w":          { "max_abs": 4.0,  "mean_abs": 1.0,  "_unit": "bar, 0.005/LSB, 0x8031F4" },
+    "zwist_display_b1":  { "max_abs": 3.0,  "mean_abs": 1.0,  "_unit": "degCA, 0.75/LSB, 0x7FEF87; the idle controller hunts" },
+    "dwi_inj_angle":     { "max_abs": 5.0,  "mean_abs": 2.0,  "_unit": "degCA, 0x803088" }
+  }
+}
