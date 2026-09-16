@@ -613,7 +613,7 @@ is bigger and differently shaped than section 4 records. Corrections:
   the on-chip tasks have a one-element list `{entry, 0x4764FC}` inline in the
   table, so their handle is row+8 and the anchor scan finds them. The other
   twelve tasks point at multi-process lists in external flash at
-  **0x0B1ED4-0x0B2A40** (up to 214 processes each), have no `0x4764FC` word
+  **0x0B1ED4-0x0B2A77** (up to 214 processes each), have no `0x4764FC` word
   in the table, and are therefore **missed by the anchor scan** — that is the
   whole of the "gaps before 0x4787DC and before 0x4789E8" that C2 recorded.
   `0x004764FC` is `os_TerminateTask`.
@@ -661,7 +661,7 @@ Their descriptors `{0, base, base}` are at `0x478F74` (A) and `0x479010` (B).
 
 ### 11.4 The slow rasters: alarm 1 and a chain of five dividers
 
-The **alarm callback vector** is at **0x478DF8** (kernel config +0xD8, which
+The **alarm callback vector** is at **0x478DF8** (kernel config +0x68, which
 becomes K+0x60); it has three entries:
 
 | Alarm | Callback | Armed by |
