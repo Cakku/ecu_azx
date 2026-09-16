@@ -23,8 +23,8 @@ document and `med9lib.py` together.
 | `r2_context.py` | Decides the SDA2 base (r2) of every function from the call graph and checks every r2-relative access against it: reports references that leave the SDA2 window, land outside a mapped region, or hit 0xFF filler. Evidence for issue #8. |
 | `sda_xref.py` | Whole-image cross-references. `--var LO [HI]` decodes every r2/r13-relative D-form load/store and prints the ones resolving into the range — the small-data accesses `callgraph.py --xref-store` cannot see. `--code ADDR...` prints every `b`/`bl` **site** targeting an address (not the enclosing function), so a flat ERCOSEK task body reads off directly. Used throughout `re/findings/rail.md` (issue #17). |
 | `gen_stock_header.py` | Generate `patches/common/med9_stock.h` (stock function / RAM addresses for patch code) from `re/symbols.csv`; `--check` fails the build when the checked-in header is stale. |
-| `patch_gen.py` | Turn a patch's `build` section into its `changes` list: resolve hook targets from the `.sym` file, encode the I-form branch words (reach and alignment checked), assert the stock bytes under the blob are 0xFF. `changes` is generated, never hand-edited. |
-| `patch_apply.py` | The only tool that modifies an image. Checks `base_sha256`, the forbidden regions and every `old`; writes the `new` bytes to a copy; fixes and verifies the checksums; proves the identification block is unchanged; requires a clean `bindiff`. Writes nothing if any of that fails. |
+| `patch_gen.py` | Turn a patch's `build` section into its `changes` list: resolve hook targets from the `.sym` file, encode the I-form branch words (reach and alignment checked), assert the stock bytes under the blob are 0xFF, and emit one change per `build.data` entry (a new calibration block from a file, or an inline table edit) with its `old` read from the stock image. `changes` is generated, never hand-edited. |
+| `patch_apply.py` | The only tool that modifies an image. Checks `base_sha256`, the forbidden regions and every `old`; writes the `new` bytes to a copy; fixes and verifies the checksums; proves the identification block is unchanged; requires a clean `bindiff`. Writes nothing if any of that fails. Guarded regions are unlocked per change by `calibration_edit` (0x1C0000-0x1DFFFF) or `onchip_edit` (0x404000-0x47FFFF, always warns); 0x000000-0x00FFFF, 0x400000-0x403FFF and the identification block are never unlockable. |
 | `ram_survey.py` | Per-byte static usage survey of the two SRAMs (0x7F8000-0x807FFF): r13 D-form accesses, absolute `lis`+D-form pairs, pointer words in both flash regions, measuring-variable cells, the cold-start fills and a table of known structures. Emits `re/ram_map.csv`, a 256-byte page map and the longest reference-free runs. `--indexed` bounds the arrays those runs usually belong to; `--stack` walks the deepest `stwu` chain from each task entry. `re/findings/ram.md`. |
 | `ercosek_tasks.py` | Brief C4 (#44). Decodes the whole ERCOSEK activation chain: the 37 task descriptors behind the ActivateTask thunk table (0x0B091C), both cyclic time tables (0x478EE4 / 0x478F80) and both raster divider chains (0x40BEF0 / 0x40C064), and prints every raster period in Time Base ticks and milliseconds. `--tasks`, `--timetable`, `--dividers`, `--periods`, `--json`. `re/findings/scheduler.md` section 11. |
 | `ram_snapshot_diff.py` | Compares the RAM snapshots taken over KWP RequestUpload and classifies every byte `changed` / `constant` / `blank`. The dynamic half of issue #23; ranges in `logging/sessions/ram_snapshot.json`, format in the module docstring, `--self-test` runs it on synthetic snapshots. |
@@ -67,8 +67,9 @@ python3 tools/patch_apply.py data/passat_azx_ori.bin patches/ff_counter \
 ```
 
 `patch_apply.py` refuses (and writes nothing) on a wrong `base_sha256`, an
-`old` that is not there, a change inside 0x000000-0x00FFFF, 0x400000-0x47FFFF
-or 0x1C0000-0x1DFFFF without `"calibration_edit": true`, a touched
+`old` that is not there, a change inside 0x000000-0x00FFFF or 0x400000-0x403FFF,
+inside 0x1C0000-0x1DFFFF without `"calibration_edit": true` or inside
+0x404000-0x47FFFF without `"onchip_edit": true`, a touched
 identification block, a failed checksum or an unexpected byte in the bindiff.
 A patch whose `"ram_status"` is not `"verified"` applies with a loud
 do-not-flash warning.

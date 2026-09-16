@@ -22,6 +22,9 @@ patches/
                          tools/gen_stock_header.py -- do not edit
   examples/hello_patch/  the template: copy this directory for a new patch
   ff_counter/            Flash 1, the no-op counter patch (issue #27)
+  ff_fuel/               the flex-fuel MVP (issues #32 / #37): the CAN slot, the
+                         OK/HOLD/FAULT machine and the rk scaling, plus the
+                         FFCAL001 calibration block its own ffcal001.py builds
 ```
 
 ## A new patch
@@ -29,8 +32,11 @@ patches/
 1. `cp -r patches/examples/hello_patch patches/<name>` and empty out `src/`.
 2. `Makefile`: `NAME := <name>` and `include ../common/patch.mk`.
 3. `patch.json`: `name`, `base_sha256`, `ram_status`, and the `build` section
-   (`flash`, `ram`, `ram_size`, `blob`, `sym`, `hooks`). Leave `changes` empty —
-   it is generated.
+   (`flash`, `ram`, `ram_size`, `blob`, `sym`, `hooks`, and `data` for flat byte
+   ranges that are not code — a new calibration block or a table edit). Leave
+   `changes` empty — it is generated. A change in a guarded region needs its
+   unlock flag: `calibration_edit` for 0x1C0000-0x1DFFFF, `onchip_edit` for the
+   on-chip flash 0x404000-0x47FFFF (docs/06 §1).
 4. Write `src/*.c` against `types.h` and `med9_stock.h`; one `HOOK_TAIL` or
    `HOOK_FULL` per hook in `src/*.S`. Need another stock address? Add its
    `re/symbols.csv` name to `WANTED` in `tools/gen_stock_header.py` and

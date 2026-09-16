@@ -38,6 +38,8 @@ import patch_gen  # noqa: E402
 PATCHES = REPO / "patches"
 HELLO = PATCHES / "examples" / "hello_patch"
 FF_COUNTER = PATCHES / "ff_counter"
+FF_FUEL = PATCHES / "ff_fuel"          # brief D1, #32; its own tests are in
+                                       # tests/test_ff_fuel_patch.py
 LLVM_DIR = Path(os.environ.get("LLVM_DIR",
                                "/Users/carlo/toolchains/LLVM-23.1.1-macOS-ARM64"))
 
@@ -113,6 +115,9 @@ class TestBuild(unittest.TestCase):
     def test_ff_counter_builds(self):
         self._check(FF_COUNTER)
 
+    def test_ff_fuel_builds(self):
+        self._check(FF_FUEL)
+
     def test_blob_has_no_sda_reference(self):
         """blobdis reads the raw bytes, not the ELF: the last check before flash."""
         make(FF_COUNTER, "all")
@@ -123,7 +128,7 @@ class TestBuild(unittest.TestCase):
 
     def test_patch_json_still_matches_a_fresh_build(self):
         """`changes` is generated; a stale patch.json must not survive a build."""
-        for patch_dir in (HELLO, FF_COUNTER):
+        for patch_dir in (HELLO, FF_COUNTER, FF_FUEL):
             with self.subTest(patch=patch_dir.name):
                 r = make(patch_dir, "all")
                 self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -306,6 +311,40 @@ class TestApply(DumpUnchanged):
     def test_the_on_chip_flash_is_refused(self):
         self.assertIn("on-chip flash", self._refuse(
             [{"addr": "0x41C3A0", "new": "60000000", "why": "rksplit"}]))
+
+    def test_the_on_chip_flash_needs_the_explicit_flag(self):
+        """D1 (#32): 0x404000-0x47FFFF *is* in our read and is checksummed, so
+        B6's fuel hook can be applied - but only with "onchip_edit", and the
+        apply always warns (docs/06 section 1, 2026-09-16)."""
+        stock = m.load_dump(str(DUMP))
+        site = 0x42247C                               # bl rksplit, injection.md 6.2
+        old = bytes(stock[m.cpu_to_file(site):m.cpu_to_file(site) + 4])
+        self.assertEqual(old.hex(), "4bff9f25")
+        ch = {"addr": f"{site:#08x}", "old": old.hex(), "new": "60000000",
+              "why": "brief B6's fuel hook site"}
+        self.assertIn("on-chip flash", self._refuse([dict(ch)]))
+        # calibration_edit must NOT open this range
+        self.assertIn("on-chip flash", self._refuse([dict(ch, calibration_edit=True)]))
+
+        patch = load_patch(FF_COUNTER)
+        patch["changes"] = [dict(ch, onchip_edit=True)]
+        p = self.tmp / "onchip_ok.json"
+        p.write_text(json.dumps(patch))
+        _data, report, warnings = patch_apply.apply_patch(DUMP, p)
+        self.assertTrue(report["ok"], report["issues"])
+        self.assertTrue(any("KESSv2" in w for w in warnings), warnings)
+
+    def test_the_missing_16k_of_on_chip_flash_can_never_be_written(self):
+        msg = self._refuse([{"addr": "0x400010", "new": "60000000",
+                             "onchip_edit": True, "calibration_edit": True,
+                             "why": "should be impossible"}])
+        self.assertIn("not in our read", msg)
+        self.assertIn("not unlockable", msg)
+
+    def test_onchip_edit_does_not_open_the_stock_calibration(self):
+        self.assertIn("stock calibration", self._refuse(
+            [{"addr": "0x5D2600", "new": "0102", "onchip_edit": True,
+              "why": "wrong flag"}]))
 
     def test_stock_calibration_needs_the_explicit_flag(self):
         # 0x5D2600 == file 0x1D2600, inside the guarded stock calibration

@@ -26,6 +26,10 @@
  * The leaf originally called from hook_site_100ms: li r12,0; stb r12,-0x1767(r13) (RAM 0x7FE889); */
 #define MED9_CLR_RAM_7FE889_800E18 0x0011F02C
 
+/* nop_leaf_bd9e4  [VERIFIED-STATIC, dump]  ext_flash, size 0x4
+ * An EMPTY function: one instruction, blr */
+#define MED9_NOP_LEAF_BD9E4        0x000BD9E4
+
 /* can_init_mb  [VERIFIED-STATIC, ghidra]  ext_flash, size 0x78
  * can_init_mb(rx_idx) */
 #define MED9_CAN_INIT_MB           0x00135750

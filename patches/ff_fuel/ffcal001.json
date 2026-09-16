@@ -1,0 +1,40 @@
+{
+  "_comment": [
+    "FFCAL001 parameters for patches/ff_fuel (brief D1, issue #32).",
+    "Build the block with:  ./.venv/bin/python3 patches/ff_fuel/ffcal001.py",
+    "",
+    "Every time constant is in PHYSICAL units and the patch converts it with",
+    "ff_tick_ms, the real period of the periodic hook (10 ms - C4, issue #44,",
+    "re/findings/scheduler.md section 11).  Move the hook to another raster and",
+    "this one value follows; nothing is rebuilt.",
+    "",
+    "null means 'use the built-in default': the F curve from the docs/05",
+    "section 3.3 formula, and the neutral values for the four tables the MVP",
+    "reserves but does not read yet."
+  ],
+
+  "version": 1,
+
+  "ff_can_id": 236,
+  "ff_timeout_ms": 1000,
+  "ff_hold_s": 60,
+  "ff_filter_tau_ms": 3000,
+  "ff_slew_pct_s": 2,
+  "ff_tick_ms": 10,
+
+  "ff_mode": 1,
+  "ff_e_override": 0,
+  "ff_stall_max": 3,
+
+  "ff_persist_enable": 0,
+  "ff_persist_hyst_pct": 5,
+  "ff_persist_block": 8,
+  "ff_persist_offset": 0,
+  "ff_persist_rate_s": 60,
+
+  "ff_F_curve": null,
+  "ff_fzw_curve": null,
+  "ff_dzw_map": null,
+  "ff_fst_map": null,
+  "ff_prail_add": null
+}
