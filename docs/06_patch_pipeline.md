@@ -37,7 +37,7 @@ Linker script skeleton:
 ```
 MEMORY {
   FLASH (rx) : ORIGIN = 0x00150000, LENGTH = 0x60000   /* free, all 0xFF, checksummed */
-  RAM   (rw) : ORIGIN = 0x00806000, LENGTH = 0x1000    /* placeholder until the RAM survey */
+  RAM   (rw) : ORIGIN = 0x007FFB00, LENGTH = 0x100     /* C2, issue #23, see section 3 */
 }
 SECTIONS {
   .text   : { KEEP(*(.text.entry)) *(.text*) *(.rodata*) } > FLASH
@@ -59,11 +59,54 @@ Always disassemble `patch.bin` with `objdump -D -b binary -m powerpc:common
 | Extra code if needed | 0x144954-0x14FFFF | tail of block 0x140000-0x14FFFF |
 | New calibration | 0x5E2510-0x5EFFFF | inside calibration block 0x5E0000-0x5EFFFF; addressed through the high alias like the rest of the calibration |
 | Never | 0x000000-0x00FFFF (boot, immobiliser pairing 0x6C00), 0x1C0000-0x1DFFFF (stock calibration, except deliberate map edits), 0x400000-0x47FFFF (on-chip flash: not fully in our read) | |
-| RAM | to be decided by the RAM survey; candidates are the top of external SRAM (0x8057xx-0x807FFF, no static references) and unused r13 gaps | a wrong choice corrupts adaptation values or the stack: survey first |
+| **RAM** | **0x7FFB00-0x7FFBFF (256 B)**, inside the reference-free internal-SRAM region 0x7FF770-0x7FFFEB | VERIFIED-STATIC that no instruction in the image names any byte of 0x7FF770-0x7FFFEB; **dynamic confirmation pending #23**. Address it absolutely (`lis`/`addi`), never through r13. Not cleared at cold start, so the patch needs a magic + checksum header. See below. |
 
 Branch reach: `b/bl` have ±32 MB range, so any placement is reachable with a
 single instruction. Code at 0x15xxxx addresses calibration with
 `lis 0x5E`, like the stock code.
+
+> **2026-09-16 (C2, issue #23) — the RAM row is decided (static half).**
+> Full derivation, evidence and the ranked alternatives:
+> `re/findings/ram.md`; the map is `re/ram_map.csv`
+> (`python3 tools/ram_survey.py data/passat_azx_ori.bin --csv re/ram_map.csv`).
+>
+> **Use `PATCH_RAM = 0x7FFB00`, `PATCH_RAM_SIZE = 0x100`** (brief C1's linker
+> script and `patches/common/`). The block is in the middle of
+> **0x7FF770-0x7FFFEB**, 2,172 bytes that carry no r13 displacement, no
+> absolute `lis`+D-form, no pointer word in either flash region and no
+> measuring-variable cell, and that lie **above** the task stack
+> (0x7FF3C0-0x7FF76F, which grows down). Rules that come with it:
+>
+> * **Address it absolutely.** `tools/blobdis.py --check-sda` fails on any
+>   reference to r2 or r13, base register included, so use
+>   `lis r11,0x80 ; addi r11,r11,-0x500`.
+> * **Initialise it.** The cold start does not fill 0x7FF770-0x7FFFEB, so the
+>   contents are undefined at power-on. Put a magic word, a length and a
+>   checksum at the head of the block and re-initialise on a mismatch. The
+>   linker script's `ASSERT(SIZEOF(.data) == 0)` stays: there is no
+>   initialised-data image for any RAM the patch uses.
+> * **Do not rely on retention.** Persist the ethanol estimate in the SPI
+>   EEPROM (`re/findings/eeprom.md` section 5, block 8 payload offset +0).
+>
+> **Two placements that the earlier version of this table suggested are now
+> refuted (VERIFIED-STATIC):**
+>
+> * *"the top of external SRAM, 0x8057xx-0x807FFF, no static references"* —
+>   0x804800-0x808687 is where `FUN_0008A12C` copies flash 0x081A00-0x085887
+>   (0x3E88 B) during a KWP programming session **and then executes it**
+>   (`bl 0x806EA0` at 0x0861B0). A patch writing there mid-session would
+>   corrupt the running flash driver. The tail also wraps: 0x808000-0x808687
+>   aliases onto 0x800000-0x800687 on a 32 KB CS1 part. And 0x805784 is the
+>   base of a live RAM dispatch table (0x1C-byte entries, function pointer at
+>   +0x18, called at 0x082C00).
+> * *"unused r13 gaps"* — every reference-free gap larger than 128 bytes
+>   inside the used `.bss` turned out to be the body of an array or buffer
+>   whose base is the last referenced byte before it
+>   (`ram_survey.py --indexed`). Do not take a gap in the map at face value.
+>
+> The external SRAM is **not** a retention area: `ram_clear_block` (0x06D8F8)
+> and `app_init` (0x04CCD4) zero 0x800004-0x80498F at every cold start. Only
+> 0x800000-0x800003 and the programming-copy area survive a reset.
 
 ## 4. Hook techniques
 

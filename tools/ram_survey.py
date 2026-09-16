@@ -702,8 +702,10 @@ def line_rows(s: Survey, line: int) -> list:
         ptrc = sum(s.ptrcal[i:i + line])
         ini = sum(s.init[i:i + line])
         names = sorted({k.name for a in range(base, base + line) for k in known_at(a)})
+        blocking = {k.name for a in range(base, base + line)
+                    for k in known_at(a, blocking_only=True)}
         refs = r13r + r13w + r13a + absr + absw + absa + ptr + ptrc
-        free = refs == 0 and not names
+        free = refs == 0 and not blocking
         rows.append({
             "start": base, "end": base + line - 1,
             "r13_read": r13r, "r13_write": r13w, "r13_addr": r13a,
