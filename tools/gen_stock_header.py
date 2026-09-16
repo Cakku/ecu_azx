@@ -33,6 +33,7 @@ HEADER = REPO / "patches" / "common" / "med9_stock.h"
 WANTED: tuple[tuple[str, str | None], ...] = (
     # functions
     ("clr_ram_7FE889_800E18", None),   # the leaf the Flash-1 hook tail-calls
+    ("nop_leaf_bd9e4", None),          # the empty leaf ff_fuel's set-A hook tail-calls
     ("can_init_mb", None),
     ("can_rx_poll", None),
     ("nvm_block_request", None),
