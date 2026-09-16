@@ -6,15 +6,17 @@ means. Nothing below has been run on an ECU — every expectation here is a
 prediction, and the log is what turns it into a fact.
 
 > **Do not flash the image built from the current `patch.json`.** Its RAM block
-> is the placeholder 0x807F00 (`"ram_status": "placeholder"`, PENDING #23).
-> Brief C2's RAM survey has to replace it first; `tools/patch_apply.py` prints
-> a warning saying so on every run.
+> is the placeholder 0x807F00, which brief C2 has since shown to be *inside*
+> the destination of the flash driver the ECU copies to 0x804800 and runs
+> during a programming session (README.md, PENDING #23). Brief C2's block
+> 0x7FFB00/0x100 has to replace it first; `tools/patch_apply.py` prints a
+> warning on every run while `"ram_status"` is not `"verified"`.
 
 ## 0. Prerequisites
 
 | Item | Status |
 |---|---|
-| RAM block proven unused across ignition cycles | **blocked on #23 / brief C2** |
+| RAM block proven unused across ignition cycles | **blocked on #23 / brief C2.** C2's static half proposes 0x7FFB00/0x100 and rules out the 0x807F00 placeholder; the dynamic half (RAM dumps across ignition cycles) is still outstanding |
 | A logger that can read arbitrary RAM (KWP2000 DDLI, service 0x2C + 0x21) | **blocked on #20**; the protocol itself is settled in `re/findings/kwp.md` sections 4 and 8 |
 | KESSv2 flashing checklist | `docs/04_re_guidelines.md` section 6, issue #26 |
 | A stock baseline log of the scenario in section 3 | record it *before* flashing |
@@ -53,8 +55,12 @@ loop:  21 F0  -> 61 F0 <t3 t2 t1 t0> <a1 a0>
 Notes from `kwp.md` that matter here: the DDLI address is 24-bit, which covers
 all of RAM; `<pos>` must be 1 for the first (and only) entry; there is **no
 0x23 readMemoryByAddress** in this firmware, so DDLI is the only way to read an
-arbitrary address at rate. Change `80 7F 00` to whatever `build.ram` says once
-brief C2 has replaced the placeholder.
+arbitrary address at rate.
+
+The address bytes are the last three of the request, so they follow
+`build.ram`: `80 7F 00` for the placeholder, **`7F FB 00`** once brief C2's
+block 0x7FFB00 is adopted. Read them out of `patch.json` rather than from here
+— this file will be wrong the day the block moves again.
 
 **Sanity checks, in this order:**
 

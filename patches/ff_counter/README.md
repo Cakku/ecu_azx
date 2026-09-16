@@ -5,18 +5,44 @@ point, the RAM allocation, the checksum pipeline and the logger *together*,
 while the engine behaves exactly as it did before: `ff_counter_tick()` touches
 nothing but its own 8-byte RAM block.
 
-> ## PENDING #23 — do not flash this build
-> `PATCH_RAM = 0x807F00` is a **placeholder**. It is above the highest static
-> reference into the external SRAM recorded so far (0x805784,
-> `docs/02_memory_map.md` §3), but "no static reference" is not "unused": the
-> RAM survey of issue #23 / brief **C2** has to confirm it across ignition
-> cycles first. `patch.json` carries `"ram_status": "placeholder"` and
-> `tools/patch_apply.py` prints a warning on every run.
+> ## PENDING #23 — do not flash this build, and do not reuse this address
+> `PATCH_RAM = 0x807F00` is the placeholder this brief was told to keep until
+> the RAM survey merges. **It is now known to be wrong, not merely unproven.**
 >
-> To adopt C2's answer: change `build.ram` (and `build.ram_size` if the block
-> is smaller than 0x40) in `patch.json`, set `"ram_status": "verified"` with the
-> evidence in `ram_status_note`, then `make gen && make apply`. Nothing else
-> changes — the addresses are not repeated anywhere else in the patch.
+> `FUN_0008A12C` copies 0x3E88 bytes from flash 0x081A00 to RAM **0x804800**
+> during a KWP programming session, and the ECU then *executes* that copy
+> (`bl 0x806EA0` at 0x0861B0). 0x804800 + 0x3E88 = 0x808688, so 0x807F00 sits
+> **inside the destination**, 0x3700 bytes in — a patch writing there while a
+> flash session runs would corrupt the running flash driver. Reported by brief
+> **C2** and confirmed here by disassembling 0x08A12C and 0x0861B0
+> (VERIFIED-STATIC, 2026-09-16). C2 also refutes the "top of external SRAM is
+> free" note in `docs/06_patch_pipeline.md` §3: 0x805784 is a live RAM dispatch
+> table called from 0x082C00.
+>
+> The address survives here only because C2 is not merged and this brief must
+> not build on an unmerged branch; nothing can be flashed while `ram_status` is
+> not `"verified"`, and `tools/patch_apply.py` says so on every run.
+>
+> **Adopt instead** (brief C2, `re/findings/ram.md`): `"ram": "0x007FFB00"`,
+> `"ram_size": 256` — internal SRAM inside 0x7FF770-0x7FFFEB, no static
+> reference of any kind, above the downward-growing task stack
+> 0x7FF3C0-0x7FF76F, outside the KWP protected window 0x7F9E3C-0x7FA47F, and
+> untouched by the programming copy.
+>
+> It is a one-line change, dry-run on `agent/C1` with
+> `make PATCH_RAM=0x007FFB00 PATCH_RAM_SIZE=0x100 check`: the blob stays
+> 96 bytes, every check passes, and the compiler addresses the block absolutely
+> as `lis r3,0x80 ; addi r4,r3,-0x500` — no r13, so C2's "address it
+> absolutely" rule is satisfied by the framework rather than by hand. Set
+> `build.ram` and `build.ram_size` in `patch.json`, set
+> `"ram_status": "verified"` with the evidence in `ram_status_note`, then
+> `make gen && make apply`. The address appears nowhere else in the patch.
+>
+> C2's second rule — *initialise the block, its contents are undefined at
+> power-on* — is already met: `ff_counter_tick()` has always assumed nothing
+> zeroes its `.bss` and detects its own cold start (see below). If a stronger
+> marker than one u16 is wanted, widening `ff_alive` to u32 is a two-line
+> change.
 
 ```bash
 cd patches/ff_counter

@@ -5,7 +5,7 @@
   "base_sha256": "b15590d3f1874ace3125c5d047c09a686db9b8bb498187663539ebab205609b3",
   "requires": [],
   "ram_status": "placeholder",
-  "ram_status_note": "PENDING #23 / brief C2: 0x807F00 is the top of the external SRAM, above the highest static reference recorded so far (0x805784, docs/02_memory_map.md section 3). It has NOT been proven unused. Replace with the block from re/findings/ram.md before anything is flashed.",
+  "ram_status_note": "PENDING #23 / brief C2. 0x807F00 is KNOWN BAD, not merely unproven: FUN_0008A12C copies 0x3E88 bytes from flash 0x081A00 to RAM 0x804800 during a KWP programming session and the ECU then executes that copy (bl 0x806EA0 at 0x0861B0). 0x804800+0x3E88 = 0x808688, so 0x807F00 is inside the destination, 0x3700 bytes in. VERIFIED-STATIC 2026-09-16 by disassembling 0x08A12C and 0x0861B0 (brief C1, confirming brief C2). It survives here only because this brief was told to keep the placeholder until C2 merges, and because nothing may be flashed while ram_status is not 'verified'. ADOPT INSTEAD, from brief C2 / re/findings/ram.md: ram 0x007FFB00, ram_size 256 - inside 0x7FF770-0x7FFFEB, internal SRAM with no static reference, above the downward-growing task stack and outside the KWP protected window 0x7F9E3C-0x7FA47F. Verified on branch agent/C1 that this is a one-line change: the blob stays 96 bytes, make check passes, and the code addresses it absolutely as 'lis r3,0x80 ; addi r4,r3,-0x500' with no r13.",
   "build": {
     "flash": "0x00150000",
     "ram": "0x00807F00",
