@@ -80,6 +80,15 @@ def load_patch() -> dict:
     return json.loads((FF_FUEL / "patch.json").read_text())
 
 
+def shipped_cal_block() -> bytes:
+    """FFCAL001 as ffcal001.json describes it.
+
+    Rebuilt rather than read from `build/`, which is gitignored: these tests
+    must run on a fresh clone with no cross compiler.
+    """
+    return ffcal001.build(ffcal001.load_params(FF_FUEL / "ffcal001.json"))
+
+
 def cal_from_block(blk: bytes) -> ff.Cal:
     """A model `Cal` describing an FFCAL001 image, so the two cannot drift."""
     can_id, timeout, hold, tau, slew, tick = struct.unpack_from(">6H", blk, 0x0C)
@@ -182,7 +191,9 @@ class TestApply(DumpUnchanged):
         off = m.cpu_to_file(CAL_BASE)
         blk = bytes(self.data[off:off + ffcal001.LENGTH])
         ffcal001.check(blk)
-        self.assertEqual(blk, (FF_FUEL / "build" / "ffcal001.bin").read_bytes())
+        self.assertEqual(blk, shipped_cal_block(),
+                         "patch.json carries a different FFCAL001 than "
+                         "ffcal001.json describes: run make gen")
         # and through the high alias the patch actually uses
         self.assertEqual(m.cpu_to_file(CAL_BASE), m.cpu_to_file(0x1E2510))
 
@@ -211,7 +222,7 @@ class EmuBase(DumpUnchanged):
         data, _report, _w = patch_apply.apply_patch(DUMP, FF_FUEL)
         cls.image.write_bytes(bytes(data))
         cls.syms = {k: int(v, 0) for k, v in load_patch()["build"]["symbols"].items()}
-        cls.cal_blk = (FF_FUEL / "build" / "ffcal001.bin").read_bytes()
+        cls.cal_blk = shipped_cal_block()
 
     @classmethod
     def tearDownClass(cls):

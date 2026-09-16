@@ -38,6 +38,8 @@ import patch_gen  # noqa: E402
 PATCHES = REPO / "patches"
 HELLO = PATCHES / "examples" / "hello_patch"
 FF_COUNTER = PATCHES / "ff_counter"
+FF_FUEL = PATCHES / "ff_fuel"          # brief D1, #32; its own tests are in
+                                       # tests/test_ff_fuel_patch.py
 LLVM_DIR = Path(os.environ.get("LLVM_DIR",
                                "/Users/carlo/toolchains/LLVM-23.1.1-macOS-ARM64"))
 
@@ -113,6 +115,9 @@ class TestBuild(unittest.TestCase):
     def test_ff_counter_builds(self):
         self._check(FF_COUNTER)
 
+    def test_ff_fuel_builds(self):
+        self._check(FF_FUEL)
+
     def test_blob_has_no_sda_reference(self):
         """blobdis reads the raw bytes, not the ELF: the last check before flash."""
         make(FF_COUNTER, "all")
@@ -123,7 +128,7 @@ class TestBuild(unittest.TestCase):
 
     def test_patch_json_still_matches_a_fresh_build(self):
         """`changes` is generated; a stale patch.json must not survive a build."""
-        for patch_dir in (HELLO, FF_COUNTER):
+        for patch_dir in (HELLO, FF_COUNTER, FF_FUEL):
             with self.subTest(patch=patch_dir.name):
                 r = make(patch_dir, "all")
                 self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
