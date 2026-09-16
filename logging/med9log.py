@@ -184,6 +184,11 @@ def load_session(path: str | Path, patch_json: str | None = None) -> Session:
 # ---------------------------------------------------------------------------
 # turning variables into DDLI chunks
 # ---------------------------------------------------------------------------
+#: the widest hole `plan_chunks` will read across to save a DDLI slot.  Every
+#: bridged byte is transferred on every sample, so this stays small.
+MAX_BRIDGE = 8
+
+
 @dataclass
 class Chunk:
     address: int
@@ -235,9 +240,9 @@ def plan_chunks(variables: list[Variable], *, first_id: int = DDLI_FIRST,
     while len(chunks) > sum(capacity):
         gaps = [(chunks[i + 1].address - chunks[i].end, i)
                 for i in range(len(chunks) - 1)]
-        if not gaps:
-            break
-        gap, i = min(gaps)
+        gap, i = min(gaps) if gaps else (MAX_BRIDGE + 1, 0)
+        if gap > MAX_BRIDGE:
+            break            # bridging this would waste more than it saves
         merged_gap += gap
         chunks[i].size = chunks[i + 1].end - chunks[i].address
         del chunks[i + 1]

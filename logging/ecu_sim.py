@@ -198,7 +198,7 @@ class Med9Handlers:
 
     def __init__(self, dump_path: str = DUMP, *, seed: int | None = None,
                  animate: bool = True, ram: AnimatedRam | None = None,
-                 clock=None):
+                 clock=None, session_timeout_s: float | None = None):
         from emu import Med9Emu
         self.emu = Med9Emu(dump_path, r2="app")
         self.seed_override = seed
@@ -206,6 +206,12 @@ class Med9Handlers:
         self.ram = ram or AnimatedRam(statics=dict(DEFAULT_STATICS))
         self.clock = clock or time.monotonic
         self.t0 = self.clock()
+        #: P3: drop back to session 0 after this long without a KWP request.
+        #: `None` = never, which is what an emulator does on its own; the real
+        #: ECU times out in ~5 s (kwp.md 2.2, exact value not extracted).
+        self.session_timeout_s = session_timeout_s
+        self._last_request = self.clock()
+        self.session_timeouts = 0
         self.table = self._read_table()
         self.log: list[str] = []
         self.power_on()
@@ -298,6 +304,17 @@ class Med9Handlers:
             return []
         if self.animate:
             self.ram.apply(self.emu, self.sim_time())
+        now = self.clock()
+        if (self.session_timeout_s is not None and self.session != 0
+                and now - self._last_request > self.session_timeout_s):
+            # P3 expired: back to session 0, dynamic ids wiped (kwp.md 2.2)
+            self.emu.call(H_SESSION_SET, args=[0], reset=False)
+            self.emu.write(SECURITY_STATE, b"\x00")
+            self._call(H_DDLI_WIPE, 0x2C, b"\x04")
+            self.session_timeouts += 1
+            self.log.append(f"session timed out after "
+                            f"{now - self._last_request:.2f} s")
+        self._last_request = now
         sid, data = request[0], request[1:]
         matching = [e for e in self.table if e.sid == sid]
         if not matching:
@@ -343,9 +360,11 @@ class EcuSimulator:
     def __init__(self, link: CanLink, handlers: Med9Handlers | None = None, *,
                  address: int = 0x01, delay_ms: float = 0.0,
                  drop_ack: int = 0, seed: int | None = None,
+                 session_timeout_s: float | None = None, animate: bool = True,
                  trace: list[str] | None = None, verbose: bool = False):
         self.link = link
-        self.handlers = handlers or Med9Handlers(seed=seed)
+        self.handlers = handlers or Med9Handlers(
+            seed=seed, animate=animate, session_timeout_s=session_timeout_s)
         self.server = Tp20Server(link, address=address,
                                  params=Tp20Params(),
                                  delay_s=delay_ms / 1000.0, trace=trace)
@@ -483,6 +502,9 @@ def main(argv=None) -> int:
                     help="delay every frame this long")
     ap.add_argument("--no-animate", action="store_true",
                     help="freeze the animated RAM cells")
+    ap.add_argument("--session-timeout", type=float, default=0.0, metavar="S",
+                    help="drop back to session 0 after S seconds without a KWP "
+                         "request (0 = never; the real ECU is about 5 s)")
     ap.add_argument("--self-test", action="store_true",
                     help="run the handlers directly and exit")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -492,7 +514,8 @@ def main(argv=None) -> int:
         return 0 if self_test(args.dump) else 1
 
     handlers = Med9Handlers(args.dump, seed=args.seed or None,
-                            animate=not args.no_animate)
+                            animate=not args.no_animate,
+                            session_timeout_s=args.session_timeout or None)
     link = open_link(parse_bus_spec(args.bus))
     link.set_accept(None)
     sim = EcuSimulator(link, handlers, address=args.address,
