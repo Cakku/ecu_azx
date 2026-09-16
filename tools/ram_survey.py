@@ -1,0 +1,468 @@
+#!/usr/bin/env python3
+"""ram_survey.py -- static usage survey of the two MED9.1.1 SRAMs.
+
+Builds a per-byte picture of 0x7F8000-0x807FFF (on-chip SRAM 0x7F8000-0x7FFFFF
+plus external SRAM 0x800000-0x807FFF on CS1) out of four independent static
+scans of ``data/passat_azx_ori.bin``, so that a patch can be given RAM that no
+stock code touches:
+
+1. **r13 small-data D-form accesses.** r13 = 0x7FFFF0 in boot *and* application
+   (file 0x10E0, 0x986AC, 0x9E3E0, 0x405588), so a single base covers every
+   ``lwz/stw/lbz/stb/...  rX,disp(r13)`` in the image.  Reads and writes are
+   counted separately and the *width* of each access is marked, so a byte that
+   is only ever touched by the halfword at 0x8031DA shows as two used bytes.
+   ``addi rX,r13,disp`` is counted apart, as ``addr``: it forms a pointer and
+   the bytes it names are usually the base of an indexed region (task 2 of the
+   brief).
+2. **Absolute ``lis`` + D-form / ``addi`` / ``ori`` pairs**, the same resolver
+   ``tools/find_abs_refs.py`` uses, restricted to targets inside the RAM.
+3. **Pointer words in flash**: every aligned 32-bit word of *both* flash
+   regions (external 0x000000-0x1FFFFF and on-chip 0x404000-0x47FFFF) whose
+   value lands in the RAM.  These are the bases of run-time-indexed accesses,
+   e.g. the tester pointer table at 0x0A3AE0.
+4. **Start-up coverage**: the two ``crt0`` .bss clears and the memory-test
+   descriptor lists, from disassembly (see ``re/findings/ram.md`` section 2).
+
+On top of that a table of *known structures* (``KNOWN``, every entry with its
+source) marks the regions that have no per-byte static reference: the stacks,
+the KWP programming copy at 0x804800, the EEPROM mirror, ``can_rx_shadow`` and
+so on.  A 32-byte line is a ``free_candidate`` only when it has no reference of
+any kind, is not covered by a start-up range and is not inside a known
+structure.
+
+Usage::
+
+    python3 tools/ram_survey.py data/passat_azx_ori.bin
+    python3 tools/ram_survey.py data/passat_azx_ori.bin --csv re/ram_map.csv
+    python3 tools/ram_survey.py data/passat_azx_ori.bin --line 16 --runs 20
+    python3 tools/ram_survey.py data/passat_azx_ori.bin --json work/ram.json
+
+Dependencies: none beyond the standard library and ``tools/med9lib.py``.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import struct
+import sys
+from dataclasses import dataclass, field
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import med9lib as m  # noqa: E402
+
+RAM_LO = 0x7F8000
+RAM_HI = 0x808000                      # exclusive
+RAM_SIZE = RAM_HI - RAM_LO             # 0x10000
+
+# The external SRAM is a 32 KB part behind OR1 = 0xFFFC0000, i.e. a 256 KB
+# window: 0x800000-0x83FFFF repeats it eight times (docs/02_memory_map.md 3).
+EXT_LO, EXT_HI = 0x800000, 0x808000
+ALIAS_WINDOW_HI = 0x840000
+
+R13 = 0x7FFFF0                         # boot and application alike
+
+# Regions that are disassembled.  0x1C0000-0x1FFFFF is the calibration block
+# (docs/02_memory_map.md 2): decoding it as PowerPC invents r13 accesses -- 51
+# of them are `lbzu/lfdu/stfsu ...(r13)` update forms, which no compiler emits
+# because they would clobber the SDA base.  Excluding it drops the r13
+# load/store count from 64,788 to the 64,7xx of docs/02 section 4.
+CODE_REGIONS = ((0x000000, 0x1C0000), (0x404000, 0x07C000))
+# Pointer words are looked for in *all* flash, including the calibration block:
+# the memory-test descriptor lists at 0x5C2E14-0x5C2E8C live there.
+PTR_REGIONS = ((0x000000, 0x200000), (0x404000, 0x07C000))
+CAL_LO, CAL_HI = 0x1C0000, 0x200000
+
+# ---------------------------------------------------------------- opcode maps
+# width in bytes; lmw/stmw are computed from rT.
+LOADS = {32: 4, 33: 4, 34: 1, 35: 1, 40: 2, 41: 2, 42: 2, 43: 2,
+         46: 4, 48: 4, 49: 4, 50: 8, 51: 8}
+STORES = {36: 4, 37: 4, 38: 1, 39: 1, 44: 2, 45: 2, 47: 4,
+          52: 4, 53: 4, 54: 8, 55: 8}
+MULTI = {46, 47}                       # lmw / stmw
+ADDRFORM = {14: "addi", 24: "ori"}     # pointer formation, no memory access
+
+NAMES = {14: "addi", 24: "ori", 32: "lwz", 33: "lwzu", 34: "lbz", 35: "lbzu",
+         36: "stw", 37: "stwu", 38: "stb", 39: "stbu", 40: "lhz", 41: "lhzu",
+         42: "lha", 43: "lhau", 44: "sth", 45: "sthu", 46: "lmw", 47: "stmw",
+         48: "lfs", 49: "lfsu", 50: "lfd", 51: "lfdu", 52: "stfs", 53: "stfsu",
+         54: "stfd", 55: "stfdu"}
+
+
+def exts16(v: int) -> int:
+    return v - 0x10000 if v & 0x8000 else v
+
+
+def access_kind(opcode: int, rt: int):
+    """Return (kind, width) for a D-form opcode, or None."""
+    if opcode in LOADS:
+        w = 4 * (32 - rt) if opcode in MULTI else LOADS[opcode]
+        return "read", max(w, 1)
+    if opcode in STORES:
+        w = 4 * (32 - rt) if opcode in MULTI else STORES[opcode]
+        return "write", max(w, 1)
+    if opcode in ADDRFORM:
+        return "addr", 1
+    return None
+
+
+# ------------------------------------------------------------ known structures
+@dataclass(frozen=True)
+class Known:
+    start: int
+    end: int                            # exclusive
+    name: str
+    tag: str
+    source: str
+    dynamic: bool = False               # written at run time, not statically
+
+
+# Every entry carries the file/finding it comes from.  Keep this table and
+# re/findings/ram.md in step.
+KNOWN = (
+    Known(0x7F8012, 0x7F8013, "ext_sram_size_code", "VERIFIED-STATIC",
+          "ext_sram_probe 0x011898 writes 0x41 (32 KB) / 0x44 (64 KB); eeprom.md 6"),
+    Known(0x7F802C, 0x7F807C, "crt0_bss_clear_1", "VERIFIED-STATIC",
+          "app_entry_crt0 0x09E3C0-0x09E434: zero loop 0x7F802C..0x7F807B"),
+    Known(0x7F8080, 0x7F80E8, "crt0_bss_clear_2", "VERIFIED-STATIC",
+          "app_entry_crt0 0x09E408-0x09E434: zero loop 0x7F8080..0x7F80E7"),
+    Known(0x7F9E3C, 0x7FA480, "kwp_protected_window", "VERIFIED-DYNAMIC",
+          "kwp_upload_range_check 0x0A3160 rejects overlap with NRC 0x31; kwp.md 5.1"),
+    Known(0x7F9E80, 0x7FA480, "eep_mirror", "VERIFIED-STATIC",
+          "ptr_eep_mirror_base 0x0B3184 = 0x7F9E80, 0x600 bytes; eeprom.md 3"),
+    Known(0x7FD2CC, 0x7FD2EC, "immo_eeprom_mirror", "VERIFIED-STATIC",
+          "eeprom_read_immo_block 0x085F44 reads EEPROM 0x280, 32 B; eeprom.md"),
+    Known(0x7FE588, 0x7FE58C, "os_stack_ptr_chain_onchip", "VERIFIED-STATIC",
+          "scheduler.md 7: r13-0x1A68"),
+    Known(0x7FE5A0, 0x7FE5A4, "os_stack_ptr_chain_ext", "VERIFIED-STATIC",
+          "scheduler.md 7: r13-0x1A50"),
+    Known(0x7FE5A4, 0x7FE5A8, "os_kernel_object_ptr", "VERIFIED-STATIC",
+          "scheduler.md 7: r13-0x1A4C"),
+    Known(0x7FE5FC, 0x7FE645, "os_task_activation_flags", "VERIFIED-STATIC",
+          "tbl_os_task_control_blocks 0x478634 field +0x14; scheduler.md 4"),
+    Known(0x7FE588, 0x7FE838, "os_kernel_ram", "HYPOTHESIS",
+          "the kernel configuration block 0x09B5EC-0x09B76C names 0x7FE588, "
+          "0x7FE5F8, 0x7FE64C, 0x7FE7B4..0x7FE7DC, 0x7FE818/20/28/34 -- treated "
+          "as one contiguous kernel area; ram.md 4"),
+    # The stack, from the kernel stack descriptor at 0x09B6F8 and crt0.
+    Known(0x7FF3C0, 0x7FF770, "os_task_stack", "VERIFIED-STATIC",
+          "kernel stack descriptor 0x09B6F8 = {0x7FFFEC, 0x7FF770, 0x7FF730, "
+          "0x7FF3C0, 0x36C}; app_entry_crt0 0x09E3C4 sets r1 = 0x7FF768 = "
+          "0x7FF770-8 and the stack grows down; ram.md 4"),
+    Known(0x7FF770, 0x7FFFEC, "os_isr_stack_or_reserved", "HYPOTHESIS",
+          "same descriptor, first word 0x7FFFEC; the only region of internal "
+          "SRAM with no static reference at all -- second stack or reserve; "
+          "ram.md 4"),
+    Known(0x7FFFF0, 0x800000, "r13_sda_anchor", "VERIFIED-STATIC",
+          "r13 = 0x7FFFF0 (file 0x10E0, 0x986AC, 0x9E3E0, 0x405588)"),
+    # External SRAM.
+    Known(0x803DA4, 0x803DB4, "kwp_io_struct", "VERIFIED-STATIC",
+          "kwp.md 1.4: +0 buffer ptr, +6 req len, +8 resp len, +0xA status, "
+          "+0xB SID, +0xC sub-function"),
+    Known(0x803DB8, 0x803DBA, "kwp_response_pending_flags", "VERIFIED-STATIC",
+          "kwp.md 1.3"),
+    Known(0x803EE4, 0x803FEC, "can_rx_shadow", "VERIFIED-STATIC",
+          "can.md 4: 22 x 12 B {u32 id; u8 data[8]}"),
+    Known(0x804800, 0x808000, "kwp_prog_copy_dest", "VERIFIED-STATIC",
+          "FUN_0008A12C copies flash 0x081A00-0x085887 (0x3E88 B) to 0x804800; "
+          "runs to 0x808688", dynamic=True),
+    Known(0x800000, 0x800688, "kwp_prog_copy_alias_tail", "VERIFIED-STATIC",
+          "the same copy overruns 0x807FFF; with a 32 KB part the CS1 window "
+          "aliases 0x808000-0x808687 onto 0x800000-0x800687", dynamic=True),
+)
+
+
+# --------------------------------------------------------------- the scanners
+@dataclass
+class Survey:
+    read: bytearray = field(default_factory=lambda: bytearray(RAM_SIZE))
+    write: bytearray = field(default_factory=lambda: bytearray(RAM_SIZE))
+    addr: bytearray = field(default_factory=lambda: bytearray(RAM_SIZE))
+    aread: bytearray = field(default_factory=lambda: bytearray(RAM_SIZE))
+    awrite: bytearray = field(default_factory=lambda: bytearray(RAM_SIZE))
+    aaddr: bytearray = field(default_factory=lambda: bytearray(RAM_SIZE))
+    ptr: bytearray = field(default_factory=lambda: bytearray(RAM_SIZE))
+    ptrcal: bytearray = field(default_factory=lambda: bytearray(RAM_SIZE))
+    init: bytearray = field(default_factory=lambda: bytearray(RAM_SIZE))
+    sites: dict = field(default_factory=dict)       # addr -> [(site, mnem, kind)]
+
+    def bump(self, arr, addr: int, width: int) -> None:
+        for a in range(addr, addr + width):
+            if RAM_LO <= a < RAM_HI:
+                i = a - RAM_LO
+                if arr[i] < 255:
+                    arr[i] += 1
+
+
+def words(data: bytes):
+    """Yield (cpu, file_off, word) for every aligned word of the code regions."""
+    for base, length in CODE_REGIONS:
+        fo0 = m.cpu_to_file(base)
+        for off in range(0, length, 4):
+            yield base + off, fo0 + off, struct.unpack_from(">I", data, fo0 + off)[0]
+
+
+def scan_r13(data: bytes, s: Survey) -> int:
+    n = 0
+    for cpu, _fo, w in words(data):
+        op = w >> 26
+        if (w >> 16) & 0x1F != 13:
+            continue
+        rt = (w >> 21) & 0x1F
+        got = access_kind(op, rt)
+        if got is None:
+            continue
+        kind, width = got
+        target = R13 + exts16(w & 0xFFFF)
+        if not (RAM_LO <= target < RAM_HI):
+            continue
+        s.bump({"read": s.read, "write": s.write, "addr": s.addr}[kind], target, width)
+        s.sites.setdefault(target, []).append((cpu, NAMES.get(op, str(op)), kind, "r13"))
+        n += 1
+    return n
+
+
+def scan_absolute(data: bytes, s: Survey) -> int:
+    """lis rD,hi  ...  <D-form|addi|ori> rX,lo(rD)  -- find_abs_refs.py's resolver."""
+    n = 0
+    size = len(data)
+    code_offs = []
+    for base, length in CODE_REGIONS:
+        fo0 = m.cpu_to_file(base)
+        code_offs.append(range(fo0, fo0 + length, 4))
+    for fo in (o for rng in code_offs for o in rng):
+        x = struct.unpack_from(">I", data, fo)[0]
+        if (x >> 26) != 15 or ((x >> 16) & 0x1F) != 0:
+            continue                                  # not lis
+        rd, hi = (x >> 21) & 0x1F, x & 0xFFFF
+        for j in range(1, 12):
+            k = fo + 4 * j
+            if k >= size:
+                break
+            y = struct.unpack_from(">I", data, k)[0]
+            op = y >> 26
+            rt = (y >> 21) & 0x1F
+            if op == 24 and rt == rd:                 # ori rA,rS=rd,uimm
+                target = (hi << 16) | (y & 0xFFFF)
+                kind, width = "addr", 1
+            elif ((y >> 16) & 0x1F) == rd and access_kind(op, rt) is not None:
+                kind, width = access_kind(op, rt)
+                target = ((hi << 16) + exts16(y & 0xFFFF)) & 0xFFFFFFFF
+            elif op in (14, 15, 32, 34, 40, 42, 48, 31) and rt == rd:
+                break                                 # rd overwritten
+            else:
+                continue
+            if RAM_LO <= target < RAM_HI:
+                s.bump({"read": s.aread, "write": s.awrite,
+                        "addr": s.aaddr}[kind], target, width)
+                s.sites.setdefault(target, []).append(
+                    (m.file_to_cpu(k), NAMES.get(op, str(op)), kind, "abs"))
+                n += 1
+            break
+    return n
+
+
+def scan_pointers(data: bytes, s: Survey) -> list:
+    """Aligned 32-bit words in either flash region whose value is a RAM address."""
+    hits = []
+    for base, length in PTR_REGIONS:
+        fo0 = m.cpu_to_file(base)
+        for off in range(0, length, 4):
+            v = struct.unpack_from(">I", data, fo0 + off)[0]
+            if RAM_LO <= v < RAM_HI:
+                site = base + off
+                cal = CAL_LO <= site < CAL_HI
+                s.bump(s.ptrcal if cal else s.ptr, v, 1)
+                hits.append((site, v, "cal" if cal else "code"))
+    return hits
+
+
+# Start-up / memory-test coverage, from disassembly and the descriptor lists at
+# 0x5C2E14 / 0x5C2E24 / 0x5C2E50 / 0x5C2E78 (re/findings/eeprom.md 6).
+INIT_RANGES = (
+    (0x7F802C, 0x7F807C, "crt0 zero loop 1 (executed)"),
+    (0x7F8080, 0x7F80E8, "crt0 zero loop 2 (executed)"),
+    (0x7F8104, 0x7F8234, "memtest descriptor 0x5C2E14 (no consumer found)"),
+    (0x7F8104, 0x7F8369, "memtest descriptor 0x5C2E24 (no consumer found)"),
+    (0x7FAAD0, 0x7FE0BD, "memtest descriptor 0x5C2E50 (no consumer found)"),
+    (0x7FF770, 0x7FFFED, "memtest descriptor 0x5C2E50 (no consumer found)"),
+    (0x7F8490, 0x7FAAC1, "memtest descriptor 0x5C2E50 (no consumer found)"),
+    (0x800000, 0x807FF9, "memtest descriptor 0x5C2E78 (no consumer found)"),
+)
+
+
+def scan_init(s: Survey) -> None:
+    for lo, hi, _why in INIT_RANGES:
+        for a in range(max(lo, RAM_LO), min(hi, RAM_HI)):
+            s.init[a - RAM_LO] = 1
+
+
+def known_at(addr: int) -> list:
+    return [k for k in KNOWN if k.start <= addr < k.end]
+
+
+# ------------------------------------------------------------------- reporting
+def line_rows(s: Survey, line: int) -> list:
+    rows = []
+    for base in range(RAM_LO, RAM_HI, line):
+        i = base - RAM_LO
+        r13r = sum(s.read[i:i + line])
+        r13w = sum(s.write[i:i + line])
+        r13a = sum(s.addr[i:i + line])
+        absr = sum(s.aread[i:i + line])
+        absw = sum(s.awrite[i:i + line])
+        absa = sum(s.aaddr[i:i + line])
+        ptr = sum(s.ptr[i:i + line])
+        ptrc = sum(s.ptrcal[i:i + line])
+        ini = sum(s.init[i:i + line])
+        names = sorted({k.name for a in range(base, base + line) for k in known_at(a)})
+        refs = r13r + r13w + r13a + absr + absw + absa + ptr + ptrc
+        free = refs == 0 and not names
+        rows.append({
+            "start": base, "end": base + line - 1,
+            "r13_read": r13r, "r13_write": r13w, "r13_addr": r13a,
+            "abs_read": absr, "abs_write": absw, "abs_addr": absa,
+            "ptr_words": ptr, "ptr_cal": ptrc, "init_bytes": ini,
+            "known": "+".join(names), "free_candidate": int(free),
+        })
+    return rows
+
+
+PAGE = 256
+
+
+def page_map(s: Survey) -> str:
+    """One character per 256-byte page of 0x7F8000-0x807FFF."""
+    out = []
+    for base in range(RAM_LO, RAM_HI, PAGE):
+        i = base - RAM_LO
+        w = sum(s.write[i:i + PAGE]) + sum(s.awrite[i:i + PAGE])
+        r = sum(s.read[i:i + PAGE]) + sum(s.aread[i:i + PAGE])
+        a = (sum(s.addr[i:i + PAGE]) + sum(s.aaddr[i:i + PAGE])
+             + sum(s.ptr[i:i + PAGE]) + sum(s.ptrcal[i:i + PAGE]))
+        names = {k.name for x in range(base, base + PAGE, 4) for k in known_at(x)}
+        if w and r:
+            c = "#"
+        elif w:
+            c = "w"
+        elif r:
+            c = "r"
+        elif a:
+            c = "p"
+        elif names:
+            c = "K"
+        else:
+            c = "."
+        out.append(c)
+    return "".join(out)
+
+
+def free_runs(s: Survey, min_len: int = 16) -> list:
+    """Maximal runs with no reference of any kind and no known structure."""
+    runs, start = [], None
+    for a in range(RAM_LO, RAM_HI):
+        i = a - RAM_LO
+        used = (s.read[i] or s.write[i] or s.addr[i] or s.aread[i] or s.awrite[i]
+                or s.aaddr[i] or s.ptr[i] or s.ptrcal[i] or known_at(a))
+        if not used and start is None:
+            start = a
+        elif used and start is not None:
+            if a - start >= min_len:
+                runs.append((start, a))
+            start = None
+    if start is not None and RAM_HI - start >= min_len:
+        runs.append((start, RAM_HI))
+    return runs
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("image")
+    ap.add_argument("--csv", help="write the per-line map here")
+    ap.add_argument("--json", help="write the machine-readable summary here")
+    ap.add_argument("--line", type=int, default=32, help="bytes per row (default 32)")
+    ap.add_argument("--runs", type=int, default=12, help="how many free runs to print")
+    ap.add_argument("--min-run", type=lambda v: int(v, 0), default=16,
+                    help="shortest free run to report (default 16)")
+    ap.add_argument("--quiet", action="store_true")
+    args = ap.parse_args(argv)
+
+    data = m.load_dump(args.image)
+    s = Survey()
+    n_r13 = scan_r13(data, s)
+    n_abs = scan_absolute(data, s)
+    ptrs = scan_pointers(data, s)
+    scan_init(s)
+
+    rows = line_rows(s, args.line)
+    runs = free_runs(s, args.min_run)
+    runs_sorted = sorted(runs, key=lambda r: r[1] - r[0], reverse=True)
+
+    if not args.quiet:
+        print(f"# ram_survey {args.image}")
+        print(f"# RAM 0x{RAM_LO:06X}-0x{RAM_HI - 1:06X}, {args.line}-byte lines, "
+              f"{len(rows)} rows")
+        print(f"# r13 D-form accesses into RAM : {n_r13}")
+        print(f"# absolute lis+D-form into RAM : {n_abs}")
+        n_cal = sum(1 for _s, _v, k in ptrs if k == "cal")
+        print(f"# pointer words in flash       : {len(ptrs)} "
+              f"({len(ptrs) - n_cal} in code, {n_cal} in the calibration block)")
+        touched = sum(1 for i in range(RAM_SIZE)
+                      if s.read[i] or s.write[i] or s.addr[i] or s.aread[i]
+                      or s.awrite[i] or s.aaddr[i] or s.ptr[i] or s.ptrcal[i])
+        print(f"# bytes with >=1 static reference: {touched} "
+              f"({100.0 * touched / RAM_SIZE:.1f} %)")
+        print(f"# free_candidate lines          : "
+              f"{sum(r['free_candidate'] for r in rows)} / {len(rows)}")
+        print()
+        print("page map, one char per 256 B; "
+              "# read+write  w write  r read  p pointer/addi only  K known  . free")
+        pm = page_map(s)
+        for k in range(0, len(pm), 64):
+            print(f"  0x{RAM_LO + k * PAGE:06X}  {pm[k:k + 64]}")
+        print()
+        print(f"longest reference-free runs (>= {args.min_run} B):")
+        for lo, hi in runs_sorted[:args.runs]:
+            print(f"  0x{lo:06X}-0x{hi - 1:06X}  {hi - lo:6d} B")
+        print()
+        print("known structures:")
+        for k in sorted(KNOWN, key=lambda k: k.start):
+            print(f"  0x{k.start:06X}-0x{k.end - 1:06X}  {k.name:<28s} "
+                  f"{k.tag:<16s} {k.source}")
+
+    if args.csv:
+        with open(args.csv, "w", encoding="utf-8") as fh:
+            cols = ["start", "end", "r13_read", "r13_write", "r13_addr",
+                    "abs_read", "abs_write", "abs_addr", "ptr_words", "ptr_cal",
+                    "init_bytes", "known", "free_candidate"]
+            fh.write(",".join(cols) + "\n")
+            for r in rows:
+                fh.write("0x%06X,0x%06X,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%d\n" % (
+                    r["start"], r["end"], r["r13_read"], r["r13_write"],
+                    r["r13_addr"], r["abs_read"], r["abs_write"], r["abs_addr"],
+                    r["ptr_words"], r["ptr_cal"], r["init_bytes"], r["known"],
+                    r["free_candidate"]))
+        if not args.quiet:
+            print(f"\nwrote {args.csv}")
+
+    if args.json:
+        doc = {
+            "image": os.path.basename(args.image),
+            "ram": {"start": hex(RAM_LO), "end": hex(RAM_HI - 1)},
+            "counts": {"r13": n_r13, "absolute": n_abs, "pointer_words": len(ptrs)},
+            "free_runs": [{"start": hex(lo), "end": hex(hi - 1), "size": hi - lo}
+                          for lo, hi in runs_sorted],
+            "known": [{"start": hex(k.start), "end": hex(k.end - 1), "name": k.name,
+                       "tag": k.tag, "source": k.source, "dynamic": k.dynamic}
+                      for k in sorted(KNOWN, key=lambda k: k.start)],
+        }
+        with open(args.json, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, indent=2)
+        if not args.quiet:
+            print(f"wrote {args.json}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
