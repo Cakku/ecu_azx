@@ -446,6 +446,61 @@ Second choice, if a faster raster is wanted: **0x12061C**, `bl 0x11F054`
 `task_100ms`; for a verified-period task use `task_20ms` (0x11EC34) and the
 `bl 0x630C0` at 0x11EC44, whose 20 ms period is VERIFIED-STATIC.
 
+### 8.1 Added 2026-09-16 (brief D1, issue #32) — the task-set-A twin site, 0x432940
+
+Section 11.7 leaves open which task set runs with the engine turning, and a
+hook in the dead set never executes. `patches/ff_fuel` therefore hooks **both**
+10 ms rasters; this is the set-A half. **VERIFIED-STATIC.**
+
+```
+0043293C  4B C8 B1 29  bl 0xbda64
+00432940  4B C8 B0 A5  bl 0xbd9e4     <-- hook here (task set A, 10 ms)
+00432944  4B FF F8 99  bl 0x4321dc
+```
+
+```
+000BD9E0  4E 80 00 20  blr            ; end of the previous function
+000BD9E4  4E 80 00 20  blr            ; nop_leaf_bd9e4 - the whole function
+000BD9E8  94 21 FF F8  stwu r1,-8(r1) ; the next function
+```
+
+* **The target is an empty function.** `0xBD9E4` is a single `blr`, and
+  `tools/sda_xref.py data/passat_azx_ori.bin --code 0xBD9E4` finds **exactly one
+  call site in the image — 0x432940 itself**. So the stock work a tail branch
+  has to preserve is literally nothing, which makes this site *cleaner* than
+  0x12067C (whose leaf clears two RAM cells).
+* **r3-r12 are dead across it.** 0x4328E4 is the same flat list of
+  argument-less `bl`s as every raster task (section 7); no instruction between
+  the calls sets a register, and the entry blocks of both neighbours' targets
+  (0xBDA64, 0x4321DC) write r3-r12 before they read them, so no return value is
+  consumed either. `HOOK_TAIL` is enough.
+* **It is unconditional and at the top level** of the task body (0x4328F0
+  onwards is an uninterrupted `bl` list), so it runs exactly once per 10 ms
+  activation of task set A.
+* **It is in the on-chip flash** (file 0x22E940), inside the code descriptor
+  table at file 0x0A0000, so `tools/checksum.py fix` covers it — but
+  `tools/patch_apply.py` guards 0x404000-0x47FFFF and the change needs the
+  explicit `"onchip_edit": true` flag added by D1 (docs/06 §1).
+
+Reproduce:
+
+```bash
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin \
+    --addr 0x4328E4 --file-off 0x22E8E4 --len 0x200
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin \
+    --addr 0x0BD9D0 --file-off 0x0BD9D0 --len 0x20
+./.venv/bin/python3 tools/sda_xref.py data/passat_azx_ori.bin --code 0xBD9E4
+```
+
+A patch that hooks both sets must stay correct if both ever fired. `ff_fuel`
+does that with a one-byte owner field in its state block: the first source to
+call takes ownership, the other is counted and returns, and ownership moves
+only after `FF_OWNER_SWITCH` consecutive calls from the other source with none
+from the owner in between — which also covers the real case of set A running
+for a few activations before 0x11DAF4 switches to set B.
+`ff_src_seen` in that block is, as a side effect, the answer to section 11.7
+readable from a single logger sample.
+
 ## 9. Which task computes injection and ignition (for briefs B6/B7)
 
 Not settled here, and deliberately not guessed. What did fall out:
