@@ -134,6 +134,29 @@ I-form: `0x48000000 | (LI & 0x03FFFFFC) | LK`, `LI = target - site`, AA = 0,
 reach +-32 MB. `tools/patch_gen.py` encodes it and checks both the alignment
 and the reach; `tests/test_patch_framework.py` pins the resulting word.
 
+The same five words of `task_100ms`, disassembled out of the two images rather
+than out of the descriptor — `tools/blobdis.py <image> --file-off 0x120674
+--len 0x14` (file offset == CPU address in the low alias):
+
+```
+                stock                              work/ff_counter.bin
+00120674  4B F9 D9 D9  bl 0xbe04c        00120674  4B F9 D9 D9  bl 0xbe04c
+00120678  48 00 03 FD  bl 0x120a74       00120678  48 00 03 FD  bl 0x120a74
+0012067C  4B FF E9 B1  bl 0x11f02c  -->  0012067C  48 02 F9 85  bl 0x150000
+00120680  4B FF F3 2D  bl 0x11f9ac       00120680  4B FF F3 2D  bl 0x11f9ac
+00120684  4B FF F0 89  bl 0x11f70c       00120684  4B FF F0 89  bl 0x11f70c
+```
+
+One word, and the leaf it used to call is untouched in the patched image —
+`blobdis.py work/ff_counter.bin --file-off 0x11F02C --len 0x10`:
+
+```
+0011F02C  39 80 00 00  li   r12, 0
+0011F030  99 8D E8 99  stb  r12, -0x1767(r13)      ; RAM 0x7FE889
+0011F034  B1 8D 0E 28  sth  r12, 0xe28(r13)        ; RAM 0x800E18
+0011F038  4E 80 00 20  blr
+```
+
 ## Applying it
 
 ```
