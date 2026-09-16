@@ -63,6 +63,21 @@ firmware bytes reproduced in them remain the rights holders' property.
 | `ppc_med9/data/languages/` | Derived from Ghidra's PowerPC processor specification | Apache-2.0 |
 | `documents/pico2_pinout.png` | Raspberry Pi Pico 2 documentation | Raspberry Pi Ltd |
 
+### Protocol descriptions used without copying code (added 2026-09-16, brief C3)
+
+`logging/med9kwp/tp20.py` implements VW Transport Protocol 2.0 and
+`logging/med9kwp/vag_formulas.py` decodes VAG measuring-block display
+formulas. Neither protocol is described in this ECU's firmware findings, so
+both were written from public descriptions. **No third-party source file is
+vendored and no code was copied**; only the protocol facts (frame layouts,
+opcode meanings, timing encodings, arithmetic) were used, and the
+implementations are my own. The sources, with their licences, are listed in
+`logging/README.md` section 5. Two of them --
+[notyal/vwcanread](https://github.com/notyal/vwcanread) and
+[jazdw/vag-blocks](https://github.com/jazdw/vag-blocks) -- are **GPL-3.0**,
+whose terms this repository could not carry; they were read as documentation
+and nothing was taken from them verbatim.
+
 Untracked reference documents under `documents/` (for example
 `MED9.1_TFSI_Funktionsrahmen.pdf`, `MPC561RM.pdf`) are third-party manuals and
 are deliberately not redistributed here.

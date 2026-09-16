@@ -348,6 +348,17 @@ unexpected. `logcmp.py` compares two logs in the format defined in
   Alternative without a PC tool: patch spare measuring-block slots so VCDS
   shows RAM values. CCP over CAN (MED9.1 CRO/DTO 0x7C3/0x7C4) needs direct
   powertrain-bus access (the gateway filters it).
+- **The logger exists (brief C3, 2026-09-16, issue #20):**
+  `logging/med9log.py` (`log` / `dump` / `groups` / `probe`) on
+  `logging/med9kwp/` (TP2.0 + KWP2000, a clean re-implementation, nothing
+  vendored), tested against `logging/ecu_sim.py`, an emulated ECU that answers
+  with the firmware's own handlers on a python-can `virtual` bus. Try
+  everything with `--sim` first. **Adapter recommendation, OBD wiring, the
+  first-contact procedure and what to do if the gateway does not route 0x200
+  are in `logging/README.md` sections 4-9.** Two corrections found while
+  building it are in `re/findings/kwp.md` section 12: **TesterPresent takes no
+  sub-function on this ECU** (`3E`, not `3E 01`), and `21 <group>` answers
+  with group *G* **and** group *G*+0x7F, only 1..127 being requestable.
 - DBC in `data/` is the infotainment CAN (PQ35 ICAN), useful only for
   gateway-bridged engine frames (`mGW_Motor` 0x35B etc.), not for the
   powertrain bus the ECU sits on. `data/ethanol_node.dbc` is ours: the one
