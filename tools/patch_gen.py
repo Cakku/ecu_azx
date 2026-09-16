@@ -7,7 +7,7 @@ has to agree with the compiler's output byte for byte.  This tool reads the
 section 1), takes the blob and the linker's `.sym` file, resolves every hook's
 target symbol, encodes the branch word and rewrites `changes`:
 
-    {"build": {"flash": "0x150000", "ram": "0x807F00", "ram_size": 64,
+    {"build": {"flash": "0x150000", "ram": "0x7FFB00", "ram_size": 256,
                "blob": "build/ff_counter.bin", "sym": "build/ff_counter.sym",
                "hooks": [{"site": "0x12067C", "kind": "bl",
                           "target": "ff_counter_hook", "old": "4bffe9b1",

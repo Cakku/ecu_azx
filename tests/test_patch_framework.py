@@ -50,7 +50,7 @@ STOCK_LEAF = 0x11F02C
 CLEARED_BYTE = 0x7FE889                     # cleared by the stock leaf
 CLEARED_HALF = 0x800E18
 PATCH_FLASH = 0x150000
-PATCH_RAM = 0x807F00                        # placeholder, PENDING #23 / brief C2
+PATCH_RAM = 0x7FFB00                        # re/findings/ram.md 8.1 (C2, #23); runtime confirmation pending
 ALIVE = 0xFC01
 SRAM_START, SRAM_LEN = 0x7F8000, 0x10000    # the whole ECU RAM (emu/memmap.py)
 STACK_TOP = 0x7FEFFC                        # emu resets r1 here
@@ -340,10 +340,14 @@ class TestApply(DumpUnchanged):
                              "why": "should be impossible"}])
         self.assertIn("identification block", msg)
 
-    def test_the_placeholder_ram_produces_a_warning(self):
+    def test_a_ram_block_that_is_not_verified_produces_a_warning(self):
+        """ff_counter is "static" (no static reference, snapshots pending),
+        hello is "example"; both must warn, and only "verified" is silent."""
         _data, _report, warnings = patch_apply.apply_patch(DUMP, FF_COUNTER)
-        self.assertTrue(any("placeholder" in w for w in warnings), warnings)
-        self.assertTrue(any("issue #23" in w for w in warnings), warnings)
+        self.assertTrue(any('"static"' in w for w in warnings), warnings)
+        self.assertTrue(any("issue #23" in w and "Do not flash" in w for w in warnings), warnings)
+        _data, _report, warnings = patch_apply.apply_patch(DUMP, HELLO)
+        self.assertTrue(any('"example"' in w and "Do not flash" in w for w in warnings), warnings)
 
     def test_the_original_dump_is_untouched(self):
         self._apply(FF_COUNTER)

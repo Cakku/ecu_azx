@@ -41,6 +41,16 @@ and `re/findings/scheduler.md` §5 and §8 (check whether C4 settled the
 - RAM: the block recommended in `re/findings/ram.md`. Its content is
   **undefined at power-on** unless C2 proved otherwise: detect a valid state
   block by magic word + checksum and initialise it if invalid.
+  > **Integration note 2026-09-16 (C2 merged):** the block is
+  > **0x7FFB00-0x7FFBFF** (256 B, `re/findings/ram.md` §8.1; VERIFIED-STATIC
+  > that nothing references it, dynamic confirmation pending #23). C2 confirmed
+  > it is *not* filled at cold start, so the header above is required. Address
+  > it absolutely (`lis`/`addi`), never through r13. The external SRAM is
+  > **cleared at every cold start** (0x800004-0x80498F) and 0x804990-0x807FFF
+  > is the flash driver's programming copy: nothing there survives a key
+  > cycle, so persistence goes through EEPROM block 8 (D2). `ff_counter` uses
+  > +0x00..+0x07 of the same block when flashed alone; state where ff_fuel
+  > puts its own state (reusing +0x00 is fine, the two are never co-flashed).
 - Engine state available to the patch: `B_stend` 0x7FE921, "engine not
   running" 0x7FEAD0, `tmst` 0x8021F6 (0.75 C/LSB, -48 C).
 

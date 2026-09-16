@@ -5,23 +5,23 @@ point, the RAM allocation, the checksum pipeline and the logger *together*,
 while the engine behaves exactly as it did before: `ff_counter_tick()` touches
 nothing but its own 8-byte RAM block.
 
-> ## PENDING #23 — do not flash this build, and do not reuse this address
-> `PATCH_RAM = 0x807F00` is the placeholder this brief was told to keep until
-> the RAM survey merges. **It is now known to be wrong, not merely unproven.**
+> ## RAM block 0x7FFB00 — `ram_status: static`; do not flash before the runtime half of #23
+> `PATCH_RAM = 0x7FFB00` (0x100 B) is the block `re/findings/ram.md` §8.1
+> recommends: VERIFIED-STATIC that no instruction in the image references any
+> byte of 0x7FF770-0x7FFFEB, above the task stack 0x7FF3C0-0x7FF76F, outside
+> the KWP programming copy 0x804800-0x808687 and outside the protected window
+> 0x7F9E3C-0x7FA47F (so the logger can read it). It is **not** filled at cold
+> start, which is what the `ff_alive` marker is for. The runtime snapshots of
+> #23 are still pending, so `tools/patch_apply.py` warns on every run.
 >
-> `FUN_0008A12C` copies 0x3E88 bytes from flash 0x081A00 to RAM **0x804800**
-> during a KWP programming session, and the ECU then *executes* that copy
-> (`bl 0x806EA0` at 0x0861B0). 0x804800 + 0x3E88 = 0x808688, so 0x807F00 sits
-> **inside the destination**, 0x3700 bytes in — a patch writing there while a
-> flash session runs would corrupt the running flash driver. Reported by brief
-> **C2** and confirmed here by disassembling 0x08A12C and 0x0861B0
-> (VERIFIED-STATIC, 2026-09-16). C2 also refutes the "top of external SRAM is
-> free" note in `docs/06_patch_pipeline.md` §3: 0x805784 is a live RAM dispatch
-> table called from 0x082C00.
->
-> The address survives here only because C2 is not merged and this brief must
-> not build on an unmerged branch; nothing can be flashed while `ram_status` is
-> not `"verified"`, and `tools/patch_apply.py` says so on every run.
+> History: brief C1 was written against the placeholder 0x807F00. Brief C2 then
+> showed that `FUN_0008A12C` copies 0x3E88 bytes from flash 0x081A00 to RAM
+> **0x804800** during a KWP programming session and the ECU *executes* that copy
+> (`bl 0x806EA0` at 0x0861B0); 0x804800 + 0x3E88 = 0x808688, so 0x807F00 sat
+> 0x3700 bytes inside the destination. C1 confirmed it from the dump
+> (VERIFIED-STATIC, 2026-09-16); the address was changed at integration the
+> same day. C2 also refutes the old "top of external SRAM is free" note in
+> `docs/06_patch_pipeline.md` §3: 0x805784 is a live RAM dispatch table.
 >
 > **Adopt instead** (brief C2, `re/findings/ram.md`): `"ram": "0x007FFB00"`,
 > `"ram_size": 256` — internal SRAM inside 0x7FF770-0x7FFFEB, no static
@@ -61,7 +61,7 @@ python3 -m unittest tests.test_patch_framework        # from the repo root
 | **Task** | `task_100ms` (0x1205A0, TCB 23) — `re/findings/scheduler.md` §8 |
 | **Trampoline** | `HOOK_TAIL` (`patches/common/hooks.S`): saves LR only, 16-byte frame |
 | **Tail** | `ba 0x11F02C` — the stock leaf still runs, in the same task, in order |
-| **RAM** | 8 bytes used of the 0x40-byte block at `PATCH_RAM` |
+| **RAM** | 8 bytes used of the 0x100-byte block at `PATCH_RAM` = 0x7FFB00 |
 | **Flash** | 96 bytes at 0x150000 (free area 0x150000-0x1AFFFF, all 0xFF) |
 | **Calibration** | none |
 | **Stock RAM touched** | none |
@@ -112,39 +112,41 @@ issue #44.
 `make dump` — the raw bytes at the address the CPU will fetch them from, not
 the ELF (`tools/blobdis.py`, capstone; `llvm-objdump` has no `-b binary`).
 Recorded 2026-09-16, LLVM 23.1.1, `PATCH_FLASH=0x150000`,
-`PATCH_RAM=0x807F00`:
+`PATCH_RAM=0x7FFB00`:
 
 ```
                                   ; --- ff_counter_hook: HOOK_TAIL trampoline
 00150000  94 21 FF F0  stwu     r1, -0x10(r1)   ; 16-byte frame, back chain at 0(r1)
 00150004  7C 08 02 A6  mflr     r0
-00150008  90 01 00 0C  stw      r0, 0xc(r1)     ; save LR: bl below destroys it
-0015000C  48 00 00 15  bl       0x150020        ; ff_counter_tick()
+00150008  90 01 00 0C  stw      r0, 0xc(r1)     ; save LR (return into task_100ms)
+0015000C  48 00 00 15  bl       0x150020        ; ff_counter_tick
 00150010  80 01 00 0C  lwz      r0, 0xc(r1)
-00150014  7C 08 03 A6  mtlr     r0              ; LR back -> the leaf's blr returns to the task
+00150014  7C 08 03 A6  mtlr     r0
 00150018  38 21 00 10  addi     r1, r1, 0x10
-0015001C  48 11 F0 2E  ba       0x11f02c        ; the stock leaf, AA=1 (see hooks.S)
-                                  ; --- ff_counter_tick()
-00150020  3C 60 00 80  lis      r3, 0x80        ; r3 = 0x800000
-00150024  38 83 7F 00  addi     r4, r3, 0x7f00  ; r4 = PATCH_RAM
+0015001C  48 11 F0 2E  ba       0x11f02c        ; the stock leaf clr_ram_7FE889_800E18
+                                  ; --- ff_counter_tick
+00150020  3C 60 00 80  lis      r3, 0x80        ; 0x800000 - 0x500 = 0x7FFB00 = PATCH_RAM
+00150024  38 83 FB 00  addi     r4, r3, -0x500
 00150028  A0 84 00 04  lhz      r4, 4(r4)       ; ff_alive
 0015002C  28 04 FC 01  cmplwi   r4, 0xfc01
-00150030  41 82 00 20  beq      0x150050        ; already alive -> just increment
-00150034  38 80 00 00  li       r4, 0           ; cold start:
+00150030  41 82 00 20  beq      0x150050        ; warm tick: skip the init
+00150034  38 80 00 00  li       r4, 0
 00150038  3C A0 00 80  lis      r5, 0x80
-0015003C  94 85 7F 00  stwu     r4, 0x7f00(r5)  ; ff_ticks = 0, r5 = PATCH_RAM
+0015003C  94 85 FB 00  stwu     r4, -0x500(r5)  ; ff_ticks = 0 (r5 -> PATCH_RAM)
 00150040  B0 85 00 06  sth      r4, 6(r5)       ; ff_reserved = 0
 00150044  3C 80 00 00  lis      r4, 0
 00150048  60 84 FC 01  ori      r4, r4, 0xfc01
 0015004C  B0 85 00 04  sth      r4, 4(r5)       ; ff_alive = 0xFC01
-00150050  80 83 7F 00  lwz      r4, 0x7f00(r3)  ; ff_ticks
+00150050  80 83 FB 00  lwz      r4, -0x500(r3)  ; ff_ticks++
 00150054  38 84 00 01  addi     r4, r4, 1
-00150058  90 83 7F 00  stw      r4, 0x7f00(r3)
+00150058  90 83 FB 00  stw      r4, -0x500(r3)
 0015005C  4E 80 00 20  blr
-
-OK: no reference to r2 or r13
 ```
 
+Absolute addressing throughout (`lis 0x80` / `-0x500`), no r2 or r13
+(`--check-sda` OK). Re-recorded 2026-09-16 after the move to 0x7FFB00; the
+blob is still 96 bytes and the trampoline is byte-identical to the placeholder
+build — only the six `ff_state` displacements changed.
 96 bytes, no `.rodata`, no branch that depends on engine state: 21 instructions
 on a warm tick, 15 of them in `ff_counter_tick`. Worst case equals best case.
 
@@ -189,16 +191,16 @@ One word, and the leaf it used to call is untouched in the patched image —
 $ make apply
 ff_counter: 3 patch range(s) (99 B), 4 descriptor range(s) (10 B), 0 unexpected
 checksums: ALL OK (65 blocks); identification block unchanged
-sha256: 84b916b26cd8ac9b978f22a23a30076ec2fa5b0937ecc1df33185f245b239666
-WARNING: ff_counter: "ram_status": "placeholder" ...
+sha256: 9ecde359ef91eabfa332ad80c3ad5667f5d5535ea72d0a0306da78a59ab375e2
+WARNING: ff_counter: "ram_status": "static" - the RAM block at 0x007FFB00 is VERIFIED-STATIC only (re/findings/ram.md): no instruction references it, but the runtime snapshots of issue #23 are still pending. Do not flash this image.
 ```
 
 Three patch ranges rather than two because two of the blob's own bytes are
 0xFF and therefore did not change. The four descriptor ranges are the sum/~sum
 words of blocks 0x120000-0x12FFFF and 0x150000-0x15FFFF.
 
-The sha256 above is of a build with the **placeholder** RAM address; it changes
-when C2's block replaces it.
+The sha256 above is of the build at `PATCH_RAM = 0x7FFB00` (2026-09-16); it
+changes whenever the RAM block or the toolchain changes.
 
 ## Tests
 

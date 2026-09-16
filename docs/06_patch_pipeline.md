@@ -34,9 +34,9 @@ section; `tools/patch_gen.py` (or `make gen`) turns it into `changes`:
 
 ```json
 { "name": "ff_counter", "issue": 27, "base_sha256": "b15590d3…",
-  "requires": [], "ram_status": "placeholder",
+  "requires": [], "ram_status": "static",
   "build": {
-    "flash": "0x00150000", "ram": "0x00807F00", "ram_size": 64,
+    "flash": "0x00150000", "ram": "0x007FFB00", "ram_size": 256,
     "blob": "build/ff_counter.bin", "sym": "build/ff_counter.sym",
     "hooks": [ {"site": "0x0012067C", "kind": "bl", "target": "ff_counter_hook",
                 "old": "4bffe9b1", "why": "…"} ] },
@@ -47,8 +47,10 @@ section; `tools/patch_gen.py` (or `make gen`) turns it into `changes`:
   so the descriptor and the placement cannot drift apart.
 * `hooks[].target` is resolved from the `.sym` file; `kind` is `b`, `bl`, `ba`
   or `bla` and decides AA/LK.
-* `ram_status` is `verified`, `placeholder` or `example`. Anything but
-  `verified` makes `tools/patch_apply.py` print a do-not-flash warning.
+* `ram_status` is `verified`, `static` (no static reference, `re/findings/ram.md`;
+  the runtime snapshots of #23 pending — `ff_counter` since 2026-09-16),
+  `placeholder` or `example`. Anything but `verified` makes
+  `tools/patch_apply.py` print a do-not-flash warning.
 * `requires` is recorded but not yet enforced by any tool.
 
 ## 2. Build

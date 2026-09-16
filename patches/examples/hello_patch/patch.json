@@ -5,16 +5,16 @@
   "base_sha256": "b15590d3f1874ace3125c5d047c09a686db9b8bb498187663539ebab205609b3",
   "requires": [],
   "ram_status": "example",
-  "ram_status_note": "0x806000 is the example address of docs/03_tooling.md section 3.1. It has not been proven unused; nothing reads or writes it on an ECU because this patch is never hooked in.",
+  "ram_status_note": "0x7FFB00 is the block re/findings/ram.md section 8.1 recommends (C2, issue #23: VERIFIED-STATIC that nothing references it, dynamic confirmation pending). Used here only so the template shows the right address; nothing reads or writes it on an ECU because this patch is never hooked in. (Until 2026-09-16 the example used 0x806000, which C2 showed to be inside the KWP programming copy.)",
   "build": {
     "flash": "0x00150000",
-    "ram": "0x00806000",
+    "ram": "0x007FFB00",
     "ram_size": 16,
     "blob": "build/hello.bin",
     "sym": "build/hello.sym",
     "hooks": [],
     "blob_size": 88,
-    "blob_sha256": "56534216f0be18714393c0fc269de13ded2d826888cb2d58e081bf23eecf4ce4",
+    "blob_sha256": "3d2f378eac47b30bb2633acc71ed76e4f460865795dc4230af4b1e728c063398",
     "bss_size": 4,
     "symbols": {}
   },
@@ -23,7 +23,7 @@
       "addr": "0x150000",
       "kind": "blob",
       "old": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-      "new": "3c60008038800000b08360004e8000203c800080a0a460007ca51a1454a3043eb0a460004e8000202803000741800008386000073c8000155463083c388400487c641a2e4e8000200000006400c80190032006400c801900",
+      "new": "3c60008038800000b083fb004e8000203c800080a0a4fb007ca51a1454a3043eb0a4fb004e8000202803000741800008386000073c8000155463083c388400487c641a2e4e8000200000006400c80190032006400c801900",
       "why": "hello code and constants (88 B of free flash)"
     }
   ],

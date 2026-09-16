@@ -48,6 +48,15 @@ FORBIDDEN = (
 # Never changes, whatever the flags say.
 IDENT_START, IDENT_END = 0x1CEE20, 0x1CEE70      # CPU, end exclusive
 
+# Every ram_status but "verified" blocks flashing; the text says why
+# (docs/06_patch_pipeline.md section 1, re/findings/ram.md, issue #23).
+RAM_STATUS_WARNINGS = {
+    "static": "is VERIFIED-STATIC only (re/findings/ram.md): no instruction "
+              "references it, but the runtime snapshots of issue #23 are still pending.",
+    "placeholder": "has NOT been proven unused (issue #23).",
+    "example": "is an example address; this patch is a template, never a flash candidate.",
+}
+
 
 class ApplyError(RuntimeError):
     pass
@@ -100,11 +109,12 @@ def apply_patch(stock_path: Path, patch_dir: Path) -> tuple[bytearray, dict, lis
         raise ApplyError(f"base_sha256 mismatch: patch.json says {want}, "
                          f"{stock_path} is {stock_sha}")
 
-    if patch.get("ram_status") == "placeholder":
+    ram_status = str(patch.get("ram_status", "missing"))
+    if ram_status != "verified":
+        why = RAM_STATUS_WARNINGS.get(ram_status, "has an unknown ram_status value.")
         warnings.append(
-            f"{name}: \"ram_status\": \"placeholder\" - the RAM block at "
-            f"{patch.get('build', {}).get('ram', '?')} has NOT been proven unused "
-            f"(issue #23). Do not flash this image.")
+            f"{name}: \"ram_status\": \"{ram_status}\" - the RAM block at "
+            f"{patch.get('build', {}).get('ram', '?')} {why} Do not flash this image.")
     for missing in patch.get("requires", []):
         warnings.append(f"{name}: requires {missing!r}; this tool does not check that")
 

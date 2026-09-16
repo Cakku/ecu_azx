@@ -35,6 +35,11 @@ Read `00_common_rules.md`, `docs/05_flexfuel_design.md` §3.7-§3.8,
   The factory content of payload +0 is unverified (bench EEPROM read).
   Fallback: block 24 (255 B, single copy). External SRAM retention across
   key cycles is HYPOTHESIS (KL30 unknown).
+  > **Correction 2026-09-16 (C2, `re/findings/ram.md` §3, VERIFIED-STATIC):**
+  > external-SRAM retention is **refuted**. `ram_clear_block` (0x06D8F8) and
+  > `app_init` (0x04CCD4) zero 0x800004-0x80498F at every cold start, and
+  > 0x804990-0x807FFF is the flash driver's programming copy. EEPROM block 8 is
+  > the only persistence route; drop the battery-backed-RAM branch of #38.
 
 ## Tasks
 1. **Measuring block (#39).** Choose four spare ids that no group references

@@ -44,16 +44,17 @@ Everything shared lives in [`patches/common/`](../../common/): `patch.ld`,
 | Constants in flash, addressed absolutely | `hello_lookup` reaches its table with `lis 0x15 / addi 0x0048` |
 | The stock addresses cannot drift | `make check` runs `tools/gen_stock_header.py --check` |
 
-Recorded output (2026-09-16, LLVM 23.1.1, framework build):
+Recorded output (2026-09-16, LLVM 23.1.1, framework build, `PATCH_RAM = 0x7FFB00`
+from `re/findings/ram.md` — until the same day the example used 0x806000):
 
 ```
   [ 1] .text      PROGBITS  00150000  000048  AX
   [ 2] .rodata    PROGBITS  00150048  000010  AM
-  [ 3] .bss       NOBITS    00806000  000004  WA
+  [ 3] .bss       NOBITS    007ffb00  000004  WA
 blob 88 B == linked flash size, .bss 4 B <= 16 B
 00150000  3C 60 00 80  lis      r3, 0x80
 00150004  38 80 00 00  li       r4, 0
-00150008  B0 83 60 00  sth      r4, 0x6000(r3)
+00150008  B0 83 FB 00  sth      r4, -0x500(r3)
 0015000C  4E 80 00 20  blr
 ...
 00150034  3C 80 00 15  lis      r4, 0x15

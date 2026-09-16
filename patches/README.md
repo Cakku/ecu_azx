@@ -56,4 +56,6 @@ patches/
 * `patch.ld` fails the link if `.data` is not empty, if `.bss` outgrows
   `ram_size`, or if the code leaves 0x150000-0x1AFFFF.
 * A patch whose `ram_status` is not `"verified"` applies with a loud
-  do-not-flash warning. `ff_counter` is in that state until issue #23 lands.
+  do-not-flash warning. `ff_counter` is `static` (block 0x7FFB00 from
+  `re/findings/ram.md`, no static reference) until the runtime half of
+  issue #23 confirms it.

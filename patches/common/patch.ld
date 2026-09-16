@@ -7,7 +7,7 @@
  *
  *     ld.lld -m elf32ppc -T ../../common/patch.ld \
  *            --defsym=PATCH_FLASH=0x00150000 \
- *            --defsym=PATCH_RAM=0x00807F00 \
+ *            --defsym=PATCH_RAM=0x007FFB00 \
  *            --defsym=PATCH_RAM_SIZE=0x40 ...
  *
  * FLASH  0x150000-0x1AFFFF is 384 KiB of 0xFF inside the checksummed 64 KiB

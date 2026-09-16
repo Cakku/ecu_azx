@@ -5,18 +5,20 @@ what will be read, what the numbers must be, and what each possible outcome
 means. Nothing below has been run on an ECU — every expectation here is a
 prediction, and the log is what turns it into a fact.
 
-> **Do not flash the image built from the current `patch.json`.** Its RAM block
-> is the placeholder 0x807F00, which brief C2 has since shown to be *inside*
-> the destination of the flash driver the ECU copies to 0x804800 and runs
-> during a programming session (README.md, PENDING #23). Brief C2's block
-> 0x7FFB00/0x100 has to replace it first; `tools/patch_apply.py` prints a
-> warning on every run while `"ram_status"` is not `"verified"`.
+> **RAM block (integration 2026-09-16):** `build.ram` is **0x7FFB00** (0x100 B),
+> the block `re/findings/ram.md` §8.1 recommends — VERIFIED-STATIC that nothing
+> in the image references it, **dynamic confirmation pending** (the runtime
+> half of #23: RequestUpload snapshots across key cycles, compared with
+> `tools/ram_snapshot_diff.py`). `tools/patch_apply.py` prints a warning on
+> every run while `"ram_status"` is not `"verified"`; do not flash before
+> those snapshots are done. (Brief C1 was written against the placeholder
+> 0x807F00, which C2 showed to be inside the flash driver's programming copy.)
 
 ## 0. Prerequisites
 
 | Item | Status |
 |---|---|
-| RAM block proven unused across ignition cycles | **blocked on #23 / brief C2.** C2's static half proposes 0x7FFB00/0x100 and rules out the 0x807F00 placeholder; the dynamic half (RAM dumps across ignition cycles) is still outstanding |
+| RAM block proven unused across ignition cycles | **static half done (C2, merged 2026-09-16): 0x7FFB00/0x100 has no static reference of any kind.** The dynamic half (RAM dumps across ignition cycles, `tools/ram_snapshot_diff.py`) is still outstanding |
 | A logger that can read arbitrary RAM (KWP2000 DDLI, service 0x2C + 0x21) | **blocked on #20**; the protocol itself is settled in `re/findings/kwp.md` sections 4 and 8 |
 | KESSv2 flashing checklist | `docs/04_re_guidelines.md` section 6, issue #26 |
 | A stock baseline log of the scenario in section 3 | record it *before* flashing |
@@ -33,8 +35,8 @@ DDLI — it is not in any stock measuring block.
 | `PATCH_RAM + 0x04` | u16 | `ff_alive` — `0xFC01` once our code has run, otherwise untouched |
 | `PATCH_RAM + 0x06` | u16 | `ff_reserved` — always 0 |
 
-`PATCH_RAM` is whatever `patch.json`'s `build.ram` says at flash time (0x807F00
-while the placeholder stands). One flash word changed: `0x12067C`,
+`PATCH_RAM` is whatever `patch.json`'s `build.ram` says at flash time (0x7FFB00
+since C2's block was adopted on 2026-09-16). One flash word changed: `0x12067C`,
 `4B FF E9 B1` -> `48 02 F9 85`.
 
 ## 2. Define the DDLI and read the counter
@@ -42,12 +44,12 @@ while the placeholder stands). One flash word changed: `0x12067C`,
 `re/findings/kwp.md` section 4 has the exact request format this firmware
 accepts, and section 8 recipe A the session handling. One entry of six bytes
 from `PATCH_RAM` puts the counter and the alive pattern in the same response.
-With the placeholder `PATCH_RAM = 0x807F00` (`a2 a1 a0` = `80 7F 00`):
+With `PATCH_RAM = 0x7FFB00` (`a2 a1 a0` = `7F FB 00`):
 
 ```
 10 89                            ; session 5: 0x21/0x2C, no security needed
 2C F0 04                         ; clear F0 first - redefining without this is NRC 0x22
-2C F0 03 01 06 80 7F 00          ; pos 1, 6 bytes @ 0x807F00   -> 6C F0
+2C F0 03 01 06 7F FB 00          ; pos 1, 6 bytes @ 0x7FFB00   -> 6C F0
 loop:  21 F0  -> 61 F0 <t3 t2 t1 t0> <a1 a0>
        3E 02  every ~2 s         ; keep alive
 ```
@@ -58,9 +60,9 @@ all of RAM; `<pos>` must be 1 for the first (and only) entry; there is **no
 arbitrary address at rate.
 
 The address bytes are the last three of the request, so they follow
-`build.ram`: `80 7F 00` for the placeholder, **`7F FB 00`** once brief C2's
-block 0x7FFB00 is adopted. Read them out of `patch.json` rather than from here
-— this file will be wrong the day the block moves again.
+`build.ram`: **`7F FB 00`** for the current block 0x7FFB00. Read them out of
+`patch.json` rather than from here — this file will be wrong the day the block
+moves again.
 
 **Sanity checks, in this order:**
 
@@ -148,7 +150,7 @@ there is no way back to a stock baseline except reflashing.
 | Symptom | First thing to check |
 |---|---|
 | `ff_alive` never becomes 0xFC01 | read the ECU back and `tools/bindiff.py` it against `work/ff_counter.bin`; KESS may have "corrected" a checksum we already had right (docs/06 section 6) |
-| Counter runs but the engine misbehaves | the RAM block is not free after all — the placeholder is unproven. Reflash stock immediately and finish #23 |
+| Counter runs but the engine misbehaves | the RAM block is not free after all — 0x7FFB00 is verified statically only. Reflash stock immediately and finish the dynamic half of #23 |
 | Counter increments in bursts or stalls | `task_100ms` is not a fixed-period raster; record the pattern, it answers `scheduler.md` section 10 |
 | Any logged stock variable outside tolerance | before blaming the patch, re-run the stock baseline: the tolerances in `tolerance.json` are predictions, not measured repeatability |
 
