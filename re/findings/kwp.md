@@ -480,3 +480,140 @@ handlers out of the dump with `emu.Med9Emu`, seeding only the RAM globals each
 success path needs (seed, level flags, security state, the I/O struct) — no ECU
 and no time base (the success paths never read it). See those files for the
 exact buffers; results are quoted in §3.2 and §5.4.
+
+---
+
+## 12. Corrections and additions from brief C3 (2026-09-16, issue #20)
+
+Found while building `logging/ecu_sim.py`, which drives the **real handlers**
+out of the dump with one persistent `emu.Med9Emu` (RAM survives between
+requests) instead of one emulator per call. Reproduce every item below with
+
+```bash
+python3 -m unittest tests.test_med9kwp -v          # the whole set, end to end
+python3 logging/ecu_sim.py --self-test             # the handler probes alone
+```
+
+### 12.1 The handler reads the sub-function from the I/O struct, not the buffer
+
+`kwp_sid_21_h1` (0x35F6C) takes the local id from **`kwp_io_struct+0xC`**
+(`lbz r3,0xc(r4)` at 0x35F84), not from `buffer[0]`, and requires
+`kwp_io_struct+6` (request length) > 0. §1.4 documents the field; this note
+records that at least one handler *only* reads the cached copy, so any harness
+that calls a handler directly must fill `+0xB` (SID) and `+0xC` (first data
+byte) as well as the buffer. VERIFIED-STATIC (disassembly above) and
+VERIFIED-DYNAMIC (with `+0xC` unset, `21 F0` answers NRC 0x11; with it set it
+answers `61 F0 <bytes>`).
+
+### 12.2 TesterPresent takes NO sub-function on this ECU — correction to §2.2
+
+§2.2 recommended `3E 01` / `3E 02`. The real handler (0x43A4A8, on-chip,
+file 0x2364A8) is nine instructions and does the opposite:
+
+```
+0043A4A8  lhz   r12,6(r4)       ; request length
+0043A4AC  cmpwi r12,0
+0043A4B0  bne   0x43a4c4        ; anything after the SID -> negative
+0043A4B4  li    r12,0 ; sth r12,8(r4) ; li r3,1      ; positive, 0 data bytes
+...
+0043A4C4  lwz   r12,0(r4) ; li r11,0x12 ; stb r11,0(r12)  ; NRC 0x12
+```
+
+* `3E` (one byte, nothing after it) -> **`7E`**, status 1, response length 0.
+* `3E 01` or `3E 02` -> **`7F 3E 12`** (subFunctionNotSupported).
+
+VERIFIED-STATIC (the listing above) and VERIFIED-DYNAMIC (emulated real
+handler; `tests/test_med9kwp.py::TestHandlers::test_tester_present_takes_no_subfunction`).
+**The logger and the bench recipes in §8 must send a bare `3E`.** §8 recipe A
+is corrected accordingly below.
+
+### 12.3 `21 <group>` returns TWO groups: G and G+0x7F — addition to §6
+
+`kwp21_group_read` (0x3583C) is the group path. It stores the requested group
+in `mw_group_requested` (0x7FD05E), calls the four-field reader `0x35748`, then
+does
+
+```
+00035888  lbz   r12,-0x2f92(r13)   ; 0x7FD05E, the requested group
+00035890  addi  r12,r12,0x7f       ; += 127
+00035894  stb   r12,-0x2f92(r13)
+00035898  lwz   r11,0(r30)         ; buffer
+000358A0  add   r3,r11,r10         ; just past the first 12 bytes
+000358A4  bl    0x35748            ; read four more fields
+```
+
+so the on-wire response is **25 bytes**:
+
+```
+61 <G> <4 x (formula,A,B) of group G> <4 x (formula,A,B) of group G+0x7F>
+```
+
+* Only groups **1..0x7F (127)** may be requested: 0x3585C rejects `> 0x7F`
+  before anything else and the caller turns that into **NRC 0x31**.
+  Groups 128..254 are readable **only** as the tail of the response for
+  group *G* − 127. (Issue #44 wants group 140 -> request `21 0D` and read
+  triples 5..8.)
+* Groups 0x50..0x54 take a different reader (`0x46338` instead of `0x35748`)
+  for their first four fields; the `+0x7F` second half is the same.
+* Formula 0x25 with A=B=0 is the "not implemented" stub 0x038EC4
+  (`re/findings/measuring_vars.md` §4), i.e. an empty field.
+
+Verified dynamically (emulated real handlers, RAM seeded):
+
+```
+21 01 -> 61 01 (01,C8,20)(05,0A,7C)(14,32,00)(14,32,00) (25,00,00)x4
+           group 001 = ids 1,80,28,29            group 128 = 813,826,0,827
+21 03 -> 61 03 (01,C8,20)(19,FF,FF)(21,FF,00)(1B,4B,80) (05,0A,7C)(05,0A,34)(25,00,00)(25,00,00)
+           group 003 = ids 1,10,7,9              group 130 = 80,480,0,0
+21 8C (140) -> 7F 21 31
+```
+
+The id-80 triple `(05,0A,7C)` appears in group 001 field 2, group 004 field 3
+and group 130 field 1 — the same variable, the same triple, three ways in.
+VERIFIED-STATIC (0x3583C) + VERIFIED-DYNAMIC (emulated).
+
+### 12.4 `kwp_sid_10_h1` (0x3716C) is the **K-line** session handler
+
+It cannot be emulated and, for the CAN route, does not have to be. With
+request length 1 it accepts **only sub-functions 0x81 and 0x89** — the
+predicate at 0x36B48 is literally
+
+```
+00036B48  cmpwi r3,0x81 ; beq .. ; cmpwi r3,0x89 ; bne .. ; li r3,1 ; blr
+```
+
+— every other sub-function falls into the length-2/length-5 branch at
+0x371D4, which is a **baud-rate table**: sub 1..6, 0x14, 0x87, 0x89, 0xA7,
+0xA9 select 9600 / 19200 / 38400 / 57600 / 115200 / 10400 (0x2580, 0x4B00,
+0x9600, 0xE100, 0x1C200, 0x28A0) and then reprogram the serial hardware.
+Under the Unicorn harness that path reaches the OS halt spin at **0x110F0**
+(`b 0x11114`) and never returns, so `logging/ecu_sim.py` does **not** run
+0x3716C. It calls the real one-line setter `kwp_session_set` (0x13CEE4,
+`stb r3,0x803D3E`) with the internal session number from the §2 table and
+enforces the §2 prerequisites (0x86 needs `kwp_security_state` == 3) in
+Python. HYPOTHESIS: on the CAN/TP2.0 route the session is started by a
+different entry point than the dispatch-table handler for 0x10, because the
+baud-rate branch is meaningless there; not chased further (time-boxed).
+
+### 12.5 Corrected recipe A (replaces §8 A)
+
+```
+10 89                                  ; session 5
+2C F0 04                               ; clear F0
+2C F0 03 01 01 A2 A1 A0                ; pos1, 1 byte @0x00A2A1A0 ... (<=20 chunks)
+loop:  21 F0   -> 61 F0 <bytes>        ; sample
+       3E      every ~2 s              ; keep alive -- NO sub-function (12.2)
+```
+
+### 12.6 Emulator limits that show up in the simulator
+
+* **The security seed is always 0.** `read_time_base` (0x478460) reads SPR
+  TBU/TBL, which the Unicorn 603e does not advance, so the real seed path
+  stores 0 in `kwp_sec_seed` (0x7FB774) and the key is 0x11170. The
+  *verification* of the key is still the real code, so `logging/ecu_sim.py
+  --seed 0x12345678` overwrites 0x7FB774 after the real seed handler has run
+  and reports that value on the wire; the subsequent `27 04` is checked by
+  `kwp_sid_27_h1` against it, exactly as `tools/kwp_seckey_verify.py` does.
+* `kwp_sec_level_flags` (0x7FB781) and the LFSR round count (0x7FB770) are
+  BSS in the dump and are seeded at simulated power-on (0x03 and 5), as the
+  verify tools do; on a real ECU the application sets them.

@@ -256,3 +256,111 @@ table alone.
 - The dispatcher is also a clean hook candidate for a bench logger: it is
   called once per field with the id in r3 and leaves the result in three
   fixed RAM bytes.
+
+---
+
+## 7. Formula cross-check against the ECU's own arithmetic (C3, 2026-09-16, #20)
+
+Section 5 deliberately recorded only the formula id and the constant `A`,
+because the formula-to-display arithmetic is community knowledge. Running the
+real group handlers under `logging/ecu_sim.py` closes that gap for two of them
+**without trusting the community table**: the ECU's own handler is fed a known
+RAM byte and the emitted `B` is compared with what an independently derived
+scaling predicts.
+
+### 7.1 Formula 0x05 is `T = 0.1 x A x (B - 100)` -- CROSS-CHECKED
+
+Measuring id 80 (group 001 field 2) reads **0x8021EF** and emits
+`(0x05, A=0x0A, B)`. `re/findings/start.md` (brief B8) says 0x8021EF is `tmot`
+with **T = 0.75x - 48 °C**, derived from the firmware, not from the display
+path. The two agree exactly:
+
+| 0x8021EF | 0.75x - 48 (start.md) | B emitted | 0.1 x 10 x (B-100) |
+|---|---|---|---|
+| 0x00 | -48.00 | 52 | **-48.00** |
+| 0x30 | -12.00 | 88 | **-12.00** |
+| 0x40 | 0.00 | 100 | **0.00** |
+| 0x60 | 24.00 | 124 | **24.00** |
+| 0x80 | 48.00 | 148 | **48.00** |
+| 0xA0 | 72.00 | 172 | **72.00** |
+| 0xC0 | 96.00 | 196 | **96.00** |
+| 0xFF | 143.25 | **243 (clamped)** | 143.00 |
+
+Two independent chains — a static read of the coolant path and the ECU's own
+display handler — give the same number for every value up to the clamp. So:
+
+* **formula 0x05 = 0.1 x A x (B - 100), °C** — VERIFIED-DYNAMIC (emulated real
+  handler) *for this ECU*, no longer just COMMUNITY;
+* **0x8021EF is `tmot` and its scaling is 0.75x - 48 °C** — independently
+  confirmed, which settles the first row of issue **#44** without a car;
+* the display byte **saturates at B = 243 = 143 °C**; anything hotter reads
+  143 °C in VCDS. Do not use the measuring block near the top of the range —
+  log 0x8021EF over DDLI instead.
+
+Reproduce: `python3 logging/ecu_sim.py --self-test` for the handler, and
+`tests/test_med9kwp.py::TestGroups::test_formula_05_matches_tmot_scaling`
+for the table above.
+
+### 7.2 Formula 0x01 is `n = 0.2 x A x B`, rpm -- CROSS-CHECKED
+
+Id 1 (group 001 field 1) reads 0x7FCE95 and emits `(0x01, A=0xC8, B=x)`;
+`0.2 x 200 x B = 40 x B`, which is exactly the "40 rpm per count" section 5
+inferred from A alone. Checked for x = 0, 20, 75, 200 (0, 800, 3000, 8000 rpm).
+
+### 7.3 Formula 0x53 is `p = ((A<<8)|B) x 0.01` bar -- CROSS-CHECKED
+
+Measuring id **500** reads **0x8031DA** (`prist_w`) and id **501** reads
+**0x8031F4** (`prsoll_w`), both with formula **0x53**.
+`re/findings/rail.md` section 2 gives both as u16 at **0.005 bar/LSB**, derived
+from the controller code. Varying 0x8031DA and reading group 106 field 1:
+
+| 0x8031DA | x 0.005 (rail.md) | A | B | (A<<8)\|B | x 0.01 |
+|---|---|---|---|---|---|
+| 0 | 0.00 | 0x00 | 0x00 | 0 | **0.00** |
+| 2000 | 10.00 | 0x03 | 0xE8 | 1000 | **10.00** |
+| 12000 | 60.00 | 0x17 | 0x70 | 6000 | **60.00** |
+| 20000 | 100.00 | 0x27 | 0x10 | 10000 | **100.00** |
+| 40000 | 200.00 | 0x4E | 0x20 | 20000 | **200.00** |
+| 65535 | 327.68 | 0x7F | 0xFF | **32767 (clamped)** | 327.67 |
+
+So the handler simply halves the raw word (0.005 -> 0.01 bar/LSB) and the
+tester multiplies by 0.01. That confirms, without a car:
+
+* **formula 0x53 = ((A<<8)\|B) x 0.01, bar** -- and it is **not in any of the
+  public formula tables consulted**, which stop well before 0x53;
+* **0x8031DA (`prist`) and 0x8031F4 (`prsoll`) really are 0.005 bar/LSB**, the
+  third row of issue **#44**;
+* the display word saturates at 32767 = **327.67 bar** (a signed-16 clamp).
+
+**Correction to the plan in #44:** group **140** does *not* contain `prsoll`.
+Group 140 is `(1005, 1006, 500, 1689)` -- field 3 is `prist` and fields 1-2 are
+0x803168/0x803164 with formula 0x5B. The group that holds **both** rail
+pressures next to each other is **231** = `(1006, 501, 500, 1689)`, i.e.
+field 2 `prsoll`, field 3 `prist`. Neither 140 nor 231 can be requested
+directly (section 12.3 of `kwp.md`); ask for **104** and read the second half
+of the answer, or for **13** to get group 140:
+
+```bash
+python3 logging/med9log.py groups --sim 231     # prints "reading group 104"
+```
+
+### 7.4 What was NOT verified
+
+Id 2 emits `(0x21, A=0x85, B = the raw byte of 0x7FEF74)`, so `100 x B / A`
+reads 100 % when the byte is 0x85 = 133 — consistent with "0x21 is the
+percentage formula", but there is no second chain for 0x7FEF74's own scaling,
+so 0x21 stays **COMMUNITY**. The other 41 formula ids this dataset emits stay
+COMMUNITY or unknown; `logging/med9kwp/vag_formulas.py` carries the table with
+a per-entry tag and prints the raw `(formula, A, B)` triple for everything it
+does not claim to know. The ids actually used by this dataset, by frequency:
+
+```
+0x10 148   0x25  90   0x36  70   0x1F  50   0x21  39   0x22  34   0x14  31
+0x05  30   0x3D  20   0x15  12   0x53  11   0x19  10   0x1A   9   0x08   8
+0x17   7   0x42   7   0x5B   7   0x01   6   0x12   6   0x07   5   0x34   5
+0x3E   5   ... (43 distinct ids, 660 implemented variables)
+```
+
+Reproduce with
+`python3 -c "import csv,re,collections; ..."` over `re/measuring_vars.csv`, or
+`python3 logging/med9log.py groups --formula-table`.

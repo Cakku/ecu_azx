@@ -112,6 +112,21 @@ Also summarised in `docs/03_tooling.md` section 5.
    SPR 528-543 *do* exist on a 603e (IBAT/DBAT) but mean something else on the
    MPC5xx, so those writes land in the wrong model. Use `watch_spr=True` to see
    them; `Med9Emu.MODELLED_SPRS` is the list the harness trusts.
+
+   **Added 2026-09-16 (brief C1): XER is modelled, but not observable through
+   the Python API.** `Result.regs["xer"]` (`uc_reg_read(UC_PPC_REG_XER)`) drops
+   SO/OV/CA and `uc_reg_write` sets them inconsistently, because QEMU keeps
+   those three bits outside `env->xer`. Seeding `xer=0x20000000` and reading it
+   back after a call that never touches XER gives `0x00000000`; seeding
+   `0x0000007F` and reading it with `mfxer` *inside* the guest gives
+   `0xE000007F`. The guest-visible round trip, on the other hand, is exact:
+   `mfxer` → `stw` → `lwz` → `mtxer` reproduced every seed tried (0,
+   0x20000000, 0xE000007F, 0x0000007F, 0x1FF3FFFF). So whether a trampoline
+   restored XER can only be decided with `mfxer` in emulated code, never with
+   `res.regs["xer"]`. `tests/fixtures/hook_full_probe.S` is that probe and
+   `tests/test_patch_framework.py::TestHookFull` uses it. SPR 1 stays in
+   `MODELLED_SPRS` because the instructions really are implemented — it is the
+   accessor that lies.
 2. **No peripherals at all.** USIU, TPU3, QADC, QSMCM, MIOS, TouCAN and the CS2
    and CS3 devices are zero-filled RAM. Anything the firmware polls has to be
    stubbed by hand (`stub_read`). Two are known: PLPRCR bit 0x8000 and the
@@ -147,4 +162,6 @@ project.
 | `boot_trace.py` | `python3 -m emu.boot_trace`: the two-stage boot report above |
 | `zw_model.py` | brief B7: bit-exact model of the base-ignition path (`KFZW`, `zwgru_build`); `python3 -m unittest tests.test_zw_model` |
 | `start_model.py` | brief B8: bit-exact model of the start path -- the cranking fuel factor `ksta` (`%ESSTT`, 0x41A268) and the start ignition angle `zwstt` (0x431294), with the two flex-fuel insertion points S1 and Z1; `python3 -m emu.start_model` prints both tables, `python3 -m unittest tests.test_start_model` checks them against the real code |
+| `ext_sram_probe.py` | brief C2 (#23): runs `ext_sram_probe` (0x011898) under both CS1 hardware models. Plain RAM -> 0x7F8012 = 0x44 (64 KB); with a hook that folds 0x808000 onto 0x800000, i.e. a 32 KB part in the 256 KB OR1 window -> 0x41 (32 KB). `python3 -m emu.ext_sram_probe`; checked by `tests/test_ram_survey.py` |
+| `os_clock.py` | brief C4 (#44): runs the ERCOSEK dispatchers against a virtual Time Base and measures every raster period from the activation-counter writes. `mftb`/`mftbu` are rewritten in emulator memory into a load from a scratch cell the driver advances to whatever the code programs into TBREF0, which is how a Unicorn run can have a controlled clock at all (limitation 1 below); `os_ActivateTask` and `os_set_alarm_cycle` are stubbed to a `blr` plus a hook. `python3 -m emu.os_clock --set a --seconds 5`; checked by `tests/test_ercosek_tasks.py` |
 | `../tests/test_emu.py` | the regression tests for all of it |

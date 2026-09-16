@@ -245,6 +245,29 @@ Result: `patches/examples/hello_patch` builds an 88-byte blob with `.text` at
 0x145000, `.rodata` at 0x145048 and `.bss` at 0x806000, addressing its table
 with `lis 0x14 / addi 0x5048` and never touching r2 or r13.
 
+#### Added 2026-09-16 (brief C1, issue #25)
+
+The flags above are unchanged, but the build moved into the shared framework:
+`patches/common/patch.mk` + `patches/common/patch.ld`, and hello_patch now
+links at **0x150000** (`src/hello.c`, `patch.json`, `Makefile`). Three more
+things this toolchain does that cost time to find out:
+
+- **`--defsym` does not override a linker-script assignment.** The
+  `X = DEFINED(X) ? X : <default>;` idiom is evaluated while lld computes
+  addresses, and `--defsym` is applied only afterwards — so the output is
+  linked at the *default* while the ELF symbol table reports the override.
+  `patch.ld` therefore has no defaults and requires all three `PATCH_*`
+  symbols. (This means the `make PATCH_FLASH=… PATCH_RAM=…` line documented
+  for the old `hello.ld` never actually worked.)
+- **A numeric branch operand is a displacement, not a target.**
+  `b 0x0011F02C` assembles to 0x4811F02C = branch to pc + 0x11F02C, and
+  `.set sym, 0x11F02C` + `b sym` behaves the same. Only an *undefined* symbol
+  resolved by the linker gives the intended relative word. `patches/common/`
+  trampolines use `ba` (AA=1) instead, whose operand is the address.
+- **Clang preprocesses `.S` files**, so `#include "../common/hooks.S"` and the
+  generated `med9_stock.h` work in assembly; the header is guarded with
+  `#ifndef __ASSEMBLER__` around everything that is not a number.
+
 ## 4. Disassembly and analysis in Python
 
 - `capstone` 5.0.x: `Cs(CS_ARCH_PPC, CS_MODE_32 | CS_MODE_BIG_ENDIAN)`.
@@ -325,6 +348,17 @@ unexpected. `logcmp.py` compares two logs in the format defined in
   Alternative without a PC tool: patch spare measuring-block slots so VCDS
   shows RAM values. CCP over CAN (MED9.1 CRO/DTO 0x7C3/0x7C4) needs direct
   powertrain-bus access (the gateway filters it).
+- **The logger exists (brief C3, 2026-09-16, issue #20):**
+  `logging/med9log.py` (`log` / `dump` / `groups` / `probe`) on
+  `logging/med9kwp/` (TP2.0 + KWP2000, a clean re-implementation, nothing
+  vendored), tested against `logging/ecu_sim.py`, an emulated ECU that answers
+  with the firmware's own handlers on a python-can `virtual` bus. Try
+  everything with `--sim` first. **Adapter recommendation, OBD wiring, the
+  first-contact procedure and what to do if the gateway does not route 0x200
+  are in `logging/README.md` sections 4-9.** Two corrections found while
+  building it are in `re/findings/kwp.md` section 12: **TesterPresent takes no
+  sub-function on this ECU** (`3E`, not `3E 01`), and `21 <group>` answers
+  with group *G* **and** group *G*+0x7F, only 1..127 being requestable.
 - DBC in `data/` is the infotainment CAN (PQ35 ICAN), useful only for
   gateway-bridged engine frames (`mGW_Motor` 0x35B etc.), not for the
   powertrain bus the ECU sits on. `data/ethanol_node.dbc` is ours: the one

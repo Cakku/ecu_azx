@@ -506,6 +506,26 @@ aliased). The brief asks whether 0x800000-0x807FFF is cleared at every start.
    not the cold start. So 0x804800-0x808687 is scratch **during a programming
    session only**.
 
+> **2026-09-16 (C2, issue #23) — point 2 and the verdict below are REFUTED.
+> VERIFIED-STATIC.** The `.data` copy really is empty, but the `.bss` fill for
+> the external SRAM is done by a *different* routine: `ram_clear_block`
+> (**0x06D8F8**, called only from 0x04CD84 inside `app_init` 0x04CCD4, which
+> `app_entry_crt0` reaches) zeroes **0x800004-0x800D07, 0x800D08-0x80361F and
+> 0x803620-0x80498F** in three `stwu`/`bdnz` loops, plus seven ranges of the
+> internal SRAM. Of the external SRAM only **0x800000-0x800003** (the word
+> this probe saves and restores) and **0x804990-0x807FFF** survive a reset,
+> and all of the latter is the destination of the KWP programming copy
+> (`FUN_0008A12C`, flash 0x081A00-0x085887 -> 0x804800-0x808688).
+> **So the external SRAM is ordinary `.bss` and cannot carry flex-fuel state
+> across a key cycle.** The "second fallback" of section 5 — "keep the byte in
+> the external SRAM and only mirror it to the EEPROM at key-off" — is not
+> available and must not be used; the block-8 proposal is unaffected.
+> Full derivation, the list of all fourteen fill ranges and the patch-RAM
+> consequences: `re/findings/ram.md` sections 3 and 3.1.
+> Reproduce: `python3 tools/ram_survey.py data/passat_azx_ori.bin` (the
+> "cold-start constant fills" block) and
+> `python3 tools/callgraph.py data/passat_azx_ori.bin --callers 0x06D8F8`.
+
 **Verdict:** VERIFIED-STATIC that the firmware never clears 0x800000-0x807FFF
 on a normal start and takes care to preserve it while probing;
 **HYPOTHESIS** that the SRAM is on a permanent (KL30) supply, because that is
@@ -555,4 +575,8 @@ found. This is a **correction to the reading implied in
    (`DFPMEEP`) and IUMPR blocks the FR lists, reached only through the
    run-time-indexed call sites.
 5. Whether the external SRAM is 32 KB or 64 KB on our hardware (RAM 0x7F8012
-   at run time answers it).
+   at run time answers it). *2026-09-16 (C2, #23): the probe is now emulated
+   under both models — `python3 -m emu.ext_sram_probe` gives 0x44 with plain
+   RAM and 0x41 when 0x808000 is folded onto 0x800000 — so the byte's meaning
+   is VERIFIED-DYNAMIC; only the hardware answer is still open.
+   `logging/sessions/ram_snapshot.json` asks C3's logger to read it first.*

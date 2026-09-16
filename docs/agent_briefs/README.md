@@ -12,6 +12,24 @@ closed: 13/13 issues. Phase 0 is blocked on hardware (#1-#4); Phase 2 has
 the hello-patch half of #25. Everything below is **desk work** that advances
 Phases 2-4 while the spare ECU, the BDM backup and the bench are pending.
 
+**Update 2026-09-16 (later): wave C is complete on `integration/wave-C`**
+(the human fast-forwards `main` after review). Pair 1: C1 (`patches/common/`,
+`tools/patch_gen.py`, `tools/patch_apply.py`, `patches/ff_counter/`, #25 done,
+#27 software half) and C2 (`tools/ram_survey.py`, `re/findings/ram.md`,
+`logging/sessions/ram_snapshot.json`, #23 static half). Pair 2: C3
+(`logging/med9kwp/`, `logging/med9log.py`, `logging/ecu_sim.py`, the session
+files, #20 software half) and C4 (`tools/ercosek_tasks.py`, `emu/os_clock.py`,
+`scheduler.md` §11-§12: the rasters are 10x faster than wave B assumed,
+0x45CAC4 = 20 ms, 0x4328E4 = 10 ms, #44 task-period row settled statically).
+Integration changes: `ff_counter` and the `hello_patch` template moved from the
+placeholder 0x807F00 (inside the KWP programming copy, C2 §6) to C2's block
+**0x7FFB00/0x100** with `"ram_status": "static"`; the Flash-1 procedure now
+reads the five raster counters first because the hook task belongs to task
+set B and which set is live is open (C4 §11.7); D1/D2 carry dated notes
+(external SRAM is cleared at cold start, EEPROM is the only persistence;
+filter constants per real raster). Wave D can start once `main` is
+fast-forwarded: D1 first, D3 as the filler.
+
 Rule learned in wave B: **run at most two agents at a time.** Four in
 parallel hit the API rate limit and lost their work. Agents commit after
 every finding for the same reason.

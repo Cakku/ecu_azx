@@ -514,7 +514,7 @@ RequestUpload snapshots across several ignition cycles) proves a range unused.
 | Target | Done when |
 |---|---|
 | Powertrain TouCAN module and the RX slot -> RAM mapping for the table at 0x2BC90 | writing a frame to a free slot's id on the bench makes its bytes appear at a known RAM address |
-| Periodic task table / hook point (100 ms) | a counter patch increments at 10 Hz |
+| Periodic task table / hook point (100 ms) | a counter patch increments at 10 Hz — **corrected 2026-09-16 (C4, #44): at 100 Hz.** The hook site 0x12067C is in a **10 ms** raster, not a 100 ms one; see §8 |
 | Fuel mass -> injection quantity multiplication (KRKATE path) and its variables (`rk`, `te`/`ti` per bank) | logged `ti` reproduces the decompiled formula for logged inputs |
 | Lambda adaptation variables (`fra`, `frau`, `frao`, `rkat`) | found in the measuring-variable table and logged |
 | `KFZW/KFZW2` blend and the final `zw` output; `dwkrz` | map addresses confirmed by xref and by a bench edit — **xref half done 2026-09-15 (B7, §3.4 note): no blend exists, `KFZW` 0x5C75FE, `KFZWOP` 0x5CA3F1, `dwkrz` 0x7FCE57-5C, insertion point 0x41D40C. The bench edit is still open.** |
@@ -523,3 +523,53 @@ RequestUpload snapshots across several ignition cycles) proves a range unused.
 | `vkKraQu` presence (fuel-quality variant byte) | present/absent decided; if present, its consumers listed |
 | EEPROM block handler | write path understood (Phase 5) |
 | Security access algorithm (KWP 0x27) | logger authenticates |
+
+---
+
+## 8. Added 2026-09-16 (C4, issue #44) — every raster in this document is 10x faster than assumed
+
+`re/findings/scheduler.md` sections 11 and 12 settle the ERCOSEK periods.
+The tick unit B1 used was five times too coarse and the activation chain was
+not known, so the rasters are
+
+| Raster | Task set A | Task set B |
+|---|---|---|
+| 1 ms | 0x4240C8 | 0x11EBF4 (`task_10ms`) |
+| 2 ms | 0x424900 | 0x11EC34 (`task_20ms`) |
+| 5 ms | 0x424AF8 | 0x11EC58 |
+| **10 ms** | **0x4328E4** (`task_100ms_int`) | **0x1205A0** (`task_100ms`) |
+| **20 ms** | **0x45CAC4** (`task_1000ms_int`) | **0x120FAC** (`task_1000ms`) |
+| 50 / 100 / 200 / 1000 ms | ids 25 / 18 / 22 / 17 | ids 37 / 31 / 34 / 30 |
+
+The symbol names are kept as they are, because five findings files and the
+issue tracker use them; the **names are wrong, the addresses are right**.
+
+What this changes here:
+
+* **§2.3 / §7, the Flash-1 counter.** The hook at 0x12067C runs at **100
+  calls per second**, not 10. A one-minute bench run gives ~6000 counts, not
+  ~600. That is C1's `patches/ff_counter/test/procedure.md` §4 slope; the
+  procedure is otherwise unaffected and now doubles as the *10 ms* period
+  test. (And it must first establish which task set is live — see below.)
+* **§2.2, `can_rx_poll`.** "Every 10-100 ms" from a raster task is still what
+  is wanted, but the task named there polls at 10 ms, which is comfortably
+  faster than the Pico's 100 ms frame rate. Nothing to change; the CAN
+  freshness/age logic of §3.2 gets ten times more samples than budgeted.
+* **§3.2, the filter.** `K ≈ 1/32 per 100 ms` was written for a 100 ms
+  raster. If the filter is hooked at 0x12067C it runs every 10 ms, so the
+  same K gives a **0.3 s** time constant instead of 3 s. Either use
+  `K ≈ 1/320` (i.e. a shift of 8 or 9 with the rate limiter doing the rest)
+  or drive the filter from a 100 ms raster (task set A id 18 / set B id 31)
+  instead. The `2 %/s` slew limit must likewise be expressed per raster
+  period, so 0.02 %/activation at 10 ms.
+* **§5.2, `rksplit` at 0x42247C.** Unaffected: that hook is in the
+  engine-synchronous task 0x4223B0, not in a time raster.
+* **Rail (B6 options C/D, `rail.md` §7).** The `%HDR*` chain in 0x45CAC4 runs
+  at **20 ms**, so the ethanol factor reaches `rkti_pre`/`frt` within one
+  20 ms period. Every "unknown latency" note attached to that task is closed.
+
+**Open, and it gates the counter test:** which of the two task sets runs with
+the engine turning. Set A is installed by `os_init`; 0x11DA64 switches to set
+B if the byte 0x7FEB5E is non-zero. If set A is live, a hook at 0x12067C
+never executes at all. The bench log in `scheduler.md` §11.7 settles it in one
+10-second read of five RAM counters.

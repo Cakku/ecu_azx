@@ -1,0 +1,48 @@
+{
+  "name": "ff_counter",
+  "issue": 27,
+  "description": "Flash 1: increment a u32 counter and write an alive pattern in the patch RAM block, once per task_100ms activation. No stock RAM, no calibration, no behaviour change.",
+  "base_sha256": "b15590d3f1874ace3125c5d047c09a686db9b8bb498187663539ebab205609b3",
+  "requires": [],
+  "ram_status": "static",
+  "ram_status_note": "VERIFIED-STATIC (brief C2, issue #23, 2026-09-16): no instruction in the image references any byte of 0x7FF770-0x7FFFEB (re/findings/ram.md section 8.1); the block lies above the task stack 0x7FF3C0-0x7FF76F, outside the KWP programming copy 0x804800-0x808687 and outside the protected window. It is NOT filled at cold start, hence the ff_alive marker. Dynamic confirmation (RequestUpload snapshots across key cycles, the runtime half of #23) is pending: do not flash before it is done. Adopted at integration on 2026-09-16, replacing the placeholder 0x807F00 that C2 showed to be inside the programming copy.",
+  "build": {
+    "flash": "0x00150000",
+    "ram": "0x007FFB00",
+    "ram_size": 256,
+    "blob": "build/ff_counter.bin",
+    "sym": "build/ff_counter.sym",
+    "hooks": [
+      {
+        "site": "0x0012067C",
+        "kind": "bl",
+        "target": "ff_counter_hook",
+        "old": "4bffe9b1",
+        "why": "task_100ms (0x1205A0, TCB 23): bl clr_ram_7FE889_800E18 -> ff_counter_hook trampoline, which tail-branches back to 0x11F02C (re/findings/scheduler.md section 8)"
+      }
+    ],
+    "blob_size": 96,
+    "blob_sha256": "4645f45b1eeef4795aceab574938abcb51dbef6c70e36b074ca9d0ebfb4d95f5",
+    "bss_size": 8,
+    "symbols": {
+      "ff_counter_hook": "0x150000"
+    }
+  },
+  "changes": [
+    {
+      "addr": "0x150000",
+      "kind": "blob",
+      "old": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "new": "9421fff07c0802a69001000c480000158001000c7c0803a6382100104811f02e3c6000803883fb00a08400042804fc0141820020388000003ca000809485fb00b08500063c8000006084fc01b08500048083fb00388400019083fb004e800020",
+      "why": "ff_counter code and constants (96 B of free flash)"
+    },
+    {
+      "addr": "0x12067c",
+      "kind": "hook",
+      "old": "4bffe9b1",
+      "new": "4802f985",
+      "why": "task_100ms (0x1205A0, TCB 23): bl clr_ram_7FE889_800E18 -> ff_counter_hook trampoline, which tail-branches back to 0x11F02C (re/findings/scheduler.md section 8)"
+    }
+  ],
+  "generated_by": "tools/patch_gen.py"
+}

@@ -1,0 +1,82 @@
+{
+  "_comment": [
+    "Ranges for the RAM snapshots that close the dynamic half of issue #23.",
+    "Produced by brief C2 from the static survey (tools/ram_survey.py,",
+    "re/findings/ram.md).  C3's logger reads each range with KWP RequestUpload",
+    "0x35 + TransferData 0x36 (62 data bytes per block, kwp.md 5) and writes one",
+    "file per session in the format tools/ram_snapshot_diff.py documents.",
+    "0x7F9E3C-0x7FA47F is left out on purpose: kwp_upload_range_check (0x0A3160)",
+    "answers NRC 0x31 for any request that overlaps it.",
+    "Sessions to record, in this order: key-on, idle (engine running, warm),",
+    "after a drive, then key-off/key-on three times.  Compare with",
+    "  python3 tools/ram_snapshot_diff.py logging/sessions/*.json --free 64"
+  ],
+  "ecu": "03H906032 / 1037382557",
+  "dump_sha256": "b15590d3f1874ace3125c5d047c09a686db9b8bb498187663539ebab205609b3",
+  "transport": "KWP2000 0x35 RequestUpload + 0x36 TransferData, 0x3E bytes/block",
+  "excluded": [
+    {
+      "start": "0x7F9E3C",
+      "end": "0x7FA47F",
+      "why": "KWP protected window, RequestUpload answers NRC 0x31 (kwp.md 5.1)"
+    }
+  ],
+  "ranges": [
+    {
+      "start": "0x7F8000",
+      "end": "0x7F9E3B",
+      "bytes": 7740,
+      "why": "internal SRAM below the protected window"
+    },
+    {
+      "start": "0x7FA480",
+      "end": "0x7FEFFF",
+      "bytes": 19328,
+      "why": "internal SRAM above the protected window, up to the old boot stack top"
+    },
+    {
+      "start": "0x7FF000",
+      "end": "0x7FFFFF",
+      "bytes": 4096,
+      "why": "PRIORITY: stack floor 0x7FF01C-0x7FF3BF, task stack 0x7FF3C0-0x7FF76F and the recommended patch region 0x7FF770-0x7FFFEB"
+    },
+    {
+      "start": "0x800000",
+      "end": "0x803FFF",
+      "bytes": 16384,
+      "why": "external SRAM, first half"
+    },
+    {
+      "start": "0x804000",
+      "end": "0x807FFF",
+      "bytes": 16384,
+      "why": "external SRAM, second half; 0x804800-0x807FFF is the KWP programming copy's destination"
+    }
+  ],
+  "priority_ranges": [
+    {
+      "start": "0x7FF770",
+      "end": "0x7FFFEB",
+      "bytes": 2172,
+      "why": "RECOMMENDED patch RAM. Must be blank (0x00 or 0xFF) and unchanged in every session, or the placement is wrong."
+    },
+    {
+      "start": "0x7FE0C0",
+      "end": "0x7FE587",
+      "bytes": 1224,
+      "why": "fallback block; must be shown not to be a second stack"
+    },
+    {
+      "start": "0x7FF000",
+      "end": "0x7FF76F",
+      "bytes": 1904,
+      "why": "stack. Measures the real low-water mark and so validates the 0x5D0 B static estimate."
+    },
+    {
+      "start": "0x804990",
+      "end": "0x807FFF",
+      "bytes": 13936,
+      "why": "the only external SRAM the cold start does not clear; expected to hold the previous programming session's leftovers"
+    }
+  ]
+}
