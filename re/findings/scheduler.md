@@ -524,9 +524,27 @@ out end to end, so every period is **VERIFIED-STATIC** and reproduced
 ### 11.1 The tick unit: 1 ms = 3508 Time Base ticks (285 ns each)
 
 Section 5.2 read the literal 7017 as 10 ms and concluded TB = 701.754 kHz.
-Four independent facts say it is 2 ms and TB = 3.5 MHz:
+Five independent facts say it is 2 ms and TB = 3.5 MHz, the first of them
+decisive on its own:
 
-1. **The ERCOSEK generator wrote its own clock description into the kernel
+0. **The firmware converts microseconds to Time Base ticks by dividing by
+   285, in executable code.** `0x12BBE4`, feeding `os_SetRelAlarm(0, …)`:
+
+   ```
+   0012BBE4  lwz   r12,-0x4BA8(r13)   ; 0x7FB448, a timeout in microseconds
+   0012BBE8  mulli r12,r12,0x3E8      ; x 1000            -> nanoseconds
+   0012BBEC  li    r11,0x11D          ; 285
+   0012BBF0  divwu r4,r12,r11         ; / 285 ns          -> Time Base ticks
+   0012BBF4  li    r3,0 ; li r5,0
+   0012BBFC  bl    0x476EE8           ; os_SetRelAlarm(0, ticks, one-shot)
+   ```
+
+   `0x011D = 285` appears as an immediate **exactly once in the whole image**,
+   here. 0x7FB448 is loaded with 0x11940 = 72000 at 0x12BB10, i.e. 72 ms, and
+   72000 x 1000 / 285 = 252631 ticks. So `ticks = t_ns / 285` is not an
+   inference about a data table: it is what the CPU does.
+   **VERIFIED-STATIC.**
+1. **The ERCOSEK generator wrote the same constant into the kernel
    configuration record.** `tbl_os_kernel_config` (external `0x09B6BC`,
    on-chip `0x478E20` — the same record; the stack descriptor C2 found at
    `0x09B6F8` is at +0x3C of both) carries at **+0xA0..+0xAC** the quartet
@@ -553,7 +571,7 @@ Four independent facts say it is 2 ms and TB = 3.5 MHz:
 
    Under section 5.2's unit the same set reads {1, 5, 10, 11, 20, 50, 150,
    400, 1500} ms; both look plausible in isolation, which is why B1's reading
-   survived. The 285 ns constant sitting in the kernel config decides it.
+   survived a whole wave. Facts 0 and 1 are what decide between them.
 3. **The hardware agrees.** `SCCR = 0x03217100` has **TBS = 1** (bit 6), and
    MPC561RM section 8.11.1 Table 8-9 plus Table 8-2 make that "time base
    source is the system clock divided by **16**" — see section 12 below. With
