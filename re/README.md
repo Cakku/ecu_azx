@@ -98,6 +98,14 @@ counts-only definition. `--extra-rows` is repeatable and takes the draft's own
 column format (plus any sidecar column), so a brief that produces new objects
 delivers its own rows instead of editing the draft.
 
+`re/ffcal001_draft_rows.csv` is such a file: the flex-fuel block of
+`docs/05_flexfuel_design.md` §4 laid out from 0x5E2510 as a **hypothesis**, so
+the block is visible in TunerPro before brief D1 lands. It is deliberately not
+part of the default build. **Brief D1 owns the real descriptor** and delivers
+`patches/ff_fuel/ffcal001_rows.csv`; at merge time use that one instead, and
+delete the placeholder. Until a patched image is loaded every cell of the block
+reads 255, because 0x5E2510 upwards is erased flash.
+
 ### Using it in TunerPro
 
 1. **Addresses in the XDF are file offsets**, `<baseoffset>` is 0. Open

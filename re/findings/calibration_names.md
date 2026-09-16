@@ -224,6 +224,21 @@ the shape (8 rows `nmot` × 8 columns load) and both axis addresses, so the
 sidecar restores them. Same treatment, same evidence trail, for the axes of the
 maps in §3.
 
+## 6.1 The FFCAL001 block
+
+`re/ffcal001_draft_rows.csv` holds the twelve objects of
+`docs/05_flexfuel_design.md` §4 laid out from 0x5E2510 (after the eight-byte
+`FFCAL001` marker) in the draft's column format, so that
+`tools/draft_to_xdf.py --extra-rows re/ffcal001_draft_rows.csv` puts them in
+the definition. **Everything about it is HYPOTHESIS**: the block does not
+exist in this image (0x5E2510 upwards is erased, `calibration_maps.md` §6), and
+brief **D1** owns the real descriptor and delivers
+`patches/ff_fuel/ffcal001_rows.csv`. Replace the placeholder with D1's file at
+merge time. The scaling in it is the one `docs/05` §4 specifies — `ff_F_curve`
+and `ff_fst_map` 1024 = 1.0, `ff_fzw_curve` 256 = 1.0, `ff_dzw_map` in the
+0.75 degCA of the ignition chain, `ff_prail_add` in 0.1 MPa — which is also the
+scaling the rest of this pass proved for the stock maps those hooks act on.
+
 ## 7. What is still unnamed (leads, not conclusions)
 
 Time-boxed and left for a follow-up brief; each line is a real lead with the

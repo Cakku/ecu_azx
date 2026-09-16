@@ -18,6 +18,7 @@ import med9lib as m  # noqa: E402
 
 DRAFT = REPO / "re" / "calibration_draft.csv"
 NAMES = REPO / "re" / "calibration_names.csv"
+FFCAL = REPO / "re" / "ffcal001_draft_rows.csv"
 
 # One 14 x 10 u16 map whose header, axes and data were read out of the image,
 # and one signed 8-bit curve with a shared axis.
@@ -418,6 +419,25 @@ class TestCommittedSidecar(DumpUnchanged):
                 if t.find("title").text == "KFZW"][0]
         self.assertEqual(kfzw.find("XDFAXIS[@id='z']/MATH").get("equation"), "X*0.75")
         self.assertEqual(kfzw.find("XDFAXIS[@id='y']/MATH").get("equation"), "X*0.25")
+
+    @unittest.skipUnless(FFCAL.is_file() and DRAFT.is_file(), "CSV missing")
+    def test_the_ffcal001_placeholder_merges_and_validates(self):
+        """re/ffcal001_draft_rows.csv is the docs/05 section 4 block as a
+        hypothesis; brief D1's real one replaces it at merge time."""
+        with DRAFT.open(newline="", encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+        before = len(rows)
+        added, replaced = x.merge_extra_rows(rows, x.read_csv(str(FFCAL)),
+                                             FFCAL.name)
+        self.assertEqual(replaced, 0)          # the block is in erased flash
+        self.assertGreater(added, 5)
+        self.assertEqual(len(rows), before + added)
+        rows, _ = x.apply_names(rows, x.load_names(str(NAMES)))
+        blob = x.build(rows, "t", "t", False, 2, None, 0)[0].tostring()
+        self.assertEqual(x.validate(blob)[2], [])
+        titles = [t.text for t in ET.fromstring(blob).iter("title")]
+        for name in ("ff_F_curve", "ff_dzw_map", "ff_fst_map"):
+            self.assertIn(name, titles)
 
     @unittest.skipUnless(NAMES.is_file(), "CSV missing")
     def test_main_merges_the_sidecar_automatically(self):
