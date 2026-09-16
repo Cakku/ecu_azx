@@ -15,14 +15,19 @@ target symbol, encodes the branch word and rewrites `changes`:
                "data": [{"addr": "0x5E2510", "file": "build/ffcal001.bin",
                          "expect_blank": true, "why": "..."},
                         {"addr": "0x2BD8C", "bytes": "000000ec",
-                         "old": "000007ff", "why": "..."}]}}
+                         "old": "000007ff", "why": "..."},
+                        {"addr": "0xA78A8", "u32_syms": ["ff_diag_e_pct"],
+                         "old": "00038ec4", "why": "..."}]}}
 
 A `data` entry is a flat byte range that is not code: a new calibration block
-(`file`, built by the patch's own generator) or a small table edit (`bytes`).
-Its `old` is read from the stock image; `expect_blank` additionally asserts
-that the stock bytes are all 0xFF, and an explicit `old` is compared against
-what is really there.  Unlock flags (`calibration_edit`, `onchip_edit`) are
-copied through to the change so `tools/patch_apply.py` sees them.
+(`file`, built by the patch's own generator), a small table edit (`bytes`), or
+a list of pointers into our own blob (`u32_syms`, resolved from the linker's
+`.sym` exactly as a hook target is, so a table of handler pointers cannot go
+stale when the code moves).  Its `old` is read from the stock image;
+`expect_blank` additionally asserts that the stock bytes are all 0xFF, and an
+explicit `old` is compared against what is really there.  Unlock flags
+(`calibration_edit`, `onchip_edit`) are copied through to the change so
+`tools/patch_apply.py` sees them.
 
 Branch encoding, I-form (docs/06, PowerPC UISA):
 
@@ -231,8 +236,26 @@ def generate(patch_dir: Path, stock_path: Path = DEFAULT_STOCK) -> tuple[dict, l
             new = (patch_dir / item["file"]).read_bytes()
         elif "bytes" in item:
             new = bytes.fromhex(str(item["bytes"]))
+        elif "u32_syms" in item:
+            # A table of pointers into our own blob: resolved from the linker's
+            # symbols, never written by hand, so it follows the code.
+            words = bytearray()
+            for name in item["u32_syms"]:
+                if name not in syms:
+                    raise PatchError(f"data #{i}: {sym_path} has no symbol {name!r}")
+                value = syms[name]
+                if not flash <= value < flash + len(blob):
+                    raise PatchError(f"data #{i}: {name} resolves to {value:#x}, "
+                                     f"which is outside the blob")
+                if value % 4:
+                    raise PatchError(f"data #{i}: {name} ({value:#x}) is not "
+                                     f"4-byte aligned; the CPU branches to it")
+                resolved[name] = f"{value:#08x}"
+                words += value.to_bytes(4, "big")
+            new = bytes(words)
         else:
-            raise PatchError(f"data #{i} at {addr:#08x} has neither 'file' nor 'bytes'")
+            raise PatchError(f"data #{i} at {addr:#08x} has no 'file', 'bytes' "
+                             f"or 'u32_syms'")
         if not new:
             raise PatchError(f"data #{i} at {addr:#08x} is empty")
         off = m.cpu_to_file(addr)
@@ -261,8 +284,12 @@ def generate(patch_dir: Path, stock_path: Path = DEFAULT_STOCK) -> tuple[dict, l
             if item.get(flag):
                 change[flag] = True
         changes.append(change)
-        notes.append(f"data {addr:#08x}: {len(new)} B"
-                     + (f" from {item['file']}" if "file" in item else ""))
+        origin = ""
+        if "file" in item:
+            origin = f" from {item['file']}"
+        elif "u32_syms" in item:
+            origin = " = " + ", ".join(f"{n} {syms[n]:#08x}" for n in item["u32_syms"])
+        notes.append(f"data {addr:#08x}: {len(new)} B{origin}")
 
     build["blob_size"] = len(blob)
     build["blob_sha256"] = hashlib.sha256(blob).hexdigest()
