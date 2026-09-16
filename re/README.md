@@ -28,6 +28,8 @@ Current notes:
 | `findings/calibration_coverage.md` | What of 0x5C2000-0x5E2FFF the draft accounts for, every uncovered range, and the free-space check for the FFCAL001 block. |
 | `findings/calibration_call_sites.csv` | One row per interpolation-helper call site, resolved or not, with the reason. |
 | `findings/fr_index.md` | Bosch MED9.1 Funktionsrahmen index: which FR module and which labels cover each area we care about, and what our dump actually confirms. |
+| `findings/ram.md` | RAM survey (issue #23, static half): what references every byte of 0x7F8000-0x807FFF, what the cold start fills, where the stack and the kernel RAM are, where the KWP programming copy lands, and the block a patch may use (`PATCH_RAM = 0x7FFB00`). Data in `ram_map.csv`. |
+| `ram_map.csv` | One row per 32-byte line of the two SRAMs with the reference counts and the `free_candidate` flag. Regenerate with `python3 tools/ram_survey.py data/passat_azx_ori.bin --csv re/ram_map.csv`. |
 `ghidra_export/functions.csv` is a regenerated dump of **every** function in
 the current Ghidra project, auto-named `FUN_` ones included. It is not
 knowledge, it is coverage: diff two of them to see what a session added.

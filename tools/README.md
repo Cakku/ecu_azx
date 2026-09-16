@@ -24,6 +24,8 @@ document and `med9lib.py` together.
 | `gen_stock_header.py` | Generate `patches/common/med9_stock.h` (stock function / RAM addresses for patch code) from `re/symbols.csv`; `--check` fails the build when the checked-in header is stale. |
 | `patch_gen.py` | Turn a patch's `build` section into its `changes` list: resolve hook targets from the `.sym` file, encode the I-form branch words (reach and alignment checked), assert the stock bytes under the blob are 0xFF. `changes` is generated, never hand-edited. |
 | `patch_apply.py` | The only tool that modifies an image. Checks `base_sha256`, the forbidden regions and every `old`; writes the `new` bytes to a copy; fixes and verifies the checksums; proves the identification block is unchanged; requires a clean `bindiff`. Writes nothing if any of that fails. |
+| `ram_survey.py` | Per-byte static usage survey of the two SRAMs (0x7F8000-0x807FFF): r13 D-form accesses, absolute `lis`+D-form pairs, pointer words in both flash regions, measuring-variable cells, the cold-start fills and a table of known structures. Emits `re/ram_map.csv`, a 256-byte page map and the longest reference-free runs. `--indexed` bounds the arrays those runs usually belong to; `--stack` walks the deepest `stwu` chain from each task entry. `re/findings/ram.md`. |
+| `ram_snapshot_diff.py` | Compares the RAM snapshots taken over KWP RequestUpload and classifies every byte `changed` / `constant` / `blank`. The dynamic half of issue #23; ranges in `logging/sessions/ram_snapshot.json`, format in the module docstring, `--self-test` runs it on synthetic snapshots. |
 | `sda_xref.py` | Whole-image cross-references. `--var LO [HI]` decodes every r2/r13-relative D-form load/store and prints the ones resolving into the range — the small-data accesses `callgraph.py --xref-store` cannot see. `--code ADDR...` prints every `b`/`bl` **site** targeting an address (not the enclosing function), so a flat ERCOSEK task body reads off directly. Used throughout `re/findings/rail.md` (issue #17). |
 
 Quick checks:
@@ -43,6 +45,11 @@ python3 tools/callgraph.py data/passat_azx_ori.bin \
 python3 tools/r2_context.py data/passat_azx_ori.bin --compare --violations
 python3 tools/sda_xref.py data/passat_azx_ori.bin --var 0x8031DA   # prist readers/writers
 python3 tools/sda_xref.py data/passat_azx_ori.bin --code 0x457BC8  # who calls the HDR controller
+python3 tools/ram_survey.py data/passat_azx_ori.bin --csv re/ram_map.csv
+python3 tools/ram_survey.py data/passat_azx_ori.bin --indexed --indexed-min 0x40
+python3 tools/ram_survey.py data/passat_azx_ori.bin --stack
+python3 tools/ram_snapshot_diff.py --self-test
+python3 -m emu.ext_sram_probe                # 0x7F8012 = 0x44 / 0x41 per CS1 model
 ```
 
 Building and applying a patch (`docs/06_patch_pipeline.md`, issue #25). The

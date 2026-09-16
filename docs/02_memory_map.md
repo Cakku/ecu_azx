@@ -179,13 +179,39 @@ other used vectors -> 0x110F0, a fatal-error handler that spins).
 | Register | Value | Set at (file) | Used for |
 |---|---|---|---|
 | r1 | 0x7FEFFC | 0x10D8 | stack |
-| r13 | **0x7FFFF0** | 0x10E0, 0x986AC, 0x9E3E0, tail 0x201588 (cpu 0x405588) | read/write small data. 64,727 r13-relative accesses, offsets -0x7FF0..+0x73F9, i.e. RAM 0x7F8000-0x8073E9 spanning both SRAMs. |
+| r13 | **0x7FFFF0** | 0x10E0, 0x986AC, 0x9E3E0, tail 0x201588 (cpu 0x405588) | read/write small data. **64,717 D-form loads/stores plus 2,640 `addi`/`ori`**, i.e. RAM **0x7F8000-0x8076D6** spanning both SRAMs (corrected 2026-09-16, C2 #23; the old figures were 64,727 and 0x8073E9). |
 | r2 | **0x017FF0** during boot | 0x10E8 | read-only small data in the constant block 0x10000-0x1FFFF |
 | r2 | **0x5C9FF0** in the application | 0x86010, 0x862DC, 0x986B4, 0x9E3E4, tail 0x201590 | read-only small data in calibration 0x5C1FF0-0x5D1FEF (this is the value the MED9.1 community documents) |
 
 Which functions run under which r2 must be established from the call graph in
 Ghidra (both bases land on dense data, so no static shortcut). Default to
 0x5C9FF0 and override for the boot module reachable from 0x1004.
+
+> **2026-09-16 (C2, issue #23) — the RAM is surveyed. VERIFIED-STATIC.**
+> `tools/ram_survey.py` gives a per-byte picture of 0x7F8000-0x807FFF and
+> `re/ram_map.csv` records it; the write-up is `re/findings/ram.md`. Facts
+> that change what this document says elsewhere:
+>
+> * **The calibration block 0x1C0000-0x1FFFFF must not be disassembled.**
+>   Treating it as code invents 51 `lbzu/lfdu/stfsu rX,d(r13)` *update*-form
+>   accesses, which no compiler emits (they would overwrite r13), and a bogus
+>   "highest r13 reference 0x807CB9". The r13 figures in the table above are
+>   measured over 0x000000-0x1BFFFF and 0x404000-0x47FFFF only.
+> * **Stack.** The application stack is **0x7FF3C0-0x7FF76F**, not "stack top
+>   0x7FEFFC": 0x7FEFFC is the *boot* stack, dead once `app_entry_crt0` sets
+>   r1 = 0x7FF768, and that RAM is reused as application data. Evidence: the
+>   kernel stack descriptor at flash 0x09B6F8 and the cold-start fill of
+>   exactly 0x7FF3C0-0x7FF76B by `FUN_0012C25C`. The section 3 table's
+>   "Stack top 0x7FEFFC" is true only for the boot module.
+> * **The external SRAM is cleared at every cold start**, 0x800004-0x80498F,
+>   by `ram_clear_block` 0x06D8F8 and `app_init` 0x04CCD4. It is ordinary
+>   `.bss`, not a retention area (this also corrects
+>   `re/findings/eeprom.md` section 6).
+> * **0x804800-0x808688 is the KWP programming copy's destination** and is
+>   *executed* there, and with a 32 KB CS1 part the tail wraps onto
+>   0x800000-0x800687. Nothing of a patch may live there.
+> * **Patch RAM: 0x7FFB00, 0x100 bytes** — see
+>   `docs/06_patch_pipeline.md` section 3.
 
 > **2026-09-15 (B1, issue #8) — the boot module is delimited, and the 0x86330
 > outlier is explained. VERIFIED-STATIC.** Full derivation and the commands:
