@@ -167,13 +167,22 @@ python3 logging/med9log.py log    --sim --seconds 2 \
         --session logging/sessions/wave_b_confirm.json -o work/sim.csv
 python3 logging/med9log.py dump   --sim --ranges logging/sessions/ram_snapshot.json \
         -o work/sim_snap.bin --session-name key-on
-python3 -m unittest tests.test_med9kwp           # 43 tests, no hardware
+python3 -m unittest tests.test_med9kwp           # 49 tests, no hardware
 ```
 
-`--sim` runs the simulator in this process on a python-can `virtual` bus.
-Nothing it produces is a recording of an ECU, and both the CSV and the
-snapshot manifest say so in a `# simulated:` / `"simulated"` line — **never put
-a simulated snapshot into the #23 comparison set.**
+The simulator animates the five raster counters and C1's Flash-1 block at the
+rates brief C4 measured (1 ms / 2 ms / 10 ms, so +1000, +500 and +100 per
+second). `logging/ecu_sim.py --task-set A` makes the **other** OS task set
+live, which freezes the set-B counters *and* the Flash-1 block — rehearse that
+before the bench, because on a real ECU it looks exactly like a failed flash
+and is not one (`sessions/flash1_counter.json` check 1).
+
+`--sim` runs the simulator **in this process** on a python-can `virtual` bus;
+that bus does not cross process boundaries, so starting `ecu_sim.py` in a
+second terminal on `virtual:` will not work (put it on a real adapter if you
+want that). Nothing it produces is a recording of an ECU, and both the CSV and
+the snapshot manifest say so in a `# simulated:` / `"simulated"` line —
+**never put a simulated snapshot into the #23 comparison set.**
 
 ### Session files
 
@@ -199,7 +208,7 @@ that spills onto the next id, which is then polled in the same sample; past
 
 | File | The question it answers |
 |---|---|
-| `sessions/wave_b_confirm.json` | every row of #44, plus the three raster counters that settle the task periods |
+| `sessions/wave_b_confirm.json` | every row of #44, plus the five raster counters that confirm brief C4's task periods and say **which of the two OS task sets is live** |
 | `sessions/can_bc_check.json` | do TouCAN modules B and C share one wire? (`can.md` section 3) |
 | `sessions/flash1_counter.json` | did Flash 1 run, and at what rate? (`patches/ff_counter/test/procedure.md`) |
 | `sessions/ram_snapshot.json` | the *ranges* for `dump`, from brief C2 |

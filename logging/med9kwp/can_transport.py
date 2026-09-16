@@ -181,7 +181,7 @@ def open_link(cfg: BusConfig, *, accept: Iterable[int] | None = None) -> CanLink
             "is /dev/tty.usbmodem*, not /dev/cu.*\n"
             "  socketcand: needs no extra package -- is socketcand running on "
             "the Pi? (pi_can_setup/README.md section 4)\n"
-            "  no hardware at all: use `--sim`, or `--bus virtual:med9` with "
-            "logging/ecu_sim.py running."
+            "  no hardware at all: use `--sim`, which runs logging/ecu_sim.py "
+            "in this process (the `virtual` bus does not cross processes)."
         ) from exc
     return CanLink(bus, accept=accept, describe=cfg.describe())

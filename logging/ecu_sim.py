@@ -31,20 +31,31 @@ What is **not** real, and why (details in `re/findings/kwp.md` section 12):
   against that value, exactly as `tools/kwp_seckey_verify.py` does.
 
 A few RAM cells are animated so a log shows movement: an rpm ramp, coolant
-warm-up, the Flash-1 counter of `patches/ff_counter/` and the three raster
-activation counters.  See :class:`AnimatedRam`.
+warm-up, the Flash-1 counter of `patches/ff_counter/` and the five raster
+activation counters of the two OS task sets.  `--task-set A` makes the *other*
+set live, which freezes the set-B counters **and** the Flash-1 block -- the
+case `logging/sessions/flash1_counter.json` check 1 has to tell apart from a
+failed flash.  See :class:`AnimatedRam`.
 
 Usage::
 
     python3 logging/ecu_sim.py --self-test          # handlers only, no bus
-    python3 logging/ecu_sim.py --bus virtual:med9   # serve until ctrl-C
+    python3 logging/ecu_sim.py --bus slcan:/dev/tty.usbmodem1411 -v
     python3 logging/ecu_sim.py --bus virtual:med9 --drop-ack 1 --delay-ms 5
 
-and from Python (what the tests and `med9log.py --sim` do)::
+**python-can's `virtual` bus does not cross process boundaries**, so a
+simulator started from a second terminal on `virtual:` is invisible to the
+logger.  Either put it on a real adapter (`slcan:`/`gs_usb:`, which is how you
+would test a third-party tool against it) or, normally, let the logger start
+it in-process::
+
+    python3 logging/med9log.py probe --sim
+
+which is this, from Python -- also what `tests/test_med9kwp.py` does::
 
     sim = EcuSimulator.on_virtual_bus("med9")
     with sim.background():
-        ...                      # drive med9log.py against it
+        ...                      # drive the logger against it
 """
 from __future__ import annotations
 
@@ -130,6 +141,11 @@ class AnimatedRam:
     ramp_period: float = 20.0
     idle_rpm: float = 800.0
     peak_rpm: float = 3000.0
+    #: which OS task set is live, "A" or "B" (re/findings/scheduler.md 11-12,
+    #: brief C4): os_init installs set A and 0x11DA64 switches to set B when
+    #: 0x7FEB5E != 0.  The counters of the other set stay frozen -- and so does
+    #: C1's Flash-1 counter, whose hook sits in a set-B task.
+    live_task_set: str = "B"
     #: static values written once at power-on: {address: (bytes)}
     statics: dict = field(default_factory=dict)
 
@@ -151,13 +167,22 @@ class AnimatedRam:
         degc = 20.0 + 70.0 * min(t / 120.0, 1.0)
         emu.write(0x8021EF, bytes([int((degc + 48.0) / 0.75) & 0xFF]))
         emu.write(0x802228, struct.pack(">H", int((degc + 48.0) / 0.75 * 16)))
-        # the three raster activation counters (re/symbols.csv, C3)
-        emu.write(0x7FD760, struct.pack(">I", int(t * 100)))      # 10 ms
-        emu.write(0x7FD778, struct.pack(">I", int(t * 50)))       # 20 ms
-        emu.write(0x7FD758, struct.pack(">I", int(t * 10)))       # 100 ms
-        # Flash 1: patches/ff_counter/ at build.ram = 0x7FFB00
-        emu.write(0x7FFB00, struct.pack(">I", int(t * 10)))       # ff_ticks
-        emu.write(0x7FFB04, struct.pack(">H", 0xFC01))            # ff_alive
+        # The raster activation counters.  Periods per brief C4
+        # (re/findings/scheduler.md 11-12): 1 ms, 2 ms and 10 ms, i.e. 1000,
+        # 500 and 100 counts/s -- NOT the 10/20/100 ms of scheduler.md 5.4.
+        # Only the live set counts; the other stays at zero.
+        set_b = self.live_task_set.upper() == "B"
+        emu.write(0x7FD754, struct.pack(">I", 0 if set_b else int(t * 100)))
+        emu.write(0x7FD75C, struct.pack(">I", 0 if set_b else int(t * 1000)))
+        emu.write(0x7FD758, struct.pack(">I", int(t * 100) if set_b else 0))
+        emu.write(0x7FD760, struct.pack(">I", int(t * 1000) if set_b else 0))
+        emu.write(0x7FD778, struct.pack(">I", int(t * 500) if set_b else 0))
+        # Flash 1: patches/ff_counter/ at build.ram = 0x7FFB00.  Its hook is in
+        # a set-B task, so with set A live it never runs and the block stays
+        # untouched -- the case the bench procedure has to be able to tell from
+        # a failed flash.
+        emu.write(0x7FFB00, struct.pack(">I", int(t * 100) if set_b else 0))
+        emu.write(0x7FFB04, struct.pack(">H", 0xFC01 if set_b else 0))
         emu.write(0x7FFB06, struct.pack(">H", 0))                 # reserved
 
     def power_on(self, emu) -> None:
@@ -502,6 +527,10 @@ def main(argv=None) -> int:
                     help="delay every frame this long")
     ap.add_argument("--no-animate", action="store_true",
                     help="freeze the animated RAM cells")
+    ap.add_argument("--task-set", choices=("A", "B"), default="B",
+                    help="which OS task set is live (scheduler.md 11-12). "
+                         "With A, the set-B counters and C1's Flash-1 block "
+                         "stay at zero -- rehearse that case before the bench")
     ap.add_argument("--session-timeout", type=float, default=0.0, metavar="S",
                     help="drop back to session 0 after S seconds without a KWP "
                          "request (0 = never; the real ECU is about 5 s)")
@@ -513,9 +542,11 @@ def main(argv=None) -> int:
     if args.self_test:
         return 0 if self_test(args.dump) else 1
 
-    handlers = Med9Handlers(args.dump, seed=args.seed or None,
-                            animate=not args.no_animate,
-                            session_timeout_s=args.session_timeout or None)
+    handlers = Med9Handlers(
+        args.dump, seed=args.seed or None, animate=not args.no_animate,
+        session_timeout_s=args.session_timeout or None,
+        ram=AnimatedRam(live_task_set=args.task_set,
+                        statics=dict(DEFAULT_STATICS)))
     link = open_link(parse_bus_spec(args.bus))
     link.set_accept(None)
     sim = EcuSimulator(link, handlers, address=args.address,

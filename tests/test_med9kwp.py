@@ -172,6 +172,16 @@ class TestChunkPlanner(unittest.TestCase):
 
 
 @requires_can
+class TestGroupArgumentParsing(unittest.TestCase):
+    def test_vcds_style_zero_padded_group_numbers(self):
+        # the brief and VCDS both write "001 002 106"; int(x, 0) rejects those
+        self.assertEqual(med9log.parse_group("001"), 1)
+        self.assertEqual(med9log.parse_group("002"), 2)
+        self.assertEqual(med9log.parse_group("106"), 106)
+        self.assertEqual(med9log.parse_group("0x6a"), 0x6A)
+
+
+@requires_can
 @requires_dump
 class TestSessionFiles(unittest.TestCase):
     def test_every_session_file_loads_and_plans(self):
@@ -199,11 +209,27 @@ class TestSessionFiles(unittest.TestCase):
         self.assertEqual(by_name["ff_reserved"].address, ram + 6)
 
     def test_symbols_resolve_from_symbols_csv(self):
-        session = med9log.load_session(
-            REPO / "logging" / "sessions" / "wave_b_confirm.json")
-        by_name = {v.name: v for v in session.variables}
-        self.assertEqual(by_name["task_10ms_activation_count"].address, 0x7FD760)
-        self.assertEqual(by_name["task_10ms_activation_count"].size, 4)
+        self.assertEqual(med9log._resolve_symbol("raster_setB_1ms_count"),
+                         (0x7FD760, 4))
+        self.assertEqual(med9log._resolve_symbol("nmot_w"), (0x7FEE74, 2))
+
+    def test_symbols_resolve_from_measuring_vars_csv(self):
+        self.assertEqual(med9log._resolve_symbol("cand_mw_tmot"), (0x8021EF, 1))
+
+    def test_an_unknown_symbol_is_a_clear_refusal(self):
+        with self.assertRaises(SystemExit) as ctx:
+            med9log._resolve_symbol("no_such_variable")
+        self.assertIn("re/symbols.csv", str(ctx.exception))
+
+    def test_the_raster_counters_cover_both_task_sets(self):
+        """C4: only one task set is live, so both must be logged (#44)."""
+        for name in ("wave_b_confirm", "flash1_counter"):
+            with self.subTest(session=name):
+                session = med9log.load_session(
+                    REPO / "logging" / "sessions" / f"{name}.json")
+                by_addr = {v.address for v in session.variables}
+                self.assertTrue({0x7FD754, 0x7FD758, 0x7FD75C, 0x7FD760,
+                                 0x7FD778} <= by_addr)
 
 
 # ---------------------------------------------------------------------------
@@ -622,13 +648,38 @@ class TestDumpCommand(_SimCase):
 
 @requires_can
 @requires_dump
-class TestAnimatedRam(unittest.TestCase):
+class TestAnimatedRam(DumpUnchanged):
     def test_the_rpm_ramp_is_deterministic(self):
         ram = AnimatedRam()
         self.assertAlmostEqual(ram.rpm(0.0), 800.0)
         self.assertAlmostEqual(ram.rpm(10.0), 3000.0)
         self.assertAlmostEqual(ram.rpm(20.0), 800.0)
         self.assertAlmostEqual(ram.rpm(5.0), 1900.0)
+
+    def _counters(self, live_set: str) -> dict[int, int]:
+        handlers = Med9Handlers(str(DUMP), animate=False,
+                                ram=AnimatedRam(live_task_set=live_set))
+        handlers.ram.apply(handlers.emu, 1.0)          # one simulated second
+        return {a: struct.unpack(">I", handlers.read_ram(a, 4))[0]
+                for a in (0x7FD754, 0x7FD758, 0x7FD75C, 0x7FD760, 0x7FD778,
+                          0x7FFB00)}
+
+    def test_set_b_live_counts_at_the_c4_rates(self):
+        c = self._counters("B")
+        self.assertEqual(c[0x7FD760], 1000)      # set B 1 ms
+        self.assertEqual(c[0x7FD778], 500)       # set B 2 ms
+        self.assertEqual(c[0x7FD758], 100)       # set B 10 ms
+        self.assertEqual(c[0x7FFB00], 100)       # ff_ticks tracks it 1:1
+        self.assertEqual(c[0x7FD754], 0)         # set A frozen
+        self.assertEqual(c[0x7FD75C], 0)
+
+    def test_set_a_live_freezes_the_flash1_block(self):
+        """The case flash1_counter.json check 1 must not read as a bad flash."""
+        c = self._counters("A")
+        self.assertEqual(c[0x7FD75C], 1000)      # set A 1 ms
+        self.assertEqual(c[0x7FD754], 100)       # set A 10 ms
+        self.assertEqual(c[0x7FD758], 0)         # set B frozen
+        self.assertEqual(c[0x7FFB00], 0)         # and so is our counter
 
 
 if __name__ == "__main__":

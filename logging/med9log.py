@@ -494,6 +494,14 @@ def _print_group(group: int, primary, secondary) -> None:
             print(f"  field {i}: {vag_formulas.decode(*triple).line()}")
 
 
+def parse_group(text: str) -> int:
+    """VCDS writes groups zero-padded ("001"), which `int(x, 0)` rejects."""
+    raw = text.strip()
+    if raw[:2].lower() in ("0x", "0b", "0o"):
+        return int(raw, 0)
+    return int(raw, 10)
+
+
 def cmd_groups(args) -> int:
     if args.formula_table:
         print("VAG measuring-block display formulas known to this tool:")
@@ -504,7 +512,7 @@ def cmd_groups(args) -> int:
             return 0
     wanted = []
     for raw in args.groups:
-        g = int(raw, 0)
+        g = parse_group(raw)
         if not 1 <= g <= 254:
             raise SystemExit(f"group {g} does not exist (1..254)")
         if g > 0x7F:
@@ -633,7 +641,8 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("groups", help="read VCDS-style measuring blocks")
     _add_bus_args(p)
-    p.add_argument("groups", nargs="*", help="group numbers, e.g. 1 2 3 106")
+    p.add_argument("groups", nargs="*",
+                   help="group numbers, VCDS style: 001 002 106 231")
     p.add_argument("--formula-table", action="store_true",
                    help="print what this tool knows about the display formulas")
     p.set_defaults(func=cmd_groups)
