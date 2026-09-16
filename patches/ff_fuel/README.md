@@ -307,6 +307,22 @@ Absolute addressing throughout (`lis 0x80` / `-0x500`, `lis 0x5E` for the
 calibration), **no r2 or r13 anywhere** (`--check-sda` OK), no `.rodata`, no
 floating point, no 64-bit arithmetic, and every loop is fixed-length.
 
+### The two halves share one word, and only one
+
+The segment task (id 40, priority 0x0A) and the raster task (id 32/19, priority
+0x09) are different ERCOSEK tasks, so one can preempt the other. Everything the
+segment half reads is a single aligned load:
+
+* `ff_magic` — written only by `ff_state_init()`, and only to the same value;
+* `ff_f_q10` — a u16 written with one `sth`, so a `lhz` can never see half of
+  an old value and half of a new one. The worst case is one injection segment
+  using the previous activation's factor, i.e. a 10 ms delay on a signal whose
+  slew limit is 0.02 % per 10 ms.
+
+`ff_rk_calls` is a read-modify-write and can lose an increment to preemption.
+It is a diagnostic counter and nothing reads it back, which is why it lives in
+the annex and outside the checksum.
+
 ## Cost
 
 Measured in the Unicorn harness on the applied image (`--trace` instruction
