@@ -90,9 +90,9 @@ DZW_RL_AXIS = (416, 864, 1280, 1696, 2144, 2976, 3840, 4256)
 CORE_OFF = 0x08    # first checksummed byte of the state block
 CORE_LEN = 0x24    # +0x08..+0x2B; the annex above it has other writers
 CORE2_OFF = 0x40   # E2 (#35): the second checksummed range, past the annex
-CORE2_LEN = 0x04   # +0x40..+0x43
-STATE_LEN = 0x44   # sizeof(struct ff_state); E2 grew it from 0x40
-BLOCK_LEN = 0x44
+CORE2_LEN = 0x0C   # +0x40..+0x4B; E5 (#36) grew it from 0x04
+STATE_LEN = 0x4C   # sizeof(struct ff_state); E2 0x40->0x44, E5 0x44->0x4C
+BLOCK_LEN = 0x4C
 
 # --- E2 (#35): the start enrichment -------------------------------------
 FST_N = 6              # ff_fst_map is FST_N ethanol rows x FST_N tmst columns
@@ -111,6 +111,26 @@ FST_E_AXIS = (0, 20, 40, 60, 85, 100)
 #: is a breakpoint of the start FUEL map rather than a number between two.
 FST_TMST_AXIS = (24, 44, 64, 91, 117, 184)
 
+# --- E5 (#36): the rail-pressure adder and the window diagnostics ------------
+PRAIL_N = CURVE_N      # ff_prail_curve is on the SAME ethanol grid as ff_F_curve
+PRAIL_HARD_MAX = 6000  # the CODE ceiling on prail_add, 30.0 bar (see ff_state.h)
+
+#: One count of a u8 %AWEA angle map, in angle LSB of 3/128 degCA: the `* 0x20`
+#: that `awea_angles` applies to `KLWBHO1SMX` before it lands in 0x7FD290
+#: (re/findings/rail.md sections 8 and 14.1).
+ANGLE_MAP_SCALE = 32
+
+#: Group 109 field 3 reports the window margin through formula 0x22 with
+#: A = 225, i.e. 2.25 degCA per count -- exactly 96 angle LSB, so the handler
+#: converts with one exact integer division.  The division FLOORS.
+WIN_COUNT_LSB = 96
+FMT_A_WIN = 225
+
+#: What the stock image holds, so a model built without an image still agrees
+#: with the ECU: `VMSVMX` 0x5D4BC6 = 5000 and the required end-of-injection
+#: margin `KLWBHO1SMX` -> 0x7FD290 = 67 counts = 50.25 degCA.
+VMSVMX_STOCK = 5000
+WIN_MARGIN_REQ_STOCK = 67
 
 # ---------------------------------------------------------------- the frame --
 def frame(e_pct: int = 0, t_fuel_c: int = 20, freq_hz: int = 100,
@@ -190,6 +210,12 @@ class Cal:
     fst_e_axis: list[int] = field(default_factory=lambda: list(FST_E_AXIS))
     fst_tmst_axis: list[int] = field(default_factory=lambda: list(FST_TMST_AXIS))
     fzwst_curve: list[int] = field(default_factory=lambda: [0] * FST_N)
+    # --- E5 (#36): the rail adder, appended by FFCAL001 v4 ----------------
+    prail_enable: int = 0
+    prail_rsv: int = 0
+    prail_max: int = 3000          # 15.0 bar: KLPRMAX 22000 - KFPRSOLHOM 19000
+    diag_window_ms: int = 1000
+    prail_curve: list[int] = field(default_factory=lambda: [0] * PRAIL_N)
 
     # The clamps the patch applies to whatever the calibration says.
     def tick(self) -> int:
@@ -223,6 +249,10 @@ class Cal:
     def zwst_ceiling(self) -> int:
         """`zwst_add` ceiling, clamped in CODE to ZWST_HARD_MAX (brief E2)."""
         return min(self.zwst_max, ZWST_HARD_MAX)
+
+    def prail_ceiling(self) -> int:
+        """`prail_add` ceiling, clamped in CODE to PRAIL_HARD_MAX (brief E5)."""
+        return min(self.prail_max, PRAIL_HARD_MAX)
 
 
 # ------------------------------------------------------------ the RAM state --
@@ -271,10 +301,35 @@ class State:
     persist_wait: int = 0
     persist_writes: int = 0
     persist_fails: int = 0
-    # core 2 (+0x40..+0x43, checksummed) -- E2 (#35)
+    # core 2 (+0x40..+0x4B, checksummed) -- E2 (#35), grown by E5 (#36)
     fst_q10: int = FST_ONE   # u16, 1/1024: the start fuel factor f_st(E, tmst)
     zwst_add: int = 0        # s8, 0.75 degCA per count: the start advance
-    st_reserved: int = 0     # always 0; reserved for brief E5
+    msv_sat_ticks: int = 0   # u8,  E5: MSV-saturated activations this window
+    prail_add: int = 0       # u16, E5: rail setpoint adder, 0.005 bar
+    win_margin_min: int = 0  # s16, E5: worst injection-window margin, angle LSB
+    prist_min: int = 0       # u16, E5: worst prist this window, 0.005 bar
+    diag_ticks: int = 0      # u16, E5: activations left of the current window
+
+
+@dataclass
+class RailIn:
+    """The stock cells `ff_rail_update()` reads (brief E5, issue #36).
+
+    Five RAM bytes/words and one calibration word, all read and never written.
+
+    The RAM fields default to **0**, for the same reason `nmot_w`, `rl_w` and
+    `tmst` do on `tick()`: that is what an un-written emulator RAM holds, so a
+    tick-by-tick comparison that does not care about the rail does not have to
+    seed anything.  `vmsvmx` is different because it lives in FLASH, which the
+    emulator always has: its default is what the stock image holds, and
+    WIN_MARGIN_REQ_STOCK is there for a test that wants the real 50.25 degCA.
+    """
+    wbho1s: int = 0                # 0x80307E, s16, 3/128 degCA
+    dwi: int = 0                   # 0x803088, u16, 3/128 degCA
+    prist: int = 0                 # 0x8031DA, u16, 0.005 bar
+    msv: int = 0                   # 0x80316E, u16
+    win_margin_req: int = 0        # 0x7FD290, u8 counts of 0.75 degCA
+    vmsvmx: int = VMSVMX_STOCK     # 0x5D4BC6, u16 -- flash, so never 0
 
 
 def _tdiv(n: int, d: int) -> int:
@@ -294,6 +349,11 @@ def _sat8(v: int) -> int:
 def _s8(v: int) -> int:
     v &= 0xFF
     return v - 0x100 if v & 0x80 else v
+
+
+def _s16(v: int) -> int:
+    v &= 0xFFFF
+    return v - 0x10000 if v & 0x8000 else v
 
 
 def axis_key8(axis, value: int) -> int:
@@ -450,10 +510,14 @@ class FlexFuelModel:
         return bytes(out)
 
     def core2_bytes(self) -> bytes:
-        """The second checksummed range, +0x40..+0x43 (brief E2)."""
+        """The second checksummed range, +0x40..+0x4B (E2, grown by E5)."""
         st = self.state
         out = (st.fst_q10.to_bytes(2, "big")
-               + bytes((st.zwst_add & 0xFF, st.st_reserved & 0xFF)))
+               + bytes((st.zwst_add & 0xFF, st.msv_sat_ticks & 0xFF))
+               + st.prail_add.to_bytes(2, "big")
+               + (st.win_margin_min & 0xFFFF).to_bytes(2, "big")
+               + st.prist_min.to_bytes(2, "big")
+               + st.diag_ticks.to_bytes(2, "big"))
         assert len(out) == CORE2_LEN
         return out
 
@@ -620,6 +684,77 @@ class FlexFuelModel:
             return stock
         return min(stock + add, 127)
 
+    # -- E5 (#36): the rail adder and the window diagnostics ---------------
+    def prail_of(self, e_filt: int) -> int:
+        """`prail_add(E)` from `ff_prail_curve`, 0.005 bar -- `f_of`'s shape."""
+        curve = self.cal.prail_curve
+        if e_filt >= E_FILT_MAX:
+            f = curve[PRAIL_N - 1]
+        else:
+            i = e_filt // CURVE_STEP
+            fr = e_filt % CURVE_STEP
+            a, b = curve[i], curve[i + 1]
+            f = a + _tdiv((b - a) * fr, CURVE_STEP)
+        return min(max(f, 0), PRAIL_HARD_MAX)
+
+    def diag_window_ticks(self) -> int:
+        """`ff_diag_window_ms` in activations; 100 when FFCAL001 is unusable."""
+        if not self.state.cal_ok:
+            return 100
+        return max(self.cal.diag_window_ms // self.cal.tick(), 1)
+
+    def rail_update(self, rail: RailIn) -> None:
+        """Recompute `prail_add` and the three window diagnostics.
+
+        `prail_add` follows the #37 rule for anything that ADDS: it is 0 on the
+        very activation the mode leaves OK/HOLD/OVERRIDE, with no hold and no
+        ramp.  The diagnostics run unconditionally -- with the adder disabled,
+        with a corrupt calibration, on a stock map -- because they are what
+        says whether the pump follows, and `dwi`/`wbho1s` have no stock
+        measuring id at all (re/findings/rail.md section 11).
+
+        The window is TUMBLING with continuous publication: the three fields
+        show the worst value since the current window started and are reset
+        when it expires.  A sliding minimum would need a ring buffer of up to
+        6553 samples, which patch code does not get to allocate.
+        """
+        st, c = self.state, self.cal
+        if (not c.prail_enable or not st.cal_ok or st.e_filt == 0
+                or st.mode not in (MODE_OK, MODE_HOLD, MODE_OVERRIDE)):
+            st.prail_add = 0
+        else:
+            st.prail_add = min(self.prail_of(st.e_filt), c.prail_ceiling())
+
+        n = self.diag_window_ticks()
+        if st.diag_ticks == 0 or st.diag_ticks > n:
+            st.win_margin_min = 0x7FFF
+            st.prist_min = 0xFFFF
+            st.msv_sat_ticks = 0
+            st.diag_ticks = n
+
+        margin = (_s16(rail.wbho1s & 0xFFFF) - (rail.dwi & 0xFFFF)
+                  - rail.win_margin_req * ANGLE_MAP_SCALE)
+        margin = min(max(margin, -0x8000), 0x7FFF)
+        st.win_margin_min = min(st.win_margin_min, margin)
+        st.prist_min = min(st.prist_min, rail.prist & 0xFFFF)
+        if (rail.vmsvmx and (rail.msv & 0xFFFF) >= rail.vmsvmx
+                and st.msv_sat_ticks < 0xFF):
+            st.msv_sat_ticks += 1
+        st.diag_ticks -= 1
+
+    def prsoll_raw_store(self, value: int) -> int:
+        """What the 0x45845C stub writes to 0x8031F0, given the stock halfword.
+
+        `value` is the halfword the stock `sth` would have stored.  The stub
+        checks the block header only; the saturation at 0xFFFF is the one bound
+        it applies, because `KLPRMAX` (22000) and `PRSOLMN` (7000) clamp the
+        cell four instructions later, from memory.
+        """
+        st = self.state
+        if st.magic != self.MAGIC:
+            return value & 0xFFFF                  # no valid state -> stock
+        return min((value & 0xFFFF) + st.prail_add, 0xFFFF)
+
     # -- the filter and the slew limiter ----------------------------------
     def _move(self, target_e16: int, *, filtered: bool) -> None:
         """Move E towards `target_e16` (1/16 %) by one activation."""
@@ -644,16 +779,19 @@ class FlexFuelModel:
         st.e_frac = now % FRAC
 
     # -- one activation ---------------------------------------------------
-    def _finish(self, nmot_w: int, rl_w: int, tmst: int = 0) -> None:
+    def _finish(self, nmot_w: int, rl_w: int, tmst: int = 0,
+                rail: RailIn | None = None) -> None:
         """`ff_finish()`: the tail of every activation, on every path."""
         self.zw_update(nmot_w, rl_w)
         self.start_update(tmst)
+        self.rail_update(rail if rail is not None else RailIn())
         self.diag_publish()
         self.seal()
 
     def tick(self, rx: bytes | None = None, *, src: int = SRC_B,
              can_id_echo: int | None = None,
-             nmot_w: int = 0, rl_w: int = 0, tmst: int = 0) -> State:
+             nmot_w: int = 0, rl_w: int = 0, tmst: int = 0,
+             rail: RailIn | None = None) -> State:
         """One periodic-hook activation.
 
         `rx` is the frame `can_rx_poll(15)` would report as fresh (DLC 8), or
@@ -661,7 +799,9 @@ class FlexFuelModel:
         `rl_w` (0x7FEFB2) are the two RAM words the ignition blend reads and
         `tmst` (0x8021F6) is the u8 count the start enrichment reads; all three
         default to 0, which is both what an un-written emulator RAM holds and,
-        for the two maps, the bottom-left cell.
+        for the two maps, the bottom-left cell.  `rail` carries the four stock
+        cells and two calibration values E5's `rail_update()` reads; leaving it
+        out means an un-written RAM with the stock calibration.
         """
         st = self.state
         if not self.state_valid():
@@ -675,7 +815,7 @@ class FlexFuelModel:
         if st.src_owner != src:
             st.src_foreign = _sat8(st.src_foreign + 1)
             if st.src_foreign < OWNER_SWITCH:
-                self._finish(nmot_w, rl_w, tmst)
+                self._finish(nmot_w, rl_w, tmst, rail)
                 return st
             st.src_owner, st.src_foreign = src, 0
         else:
@@ -690,7 +830,7 @@ class FlexFuelModel:
         if not st.cal_ok or st.cal_mode == 0:
             st.mode = MODE_OFF
             st.f_q10 = F_MIN
-            self._finish(nmot_w, rl_w, tmst)
+            self._finish(nmot_w, rl_w, tmst, rail)
             return st
 
         if st.cal_mode == 2:                       # bench override
@@ -698,7 +838,7 @@ class FlexFuelModel:
             st.age_ticks = 0
             self._move(c.override() * 16, filtered=True)
             st.f_q10 = self.f_of(st.e_filt)
-            self._finish(nmot_w, rl_w, tmst)
+            self._finish(nmot_w, rl_w, tmst, rail)
             return st
 
         # --- normal operation --------------------------------------------
@@ -743,7 +883,7 @@ class FlexFuelModel:
         # HOLD: E is frozen, so F is frozen too
 
         st.f_q10 = self.f_of(st.e_filt)
-        self._finish(nmot_w, rl_w, tmst)
+        self._finish(nmot_w, rl_w, tmst, rail)
         return st
 
     # -- the measuring block (brief D2, issue #39) ------------------------
@@ -831,8 +971,41 @@ class FlexFuelModel:
             (0x36, (ksta >> 8) & 0xFF, ksta & 0xFF),
         ]
 
+    def triples_pr(self) -> list[tuple]:
+        """The four `(formula, A, B)` triples of measuring block 109 (E5).
+
+        Unlike groups 108 and 69, **all four** fields check the state-block
+        header: all four report our own cells, and the two that are derived
+        from stock RAM report a MINIMUM, which is ours and would be a lie if it
+        were stale.  A tester who sees "not available" should read the stock
+        rail groups instead (106 field 1 and 231 fields 2/3).
+
+        Fields 1 and 2 use formula 0x53 (`((A << 8) | B) * 0.01` bar) over the
+        raw 0.005 bar word shifted right by one -- byte for byte the arithmetic
+        of the stock `prist`/`prsoll` handlers at 0x3DB94/0x3DBAC, cross-checked
+        in `re/findings/measuring_vars.md` section 7.3.  Field 3 is formula
+        0x22 with A = 225 = 2.25 degCA per count = exactly WIN_COUNT_LSB angle
+        LSB, FLOORED so the margin is never reported optimistically.
+        """
+        st = self.state
+        if st.magic != self.MAGIC or st.length != STATE_LEN:
+            return [(0x25, 0, 0)] * 4
+        clamp = lambda v: min(max(v, 0), 0xFF)              # noqa: E731
+
+        def bar(raw: int) -> tuple:
+            v = (raw & 0xFFFF) >> 1
+            return (0x53, (v >> 8) & 0xFF, v & 0xFF)
+
+        return [
+            bar(st.prail_add),
+            bar(st.prist_min),
+            (0x22, FMT_A_WIN,
+             clamp((st.win_margin_min // WIN_COUNT_LSB) + 128)),
+            (0x36, 0, clamp(st.msv_sat_ticks)),
+        ]
+
     def full_bytes(self) -> bytes:
-        """All 68 bytes at PATCH_RAM: header, core, annex and E2's core 2."""
+        """All 76 bytes at PATCH_RAM: header, core, annex and core 2."""
         st = self.state
         return self.block_bytes() + struct.pack(
             ">IHBBHHHHHH", st.rk_calls, st.e_persist, st.persist_state,

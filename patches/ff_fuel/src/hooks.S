@@ -1,12 +1,13 @@
 /*
- * ff_fuel: seven hook words, in three groups.
+ * ff_fuel: eight hook words, in four groups.
  *
  *   D1, below      three HOOK_TAIL trampolines that replace a `bl`
  *   E1, middle     ff_zw_hook, one instruction patch (0x41D40C)
- *   E2, bottom     ff_st_hook_a / ff_st_hook_b / ff_zwst_hook, three more
+ *   E2             ff_st_hook_a / ff_st_hook_b / ff_zwst_hook, three more
  *                  instruction patches (0x41A680, 0x41A808, 0x431384)
+ *   E5, bottom     ff_prail_hook, one instruction patch (0x45845C)
  *
- * Six of the seven are in the ON-CHIP flash 0x404000-0x47FFFF; only D1's
+ * Seven of the eight are in the ON-CHIP flash 0x404000-0x47FFFF; only D1's
  * task-set-B raster hook 0x12067C is in external flash.  The patch README's
  * hook table is the authority on that count.
  *
@@ -293,3 +294,92 @@ ff_zwst_hook:
     stb   0, (MED9_ZWSTT & 0xFFFF)(11)          /* 0x802096                  */
     blr
     .size ff_zwst_hook, . - ff_zwst_hook
+
+/*
+ * ---------------------------------------------------------------------------
+ * ff_prail_hook - R1, the rail-pressure setpoint adder (brief E5, issue #36).
+ *
+ * Like the four stubs above it this replaces an ordinary instruction, not a
+ * branch, so there is nothing to tail-branch to and the displaced STORE is
+ * re-done here -- hook technique 3 of docs/06_patch_pipeline.md section 4.
+ *
+ *   00458458  addi  r30,r3,0          ; the fall-through map paths
+ *   0045845C  sth   r30,0x3200(r13)   <-- becomes `bl ff_prail_hook`
+ *   00458460  lis   r31,0x5d          ; KLPRMAX, i.e. the clamp of rail.md 3.3
+ *   ...
+ *   00458480  lhz   r30,0x3200(r13)   ; the clamp RE-READS the cell
+ *
+ * `prsoll_raw` (0x8031F0) has exactly one store in the running engine and this
+ * is it.  Adding here puts the offset inside every stock limit that follows:
+ * PRSOLMN 7000 = 35.0 bar, **KLPRMAX 22000 = 110.0 bar**, and the pump-volume
+ * rate limiter.  They still bind because 0x458480 fetches the cell from RAM
+ * again instead of re-using r30 -- which is the entire safety argument for
+ * this site (re/findings/rail.md section 12.1).
+ *
+ * Why no frame, no register saves and no gate (rail.md section 12.1,
+ * VERIFIED-STATIC):
+ *
+ *   - live at the word: r30 (the value), r28 = 0xFFFF, r26 = CWPRSOL, r27 and
+ *     r1.  This stub writes r0, r11 and r12 and nothing else; r30 is never
+ *     modified, although 0x458480 reloads it from the cell anyway.
+ *   - LR: `hdrpsol_main`'s prologue is `addi r11,r1,0` / `stwu` / `mflr r0` /
+ *     `bl 0xB8228`, and the EABI save millicode's tail at 0x0B8244 is
+ *     `stw r0,4(r11)`.  LR is in the caller's frame before this word runs, so
+ *     the `bl` clobbers a dead value and nothing has to be saved.
+ *   - CR0: nothing between 0x458460 and 0x458488 reads it, and 0x458488's
+ *     `cmpw r3,r30` writes it before the `bgt` at 0x45848C.  CTR and XER are
+ *     not touched at all.
+ *   - **No gate.**  Three `b` reach this word (0x458260, 0x4583B4, 0x45843C)
+ *     and four paths fall through from 0x458458; all seven are map-selection
+ *     paths that mean "here is a new setpoint".  The one path that must NOT be
+ *     modified -- `0x7FD04D & 1`, "hold the previous setpoint" -- branches
+ *     PAST the store (`bne 0x458460` at 0x45826C), so the stub never runs on
+ *     it.  That is the opposite of E2's 0x41A680, whose early-out branched
+ *     INTO the store and forced a `B_stend` test inside the stub.
+ *
+ * **No mask before the add, either**, and that is a fact about the ECU rather
+ * than an optimisation: r30 is a clean 0..0xFFFF halfword on every path into
+ * the word.  `interp_2d_u16` (0x40C444) ends with `clrlwi r3,r8,0x10`, the two
+ * `KFPRSOLOFF` paths clamp explicitly to 0 and 0xFFFF (0x458418-0x458438 and
+ * 0x458390-0x4583B0), and the `CWPRSOL & 1` path is an `lhz`.  The stock path
+ * stores r30 itself, so with a bad state block the byte pattern written is
+ * identical whatever r30's upper half contains.
+ *
+ * Cost, per activation of the 20 ms task 0x45CAC4 that reaches the word:
+ *
+ *     8   no valid state block      <- the first milliseconds after power-up
+ *    12   adding (prail_add = 0 included: it adds zero and stores)
+ *    13   the 0xFFFF saturation, which no shipped calibration can reach
+ *
+ * Twelve is the brief's budget and the reason the stub does NOT re-clamp
+ * `prail_add` against FF_PRAIL_HARD_MAX: the producing side clamps it twice,
+ * it lives inside the checksummed core so a corrupted byte re-initialises the
+ * whole block on the next 10 ms activation, and KLPRMAX bounds the result four
+ * instructions later whatever this stub computes.  A fourth check on a path
+ * that runs 50 times a second would buy nothing.
+ * ---------------------------------------------------------------------------
+ */
+    .section .text.ff_prail_hook, "ax", @progbits
+    .globl ff_prail_hook
+    .type  ff_prail_hook, @function
+    .align 2
+ff_prail_hook:
+    lis   11, PATCH_RAM@ha
+    lwz   12, (PATCH_RAM + FF_OFF_MAGIC)@l(11)  /* ff_state.magic            */
+    xoris 12, 12, 0x4646
+    cmplwi 12, 0x3031                           /* "FF01"?                   */
+    bne   .Lff_prail_stock                      /* no valid state -> stock   */
+    lhz   12, (PATCH_RAM + FF_OFF_PRAIL_ADD)@l(11)
+    add   12, 30, 12                            /* both operands <= 0xFFFF   */
+    cmplwi 12, 0xFFFF
+    ble   .Lff_prail_store
+    li    12, -1                                /* sth keeps the low 16 bits */
+.Lff_prail_store:
+    lis   11, (MED9_PRSOLL_RAW >> 16)
+    sth   12, (MED9_PRSOLL_RAW & 0xFFFF)(11)    /* 0x8031F0                  */
+    blr
+.Lff_prail_stock:
+    lis   11, (MED9_PRSOLL_RAW >> 16)
+    sth   30, (MED9_PRSOLL_RAW & 0xFFFF)(11)    /* exactly the stock store    */
+    blr
+    .size ff_prail_hook, . - ff_prail_hook

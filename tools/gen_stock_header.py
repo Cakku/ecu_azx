@@ -56,6 +56,19 @@ WANTED: tuple[tuple[str, str | None], ...] = (
     ("ksta_adapted", None),            # 0x80302C, the cranking lever (S1)
     ("zwstt", None),                   # 0x802096, the start angle (Z1)
     ("B_stend", None),                 # 0x7FE921, the gate of both S1 stubs
+    # RAM -- E5 (issue #36): the rail-pressure adder and the injection-window
+    # diagnostics.  `prsoll_raw` is the cell the R1 stub publishes; the other
+    # four are read and never written.
+    ("prsoll_raw", None),              # 0x8031F0, the hooked store's cell
+    ("prist_w", None),                 # 0x8031DA, the 13 bar acceptance signal
+    ("vmsv_limited", None),            # 0x80316E, pinned at VMSVMX = saturated
+    ("wbho1s_w", None),                # 0x80307E, start of injection, s16
+    ("dwi_inj_angle", "DWI"),          # 0x803088, injection duration as angle
+    ("dwbho1smn_w", "WIN_MARGIN_W"),   # 0x7FD290, required margin, 0.75 degCA
+    # Calibration -- E5: the pump-volume clamp the saturation counter compares
+    # against, read out of the image so the counter follows a re-calibrated
+    # binary instead of a literal 5000.
+    ("VMSVMX", None),                  # 0x5D4BC6, u16 = 5000
 )
 
 CONFIDENCE_TAG = {
@@ -131,7 +144,12 @@ def render(symbols: dict[str, dict], wanted=WANTED) -> str:
         raise SystemExit(f"re/symbols.csv has no row for: {', '.join(missing)}")
 
     for kind_label, kinds in (("Stock functions", ("func",)),
-                              ("Stock RAM cells", ("var", "table"))):
+                              ("Stock RAM cells", ("var", "table")),
+                              # E5 (#36): a patch may also need to READ a stock
+                              # calibration constant, so that a threshold it
+                              # compares against follows a re-calibrated binary
+                              # instead of being a literal in the patch.
+                              ("Stock calibration constants", ("const",))):
         rows = [(n, s) for n, s in wanted if symbols[n]["kind"] in kinds]
         if not rows:
             continue

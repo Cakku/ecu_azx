@@ -183,7 +183,8 @@ class DiagEmuBase(tff.EmuBase):
         Without it the next activation finds the header wrong and runs
         `ff_state_init()`, which is correct behaviour and a confusing test.
         """
-        core = emu.read(PATCH_RAM + 0x08, 0x24) + emu.read(PATCH_RAM + 0x40, 4)
+        core = (emu.read(PATCH_RAM + ff.CORE_OFF, ff.CORE_LEN)
+                + emu.read(PATCH_RAM + ff.CORE2_OFF, ff.CORE2_LEN))
         emu.write(PATCH_RAM + 0x06, (~sum(core)) & 0xFFFF, 2)
 
     @staticmethod

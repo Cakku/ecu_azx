@@ -319,12 +319,13 @@ class TestStartApply(tff.TestApply):
             off = m.cpu_to_file(GROUP_TABLE + f * 0x1FE + (GROUP + 0x7F) * 2)
             self.assertEqual(bytes(self.data[off:off + 2]), b"\0\0")
 
-    def test_ffcal001_is_version_3_and_ships_both_features_off(self):
+    def test_ffcal001_still_ships_both_start_features_off(self):
+        """E5 (#36) bumped the block to v4; E2's offsets did not move."""
         off = m.cpu_to_file(tff.CAL_BASE)
         blk = bytes(self.data[off:off + ffcal001.LENGTH])
         ffcal001.check(blk)
-        self.assertEqual(struct.unpack_from(">H", blk, 0x08)[0], 3)
-        self.assertEqual(struct.unpack_from(">H", blk, 0x0A)[0], 0x0122)
+        self.assertEqual(struct.unpack_from(">H", blk, 0x08)[0], 4)
+        self.assertEqual(struct.unpack_from(">H", blk, 0x0A)[0], 0x014C)
         self.assertEqual(blk[0x108], 0, "ff_st_enable must ship 0")
         self.assertEqual(blk[0x109], 0, "ff_zwst_enable must ship 0")
         self.assertEqual(struct.unpack_from(">36H", blk, 0x94),
@@ -340,7 +341,7 @@ class TestStartApply(tff.TestApply):
         self.assertIn("ff_nvm_req", ram)
         self.assertGreaterEqual(syms["ff_nvm_req"], PATCH_RAM + ff.STATE_LEN,
                                 "the EEP_CONF record must start past the block")
-        self.assertEqual(ff.STATE_LEN, 0x44)
+        self.assertEqual(ff.STATE_LEN, 0x4C)   # E5 (#36) grew it again
 
 
 # --------------------------------- 3. %ESSTT, patched against stock ---------
@@ -708,7 +709,7 @@ class TestProducer(tff.EmuBase):
                            regs={"r1": TASK_STACK})
             self.assertTrue(res.ok, f"activation {n}: {res.summary()}")
             mdl.tick(payload if rx else None, tmst=tmst)
-            self.assertEqual(emu.read(PATCH_RAM, ff.STATE_LEN)[0x40:0x44].hex(),
+            self.assertEqual(emu.read(PATCH_RAM, ff.STATE_LEN)[ff.CORE2_OFF:].hex(),
                              mdl.core2_bytes().hex(),
                              f"core 2 differs from the model at activation {n}")
             self.assertEqual(self.block(emu).hex(), mdl.block_bytes().hex(),
@@ -808,7 +809,7 @@ class TestProducer(tff.EmuBase):
         emu.call(self.syms["ff_fuel_hook_b"], reset=False,
                  regs={"r1": TASK_STACK})
         mdl.tick(None, tmst=0x18)
-        self.assertEqual(emu.read(PATCH_RAM, ff.STATE_LEN)[0x40:0x44].hex(),
+        self.assertEqual(emu.read(PATCH_RAM, ff.STATE_LEN)[ff.CORE2_OFF:].hex(),
                          mdl.core2_bytes().hex())
 
     def test_the_factor_is_clamped_to_ff_fst_max(self):
@@ -843,8 +844,8 @@ class TestProducer(tff.EmuBase):
         self.arm_frame(emu, ff.frame(e_pct=85, counter=1))
         warm = emu.call(self.syms["ff_fuel_hook_b"], reset=False,
                         regs={"r1": TASK_STACK})
-        self.assertLess(first.insns, 2400, "the cold-start activation got heavy")
-        self.assertLess(warm.insns, 900, "the warm activation got heavy")
+        self.assertLess(first.insns, 2600, "the cold-start activation got heavy")
+        self.assertLess(warm.insns, 1000, "the warm activation got heavy")
 
     def test_one_activation_still_moves_only_our_own_ram(self):
         """The 2026-09-17 proof, with both features ON at a real calibration."""

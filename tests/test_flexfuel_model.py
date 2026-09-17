@@ -457,11 +457,11 @@ class TestFfcal001(unittest.TestCase):
         with self.assertRaises(ffcal001.CalError):
             ffcal001.build(dict(self.params, ff_dzw_max=ff.DZW_HARD_MAX + 1))
 
-    def test_the_block_is_version_3_and_an_older_block_is_refused(self):
-        """`ff_cal_ok()` accepts the current version ONLY, v1 and v2 included."""
-        self.assertEqual(struct.unpack_from(">H", self.blk, 0x08)[0], 3)
-        self.assertEqual(ffcal001.LENGTH, 0x0122)
-        for old in (1, 2):
+    def test_the_block_is_version_4_and_an_older_block_is_refused(self):
+        """`ff_cal_ok()` accepts the current version ONLY, v1-v3 included."""
+        self.assertEqual(struct.unpack_from(">H", self.blk, 0x08)[0], 4)
+        self.assertEqual(ffcal001.LENGTH, 0x014C)
+        for old in (1, 2, 3):
             with self.subTest(version=old):
                 stale = bytearray(self.blk)
                 struct.pack_into(">H", stale, 0x08, old)
@@ -497,6 +497,52 @@ class TestFfcal001(unittest.TestCase):
         self.assertEqual(struct.unpack_from(">8H", self.blk, 0xE8),
                          ff.DZW_NMOT_AXIS)
         self.assertEqual(struct.unpack_from(">8H", self.blk, 0xF8), ff.DZW_RL_AXIS)
+
+    def test_v4_appended_and_moved_nothing(self):
+        """Every v3 offset still holds what v3 put there (brief E5, #36)."""
+        v3_offsets = (0x108, 0x109, 0x10A, 0x10C, 0x10D, 0x10E, 0x114, 0x11A)
+        by_name = {n: off for off, n, *_ in ffcal001.SCALARS}
+        by_name.update({n: off for off, n, *_ in ffcal001.TABLES})
+        for off in v3_offsets:
+            self.assertIn(off, set(by_name.values()), f"{off:#x} disappeared")
+        self.assertEqual(by_name["ff_prail_enable"], 0x122,
+                         "v4 must start where v3's checksum used to be")
+        self.assertGreaterEqual(0x122, 0x11A + 6,
+                                "v4 starts at or after the end of the last v3 table")
+        # v3's own tables are untouched
+        self.assertEqual(struct.unpack_from(">36H", self.blk, 0x94), (1024,) * 36)
+        self.assertEqual(self.blk[0x11A:0x120], bytes(6))
+        # and the superseded v1 reservation is still there, still neutral
+        self.assertEqual(by_name["ff_prail_add"], 0xDC)
+        self.assertEqual(self.blk[0xDC:0xDC + 8], bytes(8))
+
+    def test_v4_ships_the_rail_adder_disabled_and_neutral(self):
+        """The whole point: a v4 file behaves exactly like the v3 one."""
+        self.assertEqual(self.blk[0x122], 0, "ff_prail_enable must ship 0")
+        self.assertEqual(self.blk[0x123], 0, "ff_prail_rsv is reserved")
+        self.assertEqual(struct.unpack_from(">H", self.blk, 0x124)[0], 3000)
+        self.assertEqual(struct.unpack_from(">H", self.blk, 0x126)[0], 1000)
+        self.assertEqual(struct.unpack_from(">17H", self.blk, 0x128), (0,) * 17,
+                         "ff_prail_curve must ship all zero")
+        self.assertLessEqual(struct.unpack_from(">H", self.blk, 0x124)[0],
+                             ff.PRAIL_HARD_MAX)
+
+    def test_ffcal001_refuses_an_unsafe_rail_calibration(self):
+        """ffcal001.py will not build a block the ECU would have to survive."""
+        import copy
+        base = ffcal001.load_params(REPO / "patches" / "ff_fuel" / "ffcal001.json")
+        for name, value in (
+                ("ff_prail_curve", [100] + [200] * 16),          # E0 not zero
+                ("ff_prail_curve", [0, 500, 400] + [600] * 14),  # not monotonic
+                ("ff_prail_curve", [0] * 16 + [ff.PRAIL_HARD_MAX + 1]),
+                ("ff_prail_max", ff.PRAIL_HARD_MAX + 1),
+                ("ff_diag_window_ms", 0),
+                ("ff_prail_rsv", 1)):
+            with self.subTest(name=name, value=value):
+                params = copy.deepcopy(base)
+                params[name] = value
+                with self.assertRaises(ffcal001.CalError):
+                    ffcal001.build(params)
 
     def test_the_layout_matches_ff_state_h(self):
         """The C header and the generator are two copies of one layout."""
