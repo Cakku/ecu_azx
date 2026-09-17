@@ -183,7 +183,7 @@ class DiagEmuBase(tff.EmuBase):
         Without it the next activation finds the header wrong and runs
         `ff_state_init()`, which is correct behaviour and a confusing test.
         """
-        core = emu.read(PATCH_RAM + 0x08, 0x24)
+        core = emu.read(PATCH_RAM + 0x08, 0x24) + emu.read(PATCH_RAM + 0x40, 4)
         emu.write(PATCH_RAM + 0x06, (~sum(core)) & 0xFFFF, 2)
 
     @staticmethod
@@ -200,7 +200,7 @@ class DiagEmuBase(tff.EmuBase):
 class TestDispatcher(DiagEmuBase):
     def test_the_four_ids_answer_with_the_model_triples(self):
         emu, mdl = self.warm()
-        got, want = emu.read(PATCH_RAM, 0x40), mdl.full_bytes()
+        got, want = emu.read(PATCH_RAM, tff.STATE_LEN), mdl.full_bytes()
         self.assertEqual(got[:0x28], want[:0x28],
                          "header and core must agree tick for tick")
         self.assertEqual(got[0x34:0x3A], want[0x34:0x3A],
@@ -346,7 +346,7 @@ class TestPersistence(DiagEmuBase):
                 emu = self.fresh()
                 emu.write(BLK8_MIRROR, blk8(bytes([stored]) + b"\xFF" * 29))
                 emu.call(self.syms["ff_fuel_hook_b"], reset=False)
-                st = emu.read(PATCH_RAM, 0x40)
+                st = emu.read(PATCH_RAM, tff.STATE_LEN)
                 self.assertEqual(struct.unpack_from(">H", st, 0x24)[0],
                                  want_pct * 16, "e_key")
                 self.assertEqual(struct.unpack_from(">H", st, 0x30)[0],
@@ -363,7 +363,7 @@ class TestPersistence(DiagEmuBase):
                 emu = self.fresh()
                 emu.write(BLK8_MIRROR, blk8(bytes([stored]) + b"\xFF" * 29))
                 emu.call(self.syms["ff_fuel_hook_b"], reset=False)
-                st = emu.read(PATCH_RAM, 0x40)
+                st = emu.read(PATCH_RAM, tff.STATE_LEN)
                 self.assertEqual(struct.unpack_from(">H", st, 0x08)[0], 0)
                 self.assertEqual(struct.unpack_from(">H", st, 0x24)[0], 0)
                 self.assertEqual(struct.unpack_from(">H", st, 0x30)[0], 0xFFFF,
@@ -381,7 +381,7 @@ class TestPersistence(DiagEmuBase):
             rx = ff.frame(e_pct=85, counter=(i // 10) & 0xFF) if i % 10 == 0 else None
             self.arm_frame(emu, rx) if rx else self.no_frame(emu)
             emu.call(self.syms["ff_fuel_hook_b"], reset=False)
-        st = emu.read(PATCH_RAM, 0x40)
+        st = emu.read(PATCH_RAM, tff.STATE_LEN)
         self.assertEqual(emu.read(BLK8_MIRROR, BLK8_LEN), before)
         self.assertEqual(struct.unpack_from(">H", st, 0x24)[0], 0, "e_key")
         self.assertEqual(st[0x32], 0, "persist_state stays idle")
@@ -389,7 +389,7 @@ class TestPersistence(DiagEmuBase):
 
     def test_the_rate_limit_holds_off_the_first_commit(self):
         emu, _ = self.warm(ticks=400)
-        st = emu.read(PATCH_RAM, 0x40)
+        st = emu.read(PATCH_RAM, tff.STATE_LEN)
         self.assertEqual(st[0x32], 0, "still idle: the 60 s window is open")
         self.assertEqual(struct.unpack_from(">H", st, 0x3A)[0], 6000 - 400)
         self.assertEqual(emu.read(BLK8_MIRROR, 1), b"\xFF")
@@ -400,7 +400,7 @@ class TestPersistence(DiagEmuBase):
         emu.write(PATCH_RAM + 0x3A, 0, 2)              # open the rate limit
         emu.call(self.syms["ff_fuel_hook_b"], reset=False)
 
-        st = emu.read(PATCH_RAM, 0x40)
+        st = emu.read(PATCH_RAM, tff.STATE_LEN)
         self.assertEqual(st[0x32], 2, "persist_state = committing")
         self.assertEqual(st[0x33], 1, "persist_err = the commit's rc")
         e_pct = struct.unpack_from(">H", st, 0x30)[0]
@@ -451,7 +451,7 @@ class TestPersistence(DiagEmuBase):
                 self.assertEqual(emu.read(req + 8, 1), b"\x01")
                 emu.write(req + 8, bytes([status]))
                 emu.call(self.syms["ff_fuel_hook_b"], reset=False)
-                st = emu.read(PATCH_RAM, 0x40)
+                st = emu.read(PATCH_RAM, tff.STATE_LEN)
                 self.assertEqual(st[0x32], want_state)
                 self.assertEqual(st[0x33], status)
                 self.assertEqual(struct.unpack_from(">H", st, 0x3C)[0], writes)
@@ -465,7 +465,7 @@ class TestPersistence(DiagEmuBase):
         req = int(tff.load_patch()["build"]["symbols"]["ff_nvm_req"], 0)
         emu.write(req + 8, b"\x02")                     # the commit finished
         emu.call(self.syms["ff_fuel_hook_b"], reset=False)
-        stored = struct.unpack_from(">H", emu.read(PATCH_RAM, 0x40), 0x30)[0]
+        stored = struct.unpack_from(">H", emu.read(PATCH_RAM, tff.STATE_LEN), 0x30)[0]
 
         # 4 % more is inside the 5 % hysteresis: nothing is queued again
         emu.write(PATCH_RAM + 0x08, (stored + 4) * 16, 2)
@@ -475,7 +475,7 @@ class TestPersistence(DiagEmuBase):
         emu.write(req + 8, b"\x00")
         emu.call(self.syms["ff_fuel_hook_b"], reset=False)
         self.assertEqual(emu.read(req + 8, 1), b"\x00", "no new request")
-        self.assertEqual(emu.read(PATCH_RAM, 0x40)[0x32], 3, "still DONE")
+        self.assertEqual(emu.read(PATCH_RAM, tff.STATE_LEN)[0x32], 3, "still DONE")
 
     def test_the_hysteresis_lets_a_big_move_through(self):
         emu, _ = self.warm(e_pct=85, ticks=400)
@@ -485,14 +485,14 @@ class TestPersistence(DiagEmuBase):
         req = int(tff.load_patch()["build"]["symbols"]["ff_nvm_req"], 0)
         emu.write(req + 8, b"\x02")
         emu.call(self.syms["ff_fuel_hook_b"], reset=False)
-        stored = struct.unpack_from(">H", emu.read(PATCH_RAM, 0x40), 0x30)[0]
+        stored = struct.unpack_from(">H", emu.read(PATCH_RAM, tff.STATE_LEN), 0x30)[0]
 
         emu.write(PATCH_RAM + 0x08, max(stored - 20, 0) * 16, 2)
         emu.write(PATCH_RAM + 0x34, max(stored - 20, 0), 2)
         emu.write(PATCH_RAM + 0x3A, 0, 2)
         self.reseal(emu)
         emu.call(self.syms["ff_fuel_hook_b"], reset=False)
-        st = emu.read(PATCH_RAM, 0x40)
+        st = emu.read(PATCH_RAM, tff.STATE_LEN)
         self.assertEqual(st[0x32], 2, "a new commit is in flight")
         self.assertEqual(emu.read(BLK8_MIRROR, 1)[0], max(stored - 20, 0))
 
@@ -502,12 +502,12 @@ class TestPersistence(DiagEmuBase):
         self.no_frame(emu)
         for _ in range(200):                   # ff_timeout_ms = 1000 -> FAULT
             emu.call(self.syms["ff_fuel_hook_b"], reset=False)
-        self.assertEqual(emu.read(PATCH_RAM, 0x40)[0x0C], ff.MODE_FAULT)
+        self.assertEqual(emu.read(PATCH_RAM, tff.STATE_LEN)[0x0C], ff.MODE_FAULT)
         before = emu.read(BLK8_MIRROR, BLK8_LEN)
         for _ in range(400):                   # E decays towards e_key
             emu.write(PATCH_RAM + 0x3A, 0, 2)  # with the rate limit wide open
             emu.call(self.syms["ff_fuel_hook_b"], reset=False)
-        st = emu.read(PATCH_RAM, 0x40)
+        st = emu.read(PATCH_RAM, tff.STATE_LEN)
         self.assertEqual(st[0x0C], ff.MODE_FAULT)
         self.assertEqual(emu.read(BLK8_MIRROR, BLK8_LEN), before)
         self.assertEqual(st[0x32], 0, "persist_state never left idle")

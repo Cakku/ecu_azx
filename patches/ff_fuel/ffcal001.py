@@ -9,7 +9,8 @@ re-checksums the block.
 
 Two outputs:
 
-  build/ffcal001.bin    the 266 bytes that go into the image (v2; v1 was 232)
+  build/ffcal001.bin    the 290 bytes that go into the image
+                        (v3; v2 was 266 and v1 232)
   ffcal001_rows.csv     descriptor rows in the exact column format of
                         `re/calibration_draft.csv`, for the integrator to
                         append at merge time (brief D3 owns that file, so D1
@@ -39,9 +40,20 @@ and the two 8-point breakpoint axes of `ff_dzw_map` (+0xE8, +0xF8); the
 checksum moved from +0xE6 to +0x108 with the length.  `ff_fzw_curve`, which
 v1 reserved as all-zero, now carries the docs/05 section 3.4 shape (0 at E0,
 the u8 maximum 255 from E50 on) and `ff_dzw_map` stays all zero, so the
-shipped file is still inert -- with `ff_zw_enable = 1` as well.  The ECU-side
-`ff_cal_ok()` accepts **version 2 only**: a v1 block flashed under a v2 blob
-is rejected exactly like a corrupt one, i.e. mode 0, F = 1024 and dzw_e = 0.
+shipped file is still inert -- with `ff_zw_enable = 1` as well.
+
+Version 3 (brief E2, issue #35, 2026-09-17) APPENDED the start enrichment and
+again moved nothing: `ff_st_enable` (+0x108, shipped **0**), `ff_zwst_enable`
+(+0x109, shipped **0**), `ff_fst_max` (+0x10A), `ff_zwst_max` (+0x10C),
+`ff_zwst_tmax` (+0x10D), the two 6-point axes `ff_fst_e_axis` (+0x10E) and
+`ff_fst_tmst_axis` (+0x114), and `ff_fzwst_curve` (+0x11A); the checksum moved
+from +0x108 to +0x120 with the length.  `ff_fst_map`, which v1 and v2 reserved
+as all-1024, is now read by `src/ff_start.c` and stays **all 1024**, so the
+shipped file is inert with `ff_st_enable = 1` as well.
+
+The ECU-side `ff_cal_ok()` accepts **the current version only**: a v1 or v2
+block flashed under a v3 blob is rejected exactly like a corrupt one, i.e.
+mode 0, F = 1024, dzw_e = 0, fst_q10 = 1024 and zwst_add = 0.
 
 Usage:
     ./.venv/bin/python3 patches/ff_fuel/ffcal001.py                # build both
@@ -62,14 +74,14 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 sys.path.insert(0, str(REPO))
 from emu.models.flexfuel import (  # noqa: E402
-    CURVE_N, DZW_N, DZW_NMOT_AXIS, DZW_RL_AXIS, f_curve_from_formula,
-    fzw_curve_default,
+    CURVE_N, DZW_N, DZW_NMOT_AXIS, DZW_RL_AXIS, FST_E_AXIS, FST_N,
+    FST_TMST_AXIS, f_curve_from_formula, fzw_curve_default,
 )
 
 CAL_BASE = 0x005E2510
 MAGIC = b"FFCAL001"
-VERSION = 2                          # E1 (#34) appended the ignition blend
-LENGTH = 0x010A                      # total, checksum included
+VERSION = 3                          # E2 (#35) appended the start enrichment
+LENGTH = 0x0122                      # total, checksum included
 
 # offset, name, struct code, count - must match patches/ff_fuel/src/ff_state.h
 SCALARS = (
@@ -92,6 +104,16 @@ SCALARS = (
                                      " 0 (shipped) makes dzw_e permanently 0"),
     (0xE7, "ff_dzw_max", "B", "0.75 degCA", "E1: |dzw_e| ceiling in counts;"
                                             " clamped to FF_DZW_HARD_MAX (16) in code"),
+    (0x108, "ff_st_enable", "B", "-", "E2 (#35): 1 = apply the start enrichment"
+                                      " f_st(E, tmst); 0 (shipped) pins fst_q10 at 1024"),
+    (0x109, "ff_zwst_enable", "B", "-", "E2 (#35): 1 = apply the start-ignition"
+                                        " advance; 0 (shipped) pins zwst_add at 0"),
+    (0x10A, "ff_fst_max", "H", "1/1024", "E2: fst_q10 ceiling; clamped to"
+                                         " FF_FST_HARD_MAX (2560 = 2.50x) in code"),
+    (0x10C, "ff_zwst_max", "B", "0.75 degCA", "E2: zwst_add ceiling in counts;"
+                                              " clamped to FF_ZWST_HARD_MAX (8) in code"),
+    (0x10D, "ff_zwst_tmax", "B", "tmst count", "E2: the start advance is 0 at and"
+                                               " above this tmst count (117 = 39.75 degC)"),
 )
 
 TABLES = (
@@ -108,8 +130,13 @@ TABLES = (
      " read as interp_2d_s8(val, nx=8, key_nmot, key_rl). ALL ZERO as shipped,"
      " so the file is inert even with ff_zw_enable = 1; calibrate it from +0"
      " towards +2 degCA only in cells where dwkrz stays 0"),
-    (0x94, "ff_fst_map", 36, "H", 0, "map_2d_data", "1/1024",
-     "RESERVED 6x6 start/warm-up factor (docs/05 section 3.5); neutral 1024"),
+    (0x94, "ff_fst_map", 36, "H", 0, "map_2d", "1/1024",
+     "E2 (#35): start/warm-up fuel factor f_st, 6 ethanol rows x 6 tmst columns,"
+     " read as interp(val, ny=6, nx=6, key_E, key_tmst) by src/ff_start.c."
+     " ALL 1024 as shipped, so the file is inert even with ff_st_enable = 1;"
+     " ROW 0 (E0) must stay exactly 1024 - that is what makes E0 bit-identical"
+     " at both S1 sites. Calibrate from about 1.2x at a warm start upwards, and"
+     " never past the injection window dwi (0x803088, injection.md section 8)"),
     (0xDC, "ff_prail_add", 8, "B", 0, "curve_1d", "0.1 MPa",
      "RESERVED rail-pressure adder over ethanol % (docs/05 section 3.6); neutral 0"),
     (0xE8, "ff_dzw_nmot_axis", DZW_N, "H", 0, "axis", "0.25 rpm",
@@ -119,6 +146,21 @@ TABLES = (
     (0xF8, "ff_dzw_rl_axis", DZW_N, "H", 0, "axis", "100/4096 %",
      "E1 (#34): the 8 column breakpoints of ff_dzw_map, eight of the twelve"
      " breakpoints of the stock KFZW rl axis 0x5C7758 (10.2..103.9 %)"),
+    (0x10E, "ff_fst_e_axis", FST_N, "B", 0, "axis", "%",
+     "E2 (#35): the 6 ROW breakpoints of ff_fst_map, ethanol volume percent."
+     " Shared with ff_fzwst_curve. 85 is a breakpoint because E85 is the"
+     " calibration target; 0 must stay 0 so row 0 is the E0 row"),
+    (0x114, "ff_fst_tmst_axis", FST_N, "B", 0, "axis", "tmst count",
+     "E2 (#35): the 6 COLUMN breakpoints of ff_fst_map, in tmst counts of"
+     " 0.75 degC with a -48 degC offset. Six of the twelve stock KFWKSTT"
+     " breakpoints (0x5C6C62), so every cell lines up with a stock row:"
+     " 24/44/64/91/117/184 = -30/-15/0/+20.25/+39.75/+90 degC"
+     " (re/findings/start.md section 9.4)"),
+    (0x11A, "ff_fzwst_curve", FST_N, "b", 1, "curve_1d", "0.75 degCA",
+     "E2 (#35): start-ignition ADVANCE over ethanol %, on ff_fst_e_axis, in s8"
+     " counts. ALL ZERO as shipped. The knock retard is bypassed during the"
+     " start (start.md section 5), so nothing downstream takes this back:"
+     " stay inside +2..+4 degCA = +3..+5 counts"),
 )
 
 CRC_OFF = LENGTH - 2
@@ -127,10 +169,13 @@ DEFAULT_TABLES = {
     "ff_F_curve": None,                      # from the formula
     "ff_fzw_curve": None,                    # from the docs/05 3.4 shape
     "ff_dzw_map": [0] * 64,
-    "ff_fst_map": [1024] * 36,
+    "ff_fst_map": [1024] * (FST_N * FST_N),
     "ff_prail_add": [0] * 8,
     "ff_dzw_nmot_axis": list(DZW_NMOT_AXIS),
     "ff_dzw_rl_axis": list(DZW_RL_AXIS),
+    "ff_fst_e_axis": list(FST_E_AXIS),
+    "ff_fst_tmst_axis": list(FST_TMST_AXIS),
+    "ff_fzwst_curve": [0] * FST_N,
 }
 
 
@@ -193,6 +238,48 @@ def build(params: dict) -> bytes:
         raise CalError(f"ff_dzw_max is {dzw_max} counts = {dzw_max * 0.75:.2f} degCA;"
                        " the patch clamps to FF_DZW_HARD_MAX = 16 (12.00 degCA) in"
                        " code, so anything above that is a calibration that lies")
+
+    # --- E2 (#35): the same kind of properties for the start enrichment ----
+    fst = struct.unpack_from(">" + "H" * (FST_N * FST_N), blk, 0x94)
+    if any(v != 1024 for v in fst[:FST_N]):
+        raise CalError("ff_fst_map row 0 is the E0 row and must be exactly 1024 in"
+                       f" all {FST_N} cells, got {list(fst[:FST_N])} - E0 would not"
+                       " be bit-identical at the two S1 sites")
+    if any(v < 1024 for v in fst):
+        raise CalError("ff_fst_map may not go below 1024: f_st only ever ENRICHES"
+                       " the start, and the stub refuses a value below 1024 anyway")
+    if max(fst) > 2560:
+        raise CalError(f"ff_fst_map reaches {max(fst)} = {max(fst) / 1024:.2f}x; the"
+                       " patch clamps every cell to FF_FST_HARD_MAX = 2560 (2.50x)"
+                       " in code, so anything above that is a calibration that lies")
+    fst_max = struct.unpack_from(">H", blk, 0x10A)[0]
+    if not 1024 <= fst_max <= 2560:
+        raise CalError(f"ff_fst_max is {fst_max}; it has to be between 1024 (1.00x,"
+                       " the neutral) and FF_FST_HARD_MAX 2560 (2.50x)")
+    zwst_max = blk[0x10C]
+    if zwst_max > 8:
+        raise CalError(f"ff_zwst_max is {zwst_max} counts = {zwst_max * 0.75:.2f}"
+                       " degCA; the patch clamps to FF_ZWST_HARD_MAX = 8 (6.00 degCA)"
+                       " in code, and the knock retard is bypassed during the start")
+    e_axis = blk[0x10E:0x10E + FST_N]
+    if e_axis[0] != 0:
+        raise CalError(f"ff_fst_e_axis[0] must be 0 so row 0 is the E0 row, got"
+                       f" {e_axis[0]}")
+    if e_axis[FST_N - 1] > 100:
+        raise CalError("ff_fst_e_axis is ethanol volume percent; it cannot exceed 100")
+    for name, off in (("ff_fst_e_axis", 0x10E), ("ff_fst_tmst_axis", 0x114)):
+        axis = blk[off:off + FST_N]
+        if any(b <= a for a, b in zip(axis, axis[1:])):
+            raise CalError(f"{name} must be strictly increasing, got {list(axis)}"
+                           " - the breakpoint search assumes it")
+    fzwst = struct.unpack_from(">" + "b" * FST_N, blk, 0x11A)
+    if fzwst[0] != 0:
+        raise CalError(f"ff_fzwst_curve[0] must be exactly 0 (no start advance at"
+                       f" E0), got {fzwst[0]}")
+    if max(fzwst) > 8:
+        raise CalError(f"ff_fzwst_curve reaches {max(fzwst)} counts ="
+                       f" {max(fzwst) * 0.75:.2f} degCA; the patch clamps to"
+                       " FF_ZWST_HARD_MAX = 8 (6.00 degCA) in code")
 
     crc = (~sum(blk[:CRC_OFF])) & 0xFFFF
     struct.pack_into(">H", blk, CRC_OFF, crc)
@@ -259,7 +346,15 @@ def rows(params: dict) -> list[dict]:
                      "y_axis_addr": f"0x{CAL_BASE + 0xE8:06X}",
                      "x_elem": "u16", "y_elem": "u16"}
         elif name == "ff_fst_map":
-            x_n, y_n = 6, 6
+            # E2: like ff_dzw_map, the only other table in the block with axes
+            # of its own.  x is the tmst column, y the ethanol row.
+            x_n, y_n = FST_N, FST_N
+            extra = {"x_axis_addr": f"0x{CAL_BASE + 0x114:06X}",
+                     "y_axis_addr": f"0x{CAL_BASE + 0x10E:06X}",
+                     "x_elem": "u8", "y_elem": "u8"}
+        elif name == "ff_fzwst_curve":
+            # E2: a 1-D curve that borrows ff_fst_map's ethanol axis.
+            extra = {"x_axis_addr": f"0x{CAL_BASE + 0x10E:06X}", "x_elem": "u8"}
         row(CAL_BASE + off, kind, x_n, y_n,
             1 if code in ("B", "b") else 2, signed, name,
             f"{note} [{unit}]", **extra)

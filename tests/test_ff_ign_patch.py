@@ -223,13 +223,15 @@ class TestIgnApply(tff.TestApply):
             off = m.cpu_to_file(GROUP_TABLE + f * 0x1FE + (GROUP + 0x7F) * 2)
             self.assertEqual(bytes(self.data[off:off + 2]), b"\0\0")
 
-    def test_ffcal001_is_version_2_on_the_image(self):
+    def test_ffcal001_carries_e1s_fields_where_v2_put_them(self):
+        """E2 bumped the block to v3 by APPENDING; nothing of E1's moved."""
         off = m.cpu_to_file(tff.CAL_BASE)
         blk = bytes(self.data[off:off + ffcal001.LENGTH])
         ffcal001.check(blk)
-        self.assertEqual(struct.unpack_from(">H", blk, 0x08)[0], 2)
-        self.assertEqual(struct.unpack_from(">H", blk, 0x0A)[0], 0x010A)
+        self.assertEqual(struct.unpack_from(">H", blk, 0x08)[0], ffcal001.VERSION)
+        self.assertEqual(struct.unpack_from(">H", blk, 0x0A)[0], ffcal001.LENGTH)
         self.assertEqual(blk[0xE6], 0, "ff_zw_enable must ship 0")
+        self.assertEqual(blk[0x54:0x94], bytes(64), "ff_dzw_map must ship zero")
 
     def test_the_trampoline_is_the_ten_documented_instructions(self):
         """Read back out of the image, not out of the ELF (README 'Blob')."""

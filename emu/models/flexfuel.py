@@ -89,8 +89,27 @@ DZW_RL_AXIS = (416, 864, 1280, 1696, 2144, 2976, 3840, 4256)
 
 CORE_OFF = 0x08    # first checksummed byte of the state block
 CORE_LEN = 0x24    # +0x08..+0x2B; the annex above it has other writers
-STATE_LEN = 0x40   # sizeof(struct ff_state)
-BLOCK_LEN = 0x40
+CORE2_OFF = 0x40   # E2 (#35): the second checksummed range, past the annex
+CORE2_LEN = 0x04   # +0x40..+0x43
+STATE_LEN = 0x44   # sizeof(struct ff_state); E2 grew it from 0x40
+BLOCK_LEN = 0x44
+
+# --- E2 (#35): the start enrichment -------------------------------------
+FST_N = 6              # ff_fst_map is FST_N ethanol rows x FST_N tmst columns
+FST_ONE = 1024         # ff_fst_map[..] / 1024 is the factor
+FST_HARD_MAX = 2560    # the CODE ceiling on fst_q10, 2.50x (see ff_state.h)
+ZWST_HARD_MAX = 8      # the CODE ceiling on zwst_add, 6.00 degCA
+
+#: `ff_fst_e_axis`, ethanol volume percent.  85 because E85 is the target.
+FST_E_AXIS = (0, 20, 40, 60, 85, 100)
+
+#: `ff_fst_tmst_axis`, in `tmst` counts of 0.75 degC with a -48 degC offset:
+#: -30, -15, 0, +20.25, +39.75, +90 degC.  Six of the twelve breakpoints of the
+#: stock KFWKSTT tmst axis 0x5C6C62, so every cell lines up with a stock row
+#: (re/findings/start.md section 9.4).  117 is also the shipped
+#: `ff_zwst_tmax`, so the temperature at which the start ADVANCE switches off
+#: is a breakpoint of the start FUEL map rather than a number between two.
+FST_TMST_AXIS = (24, 44, 64, 91, 117, 184)
 
 
 # ---------------------------------------------------------------- the frame --
@@ -160,6 +179,17 @@ class Cal:
     dzw_map: list[int] = field(default_factory=lambda: [0] * (DZW_N * DZW_N))
     dzw_nmot_axis: list[int] = field(default_factory=lambda: list(DZW_NMOT_AXIS))
     dzw_rl_axis: list[int] = field(default_factory=lambda: list(DZW_RL_AXIS))
+    # --- E2 (#35): the start enrichment, appended by FFCAL001 v3 ----------
+    st_enable: int = 0
+    zwst_enable: int = 0
+    fst_max: int = 2048
+    zwst_max: int = 4
+    zwst_tmax: int = 117           # tmst count; 39.75 degC
+    fst_map: list[int] = field(
+        default_factory=lambda: [FST_ONE] * (FST_N * FST_N))
+    fst_e_axis: list[int] = field(default_factory=lambda: list(FST_E_AXIS))
+    fst_tmst_axis: list[int] = field(default_factory=lambda: list(FST_TMST_AXIS))
+    fzwst_curve: list[int] = field(default_factory=lambda: [0] * FST_N)
 
     # The clamps the patch applies to whatever the calibration says.
     def tick(self) -> int:
@@ -185,6 +215,14 @@ class Cal:
     def dzw_ceiling(self) -> int:
         """|dzw_e| ceiling, clamped in CODE to DZW_HARD_MAX (brief E1)."""
         return min(self.dzw_max, DZW_HARD_MAX)
+
+    def fst_ceiling(self) -> int:
+        """`fst_q10` ceiling, clamped in CODE to FST_HARD_MAX (brief E2)."""
+        return max(min(self.fst_max, FST_HARD_MAX), FST_ONE)
+
+    def zwst_ceiling(self) -> int:
+        """`zwst_add` ceiling, clamped in CODE to ZWST_HARD_MAX (brief E2)."""
+        return min(self.zwst_max, ZWST_HARD_MAX)
 
 
 # ------------------------------------------------------------ the RAM state --
@@ -233,6 +271,10 @@ class State:
     persist_wait: int = 0
     persist_writes: int = 0
     persist_fails: int = 0
+    # core 2 (+0x40..+0x43, checksummed) -- E2 (#35)
+    fst_q10: int = FST_ONE   # u16, 1/1024: the start fuel factor f_st(E, tmst)
+    zwst_add: int = 0        # s8, 0.75 degCA per count: the start advance
+    st_reserved: int = 0     # always 0; reserved for brief E5
 
 
 def _tdiv(n: int, d: int) -> int:
@@ -279,6 +321,52 @@ def axis_key8(axis, value: int) -> int:
     return 0                      # a non-monotonic axis: the safe cell
 
 
+def axis_key6(axis, value: int, mul: int = 1) -> int:
+    """`(index << 16) | frac` for a 6-point u8 axis (brief E2).
+
+    `src/ff_start.c`'s `ff_axis6()`, which is `ff_axis8()` over a u8 breakpoint
+    list.  `mul` puts the axis and the value into the same units: the tmst axis
+    is searched with 1, the ethanol axis with 16 because `e_filt` is in 1/16 %
+    while the axis is in whole percent.  The comparison stays exact -- a
+    breakpoint at 85 % is exactly `e_filt` 1360.
+    """
+    n = len(axis)
+    if value <= axis[0] * mul:
+        return 0
+    if value >= axis[n - 1] * mul:
+        return (n - 1) << 16
+    for i in range(n - 1):
+        lo, hi = axis[i] * mul, axis[i + 1] * mul
+        if lo <= value < hi:
+            return (i << 16) | (((value - lo) << 16) // (hi - lo))
+    return 0                      # a non-monotonic axis: the safe cell
+
+
+def interp6_u16(values, key_y: int, key_x: int, nx: int = FST_N) -> int:
+    """`ff_interp6()` of src/ff_start.c: bilinear over an nx-wide u16 map.
+
+    Same index order and same arithmetic as `interp8_s8`, only over u16 cells
+    and with every corner clamped to FST_HARD_MAX **before** it is used -- which
+    is what keeps the widest intermediate product at 2560 * 65535, inside s32,
+    on the ECU.  The result is floored at FST_ONE: `f_st` only ever enriches.
+    """
+    def cell(p: int) -> int:
+        return min(values[p], FST_HARD_MAX)
+
+    fx, ix = key_x & 0xFFFF, key_x >> 16
+    fy, iy = key_y & 0xFFFF, key_y >> 16
+    p = ix + nx * iy
+    v = cell(p)
+    if fx:
+        v = v + ((fx * (cell(p + 1) - v)) >> 16)
+    if fy:
+        v2 = cell(p + nx)
+        if fx:
+            v2 = v2 + ((fx * (cell(p + nx + 1) - v2)) >> 16)
+        v = v + ((fy * (v2 - v)) >> 16)
+    return max(v, FST_ONE)
+
+
 def interp8_s8(values, key_y: int, key_x: int, nx: int = DZW_N) -> int:
     """`interp_2d_s8` (0x40C3B4) over an nx-wide s8 map: `values[iy*nx + ix]`."""
     fx, ix = key_x & 0xFFFF, key_x >> 16
@@ -318,6 +406,7 @@ class FlexFuelModel:
         st.magic, st.length = self.MAGIC, self.LENGTH
         st.mode = MODE_FAULT            # FAULT until the first valid frame
         st.f_q10 = F_MIN                # E0 behaviour, bit-identical to stock
+        st.fst_q10 = FST_ONE            # E2: the same, for the start
         st.status = 0xFF
         st.cal_ok = 1 if c.valid else 0
         st.cal_mode = c.mode if c.valid else 0
@@ -332,8 +421,13 @@ class FlexFuelModel:
                 and st.csum == self.checksum())
 
     def checksum(self) -> int:
-        """Bit-complement of the 16-bit sum of the core bytes (+0x08..+0x27)."""
-        return (~sum(self.core_bytes())) & 0xFFFF
+        """Bit-complement of the 16-bit sum of the two checksummed ranges.
+
+        +0x08..+0x2B (D1's core) and +0x40..+0x43 (E2's), in that order, which
+        is exactly the order `ff_core_csum()` sums them in.  The annex between
+        them has other writers and stays outside.
+        """
+        return (~sum(self.core_bytes() + self.core2_bytes())) & 0xFFFF
 
     def core_bytes(self) -> bytes:
         st = self.state
@@ -355,15 +449,25 @@ class FlexFuelModel:
         assert len(out) == CORE_LEN
         return bytes(out)
 
+    def core2_bytes(self) -> bytes:
+        """The second checksummed range, +0x40..+0x43 (brief E2)."""
+        st = self.state
+        out = (st.fst_q10.to_bytes(2, "big")
+               + bytes((st.zwst_add & 0xFF, st.st_reserved & 0xFF)))
+        assert len(out) == CORE2_LEN
+        return out
+
     def seal(self) -> None:
         self.state.csum = self.checksum()
 
     def block_bytes(self) -> bytes:
-        """The 0x28 bytes of header + core, exactly as they sit at PATCH_RAM.
+        """The 0x2C bytes of header + first core, as they sit at PATCH_RAM.
 
         This is what `tests/test_ff_fuel_patch.py` compares the emulated RAM
         against, tick by tick.  The annex (+0x2C..+0x3F) is deliberately left
         out: the segment task and brief D2 write it, not the periodic tick.
+        E2's second core (+0x40..+0x43) is not contiguous with this, so it has
+        its own `core2_bytes()`; `full_bytes()` shows all 0x44.
         """
         st = self.state
         return struct.pack(">IHH", st.magic, st.length, st.csum) + self.core_bytes()
@@ -435,6 +539,87 @@ class FlexFuelModel:
             return 0                               # no valid state -> stock
         return st.dzw_e
 
+    # -- E2 (#35): the start enrichment ------------------------------------
+    def fst_of(self, e_filt: int, tmst: int) -> int:
+        """`f_st(E, tmst)` from `ff_fst_map`, Q10: `src/ff_start.c`'s producer.
+
+        `interp6_u16` indexes `val[iy * 6 + ix]`, so y is the ETHANOL row and x
+        the `tmst` column -- the map reads in the XDF the way the calibration
+        is thought about, one row per fuel.
+        """
+        ky = axis_key6(self.cal.fst_e_axis, e_filt, 16)
+        kx = axis_key6(self.cal.fst_tmst_axis, tmst, 1)
+        return interp6_u16(self.cal.fst_map, ky, kx)
+
+    def fzwst_of(self, e_filt: int) -> int:
+        """The start-advance curve over the SAME ethanol axis as the map rows."""
+        key = axis_key6(self.cal.fst_e_axis, e_filt, 16)
+        f, i = key & 0xFFFF, key >> 16
+        a = _s8(self.cal.fzwst_curve[i] & 0xFF)
+        if f == 0:
+            return a
+        b = _s8(self.cal.fzwst_curve[i + 1] & 0xFF)
+        return a + ((f * (b - a)) >> 16)
+
+    def start_update(self, tmst: int) -> None:
+        """Recompute `fst_q10` and `zwst_add`; the end of every activation.
+
+        The two halves of the #37 asymmetry, side by side:
+
+        * the FUEL factor runs wherever `ff_tick()` computes `f_q10` from
+          `e_filt` -- OK, HOLD, FAULT and OVERRIDE -- so it inherits the FAULT
+          hold and the decay towards `e_key` without a rule of its own, and it
+          is neutral (1024) exactly where `f_q10` is forced to 1024;
+        * the start ADVANCE is 0 on the very activation the mode leaves
+          OK/HOLD/OVERRIDE, with no hold and no ramp, and additionally 0 at and
+          above `ff_zwst_tmax`.  The knock retard is bypassed during the start,
+          so nothing downstream would take a stale advance back.
+        """
+        st, c = self.state, self.cal
+        if (not c.st_enable or not st.cal_ok or st.e_filt == 0
+                or st.mode in (MODE_INIT, MODE_OFF)):
+            st.fst_q10 = FST_ONE
+        else:
+            st.fst_q10 = min(self.fst_of(st.e_filt, tmst), c.fst_ceiling())
+
+        if (not c.zwst_enable or not st.cal_ok or st.e_filt == 0
+                or st.mode not in (MODE_OK, MODE_HOLD, MODE_OVERRIDE)
+                or tmst >= c.zwst_tmax):
+            st.zwst_add = 0
+            return
+        st.zwst_add = min(max(self.fzwst_of(st.e_filt), 0), c.zwst_ceiling())
+
+    def ksta_scale(self, ksta: int) -> int:
+        """What either S1 stub publishes at 0x80302C, given the block as it is.
+
+        `ksta` is the halfword the stock `sth` would have stored; the stub takes
+        exactly those 16 bits (`clrlwi`) and saturates the product at 0xFFFF,
+        which is the fixed point `re/findings/start.md` section 3.3 fixes for
+        the cell.
+        """
+        st = self.state
+        if st.magic != self.MAGIC:
+            return ksta & 0xFFFF                   # no valid state -> stock
+        if st.fst_q10 <= FST_ONE:
+            return ksta & 0xFFFF                   # neutral -> bit-identical
+        return min(((ksta & 0xFFFF) * st.fst_q10) >> 10, 0xFFFF)
+
+    def zwstt_offset(self, zwstt: int) -> int:
+        """What the 0x431384 stub stores, given the stock s8 it displaced.
+
+        The stub range-checks the byte UNSIGNED against ZWST_HARD_MAX, which
+        rejects every negative value too, and then re-does the s8 clamp the
+        stock code applies *before* the store.
+        """
+        st = self.state
+        stock = _s8(zwstt & 0xFF)
+        if st.magic != self.MAGIC:
+            return stock
+        add = st.zwst_add & 0xFF
+        if add > ZWST_HARD_MAX:                    # incl. every negative byte
+            return stock
+        return min(stock + add, 127)
+
     # -- the filter and the slew limiter ----------------------------------
     def _move(self, target_e16: int, *, filtered: bool) -> None:
         """Move E towards `target_e16` (1/16 %) by one activation."""
@@ -459,21 +644,24 @@ class FlexFuelModel:
         st.e_frac = now % FRAC
 
     # -- one activation ---------------------------------------------------
-    def _finish(self, nmot_w: int, rl_w: int) -> None:
+    def _finish(self, nmot_w: int, rl_w: int, tmst: int = 0) -> None:
         """`ff_finish()`: the tail of every activation, on every path."""
         self.zw_update(nmot_w, rl_w)
+        self.start_update(tmst)
         self.diag_publish()
         self.seal()
 
     def tick(self, rx: bytes | None = None, *, src: int = SRC_B,
              can_id_echo: int | None = None,
-             nmot_w: int = 0, rl_w: int = 0) -> State:
+             nmot_w: int = 0, rl_w: int = 0, tmst: int = 0) -> State:
         """One periodic-hook activation.
 
         `rx` is the frame `can_rx_poll(15)` would report as fresh (DLC 8), or
         None for "nothing new since the last call".  `nmot_w` (0x7FEE74) and
-        `rl_w` (0x7FEFB2) are the two RAM words the ignition blend reads; they
-        default to 0, which selects the bottom-left cell of `ff_dzw_map`.
+        `rl_w` (0x7FEFB2) are the two RAM words the ignition blend reads and
+        `tmst` (0x8021F6) is the u8 count the start enrichment reads; all three
+        default to 0, which is both what an un-written emulator RAM holds and,
+        for the two maps, the bottom-left cell.
         """
         st = self.state
         if not self.state_valid():
@@ -487,7 +675,7 @@ class FlexFuelModel:
         if st.src_owner != src:
             st.src_foreign = _sat8(st.src_foreign + 1)
             if st.src_foreign < OWNER_SWITCH:
-                self._finish(nmot_w, rl_w)
+                self._finish(nmot_w, rl_w, tmst)
                 return st
             st.src_owner, st.src_foreign = src, 0
         else:
@@ -502,7 +690,7 @@ class FlexFuelModel:
         if not st.cal_ok or st.cal_mode == 0:
             st.mode = MODE_OFF
             st.f_q10 = F_MIN
-            self._finish(nmot_w, rl_w)
+            self._finish(nmot_w, rl_w, tmst)
             return st
 
         if st.cal_mode == 2:                       # bench override
@@ -510,7 +698,7 @@ class FlexFuelModel:
             st.age_ticks = 0
             self._move(c.override() * 16, filtered=True)
             st.f_q10 = self.f_of(st.e_filt)
-            self._finish(nmot_w, rl_w)
+            self._finish(nmot_w, rl_w, tmst)
             return st
 
         # --- normal operation --------------------------------------------
@@ -555,7 +743,7 @@ class FlexFuelModel:
         # HOLD: E is frozen, so F is frozen too
 
         st.f_q10 = self.f_of(st.e_filt)
-        self._finish(nmot_w, rl_w)
+        self._finish(nmot_w, rl_w, tmst)
         return st
 
     # -- the measuring block (brief D2, issue #39) ------------------------
@@ -614,13 +802,43 @@ class FlexFuelModel:
             (0x36, 0, zw_latch & 3),
         ]
 
+    def triples_st(self, tmst: int = 0, ksta: int = 0x400) -> list[tuple]:
+        """The four `(formula, A, B)` triples of measuring block 69 (brief E2).
+
+        `tmst` is the stock byte at 0x8021F6 and `ksta` the stock word at
+        0x80302C: fields 3 and 4 read them live in the handler, so they are
+        arguments here rather than state, and neither depends on our block
+        header -- a tester watching a cold start must still see them.
+
+        Field 1 is a plain percent (formula 0x21, A = 100); FST_HARD_MAX is
+        chosen so it always fits the byte.  Field 2 is the ignition formula
+        E1 settled on, 0x22 with A = 0x4B = 0.75 degCA per count.  Field 3 is
+        formula 0x05 with A = 10, i.e. whole degrees C, converted here from
+        the 0.75 degC / -48 degC count and rounded to nearest.  Field 4 is a
+        RAW COUNT (formula 0x36): `ksta_adapted` runs to 22.8x = 2280 % in the
+        stock dataset alone, so a percent byte would saturate -- see
+        `src/ff_start.c`.
+        """
+        st = self.state
+        clamp = lambda v: min(max(v, 0), 0xFF)              # noqa: E731
+        ours = st.magic == self.MAGIC and st.length == STATE_LEN
+        pct = (st.fst_q10 * 100 + FST_ONE // 2) // FST_ONE
+        degc = ((tmst & 0xFF) * 3 + 2) // 4 - 48
+        return [
+            (0x21, 100, clamp(pct)) if ours else (0x25, 0, 0),
+            (0x22, 0x4B, clamp(st.zwst_add + 128)) if ours else (0x25, 0, 0),
+            (0x05, 10, clamp(degc + 100)),
+            (0x36, (ksta >> 8) & 0xFF, ksta & 0xFF),
+        ]
+
     def full_bytes(self) -> bytes:
-        """All 64 bytes at PATCH_RAM, annex included."""
+        """All 68 bytes at PATCH_RAM: header, core, annex and E2's core 2."""
         st = self.state
         return self.block_bytes() + struct.pack(
             ">IHBBHHHHHH", st.rk_calls, st.e_persist, st.persist_state,
             st.persist_err, st.diag_e_pct, st.diag_f_pct, st.diag_t_degc,
-            st.persist_wait, st.persist_writes, st.persist_fails)
+            st.persist_wait, st.persist_writes, st.persist_fails
+        ) + self.core2_bytes()
 
     # -- the segment-synchronous half -------------------------------------
     def rk_scale(self, rk: int) -> int:

@@ -48,6 +48,13 @@ WANTED: tuple[tuple[str, str | None], ...] = (
     ("rl_w", None),                    # KFZW column-axis input
     ("cand_mw_percyl_block", "DWKRZ"), # the six per-cylinder knock retards
     ("zwgru_low_octane_latch", "ZW_LOW_OCT_LATCH"),
+    # RAM -- E2 (issue #35): the start enrichment.  `tmst` is the column axis
+    # of ff_fst_map and the gate of the start advance; the other two are the
+    # cells the three E2 stubs publish, addressed absolutely in src/hooks.S and
+    # read back by the group-69 handlers.
+    ("tmst", None),                    # 0x8021F6, coolant latched at start
+    ("ksta_adapted", None),            # 0x80302C, the cranking lever (S1)
+    ("zwstt", None),                   # 0x802096, the start angle (Z1)
 )
 
 CONFIDENCE_TAG = {

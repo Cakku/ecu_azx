@@ -457,15 +457,18 @@ class TestFfcal001(unittest.TestCase):
         with self.assertRaises(ffcal001.CalError):
             ffcal001.build(dict(self.params, ff_dzw_max=ff.DZW_HARD_MAX + 1))
 
-    def test_the_block_is_version_2_and_a_v1_block_is_refused(self):
-        self.assertEqual(struct.unpack_from(">H", self.blk, 0x08)[0], 2)
-        self.assertEqual(ffcal001.LENGTH, 0x010A)
-        v1 = bytearray(self.blk)
-        struct.pack_into(">H", v1, 0x08, 1)
-        struct.pack_into(">H", v1, ffcal001.CRC_OFF,
-                         (~sum(v1[:ffcal001.CRC_OFF])) & 0xFFFF)
-        with self.assertRaises(ffcal001.CalError):
-            ffcal001.check(bytes(v1))
+    def test_the_block_is_version_3_and_an_older_block_is_refused(self):
+        """`ff_cal_ok()` accepts the current version ONLY, v1 and v2 included."""
+        self.assertEqual(struct.unpack_from(">H", self.blk, 0x08)[0], 3)
+        self.assertEqual(ffcal001.LENGTH, 0x0122)
+        for old in (1, 2):
+            with self.subTest(version=old):
+                stale = bytearray(self.blk)
+                struct.pack_into(">H", stale, 0x08, old)
+                struct.pack_into(">H", stale, ffcal001.CRC_OFF,
+                                 (~sum(stale[:ffcal001.CRC_OFF])) & 0xFFFF)
+                with self.assertRaises(ffcal001.CalError):
+                    ffcal001.check(bytes(stale))
 
     def test_v2_appended_and_moved_nothing(self):
         """Every v1 offset still holds what v1 put there (brief E1)."""
@@ -478,6 +481,22 @@ class TestFfcal001(unittest.TestCase):
             self.assertIn(off, set(by_name.values()), f"{off:#x} disappeared")
         self.assertGreater(0xE6, 0xDC + 8, "v2 starts after the last v1 table")
         self.assertEqual(struct.unpack_from(">17H", self.blk, 0x20)[0], 1024)
+
+    def test_v3_appended_and_moved_nothing(self):
+        """Every v2 offset still holds what v2 put there (brief E2, #35)."""
+        v2_offsets = (0xE6, 0xE7, 0xE8, 0xF8)
+        by_name = {n: off for off, n, *_ in ffcal001.SCALARS}
+        by_name.update({n: off for off, n, *_ in ffcal001.TABLES})
+        for off in v2_offsets:
+            self.assertIn(off, set(by_name.values()), f"{off:#x} disappeared")
+        self.assertEqual(by_name["ff_st_enable"], 0x108,
+                         "v3 must start where v2's checksum used to be")
+        self.assertGreaterEqual(0x108, 0xF8 + 16,
+                                "v3 starts at or after the end of the last v2 table")
+        # the two v2 axes are untouched
+        self.assertEqual(struct.unpack_from(">8H", self.blk, 0xE8),
+                         ff.DZW_NMOT_AXIS)
+        self.assertEqual(struct.unpack_from(">8H", self.blk, 0xF8), ff.DZW_RL_AXIS)
 
     def test_the_layout_matches_ff_state_h(self):
         """The C header and the generator are two copies of one layout."""
