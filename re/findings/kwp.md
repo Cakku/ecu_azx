@@ -303,6 +303,52 @@ an entry array; each stored entry is 8 B = size at +1, 24-bit source addr at
 +4). `kwp_sid_2C_h2` (0x35034) wipes all 10 slots (session change / reset), so
 **redefine your dynamic ids after every session (re)start.**
 
+> **2026-09-17 (E4, #20/#39) — where the entry arrays actually are, and the
+> emulator trap that hid it. VERIFIED-STATIC.**
+>
+> The "ptr to an entry array" at slot+4 is **not** filled by `kwp_sid_2C_h1`,
+> and `kwp_sid_2C_h2` clears only the count byte at slot+1 (0x035044-0x03505C
+> writes `stb r3,1(r12)` for ten slots and nothing else). It is filled once by
+> **`ddli_init` at 0x12E39C**:
+>
+> ```
+> 0012E3B0  stw  r11,4(r4)        ; r4 = 0x804038, r11 = 0x80366C   -> id 0xF0
+> 0012E3BC  mulli r11,r5,0x18     ; r3 = 0x80370C, r5 = 1..9
+> 0012E3D0  stw  r11,4(r12)       ; slot n -> 0x80370C + (n-1)*0x18 -> 0xF1..0xF9
+> ```
+>
+> so **id 0xF0's entry array is 0x80366C-0x80370B (0xA0 B = 20 entries)** and
+> **ids 0xF1-0xF9 get 0x18 B = 3 entries each**, starting at 0x80370C — which
+> is exactly `tbl_ddli_max_entries` (0xA2268) and confirms those limits from a
+> second, independent direction. `ddli_init` is a leaf ending at 0x12E3E4 and
+> is reached only through the function-pointer table at **0x0B1B88**, the same
+> init-table family as the NVM mode setters of `eeprom.md` §9.
+>
+> **Consequence for `emu/` and `logging/ecu_sim.py`.** The emulator has no OS
+> to walk that table, so before this note every pointer was 0 and every
+> dynamic id wrote its entries to **address 0 + i·8** — into
+> `tbl_etr_branch_table` at 0x000000 (one define turned `48 01 10 F2` into
+> `48 02 10 F2 00 7F FB 00`). Two visible symptoms, one cause:
+> * defining a **second** dynamic id silently overwrote the **first** one's
+>   entries, so the first id's record read the wrong cells and, when the sizes
+>   differed, came back short and shifted;
+> * the exception branch table was corrupted, which is a plausible source of
+>   the runs that died mid-session under load.
+>
+> `logging/ecu_sim.py::Med9Handlers.power_on` now calls the real routine, and
+> all five ids of `logging/sessions/ff_fuel.json` then read back byte for byte
+> against a direct RAM read of the same emulator
+> (`tests/test_ecu_sim_patch.py::TestDdliAcrossSeveralIds`).
+>
+> **Nothing here says the bench will misbehave.** On the car the application's
+> start-up runs the init table, so the pointers are right and five dynamic ids
+> are fine — the 20/3/3/… entry budget and the response length are the real
+> limits, and `logging/med9log.py::plan_chunks` already respects both. What was
+> broken was only the simulator's fidelity, in exactly the way
+> `eeprom.md` §10.3 describes for the NVM device pointers: an uninitialised
+> pointer that no statically resolvable instruction in the *application* path
+> writes, because the writer lives in an init table.
+
 ### 4.2 ReadDataByLocalId routing — `kwp_sid_21_h1` (0x35F6C)
 
 ```

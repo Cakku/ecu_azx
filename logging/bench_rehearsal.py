@@ -265,9 +265,7 @@ def checks_for(name: str, s: dict) -> list[tuple[str, bool, str]]:
         chk("7 the mirror read over DDLI agrees with ff_e_persist",
             last(s, "eep_blk8_mirror_b0") == last(s, "ff_e_persist"),
             f"mirror+0={last(s, 'eep_blk8_mirror_b0')} "
-            f"e_persist={last(s, 'ff_e_persist')} -- KNOWN OPEN: with the NVM "
-            "stack running, the first DDLI chunk of the protected window does "
-            "not read back its address (see the E4 report)")
+            f"e_persist={last(s, 'ff_e_persist')}")
         chk("7 the queue is idle in almost every sample",
             sum(1 for _t, v in s.get("nvm_queue_state", [])
                 if v not in (0x20, 0x21)) <= max(2, len(s.get("nvm_queue_state", [])) // 10),
