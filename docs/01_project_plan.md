@@ -62,6 +62,33 @@ fuel change) is the owner's responsibility and is not covered here.
 > walkthrough (#42). Hardware items unchanged: #1-#4, #22, #26-#28, #30-#31,
 > #33, #40, #45.
 
+> **Update 2026-09-17 (later), wave E on `integration/wave-E`.** 591 tests OK,
+> checksums ALL OK. E1, E2 and E5 have grown `patches/ff_fuel` from the
+> fuel-only MVP into **one patch with four features** — fuel scaling, the
+> ignition blend (#34), the start enrichment (#35) and the rail-pressure adder
+> plus the injection-window diagnostics (#36) — eight hook words, FFCAL001 v4
+> (332 B at 0x5E2510) and VCDS measuring groups 111 / 108 / 69 / 109. **Three
+> of the four ship disabled**, `ff_*_enable` = 0 with neutral tables, so the
+> flashable file still behaves exactly like the proven fuel-only MVP until the
+> human turns one byte on (§3 principle 5). E3 took the calibration definition
+> to 259 named objects (#41); E4 made every bench procedure runnable against
+> the simulator, with a simulated Pico and an SPI-EEPROM device model, so
+> nothing goes to the bench un-rehearsed; **E6 settled the on-chip question
+> from the dump** (`re/findings/flash_programming.md`): the ECU's own OBD
+> programming route can erase and program 0x404000-0x47FFFF, and there is no
+> boot-time integrity gate on flash content. E7 wrote
+> [`07_workflow.md`](07_workflow.md), the end-to-end walkthrough (#42 step 1).
+>
+> **What still blocks the first flash is now only hardware.** The RAM block
+> 0x7FFB00 is VERIFIED-STATIC, not dynamic — the RequestUpload snapshots of
+> #23 need an ECU — and whether **KESSv2** drives the on-chip route is a
+> property of the tool that only the Flash 0 read-back can answer (seven of
+> the eight hook words are on-chip now, not two of three). There is still no
+> spare ECU (#2), no BDM backup (#4: `data/backup_bdm/MANIFEST` does not
+> exist) and no bench (#22). Phase 5's *code* is written; Phase 5's
+> *calibration* — the values in #34-#36 — needs the car and a wideband. The
+> next step of #42 is the bench dry-run, and it is the human's.
+
 ## 3. Principles
 
 1. **Evidence before action.** A fact is used only at the level it has been
