@@ -405,6 +405,8 @@ None of this is settled: **the whole "in the car" half of section 7 and all of
 section 9 are HYPOTHESIS until the first OBD session happens.**
 
 
+> **2026-09-17 (integration, after E7's dry-run).** Two clock fixes in `med9log.py`: with `--sim-patch`, the simulated node (`--sim-node`) now paces itself on the ECU's simulated clock instead of the wall clock times `--time-scale`, and a `--sim-seconds` run ends when the ECU's own clock reaches the target (wall deadline kept as a 5x safety cap). Before, a catch-up cut short by `PatchRunner`'s wall budget made the node outrun the ECU ("~10 frames/s" read 15.9) and a step written in ECU seconds could end before its fault was due. `bench_rehearsal.py --fresh-eeprom` passes 69/69 with both.
+
 ## 9. Bench rehearsal — running the patch inside the simulator (E4, 2026-09-17)
 
 Every bench procedure in `patches/ff_fuel/test/` was written before any

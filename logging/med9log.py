@@ -299,7 +299,16 @@ class SimNode:
     the one-command form of `patches/ff_fuel/test/procedure.md` sections 3-5.
     """
 
-    def __init__(self, channel: str, args):
+    def __init__(self, channel: str, args, clock=None):
+        """`clock`: a callable returning the ECU's SIMULATED seconds (the
+        PatchRunner's `sim_t`).  With it the node paces itself on the same
+        clock as the ECU, so "10 frames per second" holds per ECU second
+        whatever the host does -- as on a real bench, where both clocks are
+        real.  Without it the node runs on the wall clock times
+        `--time-scale`, which drifts whenever a catch-up is cut short
+        (`PatchRunner.lagged`); that drift is what made procedure.md 3's
+        "~10 frames/s" check read 15.9 in the rehearsal (integration,
+        2026-09-17)."""
         from ethanol_frame_send import EthanolNode, FrameSender
         ramp = None
         if getattr(args, "node_e_ramp", None):
@@ -313,8 +322,12 @@ class SimNode:
             fault_after=getattr(args, "node_fault_after", None))
         self.link = open_link(parse_bus_spec(f"virtual:{channel}"))
         self.link.set_accept(set())          # the node never listens
-        self.sender = FrameSender(self.link, self.node,
-                                  scale=getattr(args, "time_scale", 1.0))
+        if clock is not None:
+            self.sender = FrameSender(self.link, self.node, clock=clock,
+                                      t0=clock(), scale=1.0)
+        else:
+            self.sender = FrameSender(self.link, self.node,
+                                      scale=getattr(args, "time_scale", 1.0))
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -334,6 +347,14 @@ class SimNode:
         if self._thread is not None:
             self._thread.join(timeout=2.0)
         self.link.close()
+
+
+def _sim_clock(sim):
+    """The simulator's ECU clock (PatchRunner.sim_t) as a callable, or None."""
+    runner = getattr(sim, "runner", None) or getattr(getattr(sim, "handlers", None), "runner", None)
+    if runner is None or not hasattr(runner, "sim_t"):
+        return None
+    return lambda: runner.sim_t
 
 
 def start_simulator(args):
@@ -382,11 +403,12 @@ def connection(args):
         stack = contextlib.ExitStack()
         stack.enter_context(sim.background())
         if getattr(args, "sim_node", False):
-            stack.enter_context(SimNode(channel, args))
+            stack.enter_context(SimNode(channel, args, clock=_sim_clock(sim)))
         spec = f"virtual:{channel}"
     else:
         stack = contextlib.ExitStack()
         spec = args.bus
+    args._sim = sim                  # cmd_log ends a --sim-seconds run on ECU time
     link = open_link(parse_bus_spec(spec))
     tp = Tp20Client(link, dest=args.address, rx_id=args.rx_id,
                     timeout=args.timeout)
@@ -468,7 +490,25 @@ def cmd_log(args) -> int:
         deadline = started + args.seconds
         period = 1.0 / args.rate if args.rate else 0.0
         next_due = started
-        while time.monotonic() < deadline:
+        # A --sim-seconds run ends when the ECU's OWN clock reaches the target,
+        # not when the wall clock does: the PatchRunner may fall behind the
+        # wall target (`lagged`), and a procedure step written in ECU seconds
+        # ("fault at 40 s") must still reach its 40th ECU second.  The wall
+        # deadline stays as a safety cap at five times the nominal length
+        # (integration, 2026-09-17).
+        sim_target = getattr(args, "sim_seconds", None)
+        sim_obj = getattr(args, "_sim", None)
+        sim_clock = (_sim_clock(sim_obj) if sim_target and sim_obj is not None
+                     else None)
+        if sim_clock is not None:
+            deadline = started + 5.0 * args.seconds
+
+        def _running() -> bool:
+            if time.monotonic() >= deadline:
+                return False
+            return sim_clock is None or sim_clock() < sim_target
+
+        while _running():
             if period:
                 sleep = next_due - time.monotonic()
                 if sleep > 0:
@@ -652,7 +692,7 @@ def cmd_probe(args) -> int:
         channel = sim.link.description.split(":", 1)[1]
         stack.enter_context(sim.background())
         if getattr(args, "sim_node", False):
-            stack.enter_context(SimNode(channel, args))
+            stack.enter_context(SimNode(channel, args, clock=_sim_clock(sim)))
         spec = f"virtual:{channel}"
     else:
         spec = args.bus
@@ -778,8 +818,10 @@ def main(argv=None) -> int:
     p.add_argument("--seconds", type=float, default=10.0,
                    help="WALL-clock seconds to log for")
     p.add_argument("--sim-seconds", type=float, default=None, metavar="S",
-                   help="with --sim: log for S SIMULATED seconds instead, "
-                        "i.e. S / --time-scale wall seconds")
+                   help="with --sim: log for S SIMULATED seconds instead -- "
+                        "measured on the ECU's own clock when the patch runs "
+                        "(nominally S / --time-scale wall seconds, longer if "
+                        "the host cannot keep up)")
     p.add_argument("--rate", type=float, default=0.0,
                    help="cap the sample rate in Hz (default: as fast as the bus allows)")
     p.add_argument("--raw", action="store_true",
