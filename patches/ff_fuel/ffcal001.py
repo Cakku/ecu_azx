@@ -9,8 +9,8 @@ re-checksums the block.
 
 Two outputs:
 
-  build/ffcal001.bin    the 290 bytes that go into the image
-                        (v3; v2 was 266 and v1 232)
+  build/ffcal001.bin    the 332 bytes that go into the image
+                        (v4; v3 was 290, v2 266 and v1 232)
   ffcal001_rows.csv     descriptor rows in the exact column format of
                         `re/calibration_draft.csv`, for the integrator to
                         append at merge time (brief D3 owns that file, so D1
@@ -51,9 +51,20 @@ from +0x108 to +0x120 with the length.  `ff_fst_map`, which v1 and v2 reserved
 as all-1024, is now read by `src/ff_start.c` and stays **all 1024**, so the
 shipped file is inert with `ff_st_enable = 1` as well.
 
-The ECU-side `ff_cal_ok()` accepts **the current version only**: a v1 or v2
-block flashed under a v3 blob is rejected exactly like a corrupt one, i.e.
-mode 0, F = 1024, dzw_e = 0, fst_q10 = 1024 and zwst_add = 0.
+Version 4 (brief E5, issue #36, 2026-09-17) APPENDED the rail-pressure adder
+and once more moved nothing: `ff_prail_enable` (+0x122, shipped **0**), one
+reserved byte that keeps the two words below it even (+0x123), `ff_prail_max`
+(+0x124), `ff_diag_window_ms` (+0x126) and the 17-point `ff_prail_curve`
+(+0x128); the checksum moved from +0x120 to +0x14A with the length.  The
+8-byte `ff_prail_add` table v1 reserved at +0xDC is **superseded** by
+`ff_prail_curve` and is left in place, neutral and unread, so nothing moves.
+It was the wrong shape for the job: eight u8 in 0.1 MPa with no axis at all,
+against seventeen u16 in the ECU's own 0.005 bar on the same ethanol grid as
+`ff_F_curve` and `ff_fzw_curve`.
+
+The ECU-side `ff_cal_ok()` accepts **the current version only**: a v1, v2 or
+v3 block flashed under a v4 blob is rejected exactly like a corrupt one, i.e.
+mode 0, F = 1024, dzw_e = 0, fst_q10 = 1024, zwst_add = 0 and prail_add = 0.
 
 Usage:
     ./.venv/bin/python3 patches/ff_fuel/ffcal001.py                # build both
@@ -75,13 +86,14 @@ REPO = HERE.parent.parent
 sys.path.insert(0, str(REPO))
 from emu.models.flexfuel import (  # noqa: E402
     CURVE_N, DZW_N, DZW_NMOT_AXIS, DZW_RL_AXIS, FST_E_AXIS, FST_N,
-    FST_TMST_AXIS, f_curve_from_formula, fzw_curve_default,
+    FST_TMST_AXIS, PRAIL_HARD_MAX, PRAIL_N, f_curve_from_formula,
+    fzw_curve_default,
 )
 
 CAL_BASE = 0x005E2510
 MAGIC = b"FFCAL001"
-VERSION = 3                          # E2 (#35) appended the start enrichment
-LENGTH = 0x0122                      # total, checksum included
+VERSION = 4                          # E5 (#36) appended the rail adder
+LENGTH = 0x014C                      # total, checksum included
 
 # offset, name, struct code, count - must match patches/ff_fuel/src/ff_state.h
 SCALARS = (
@@ -114,6 +126,18 @@ SCALARS = (
                                               " clamped to FF_ZWST_HARD_MAX (8) in code"),
     (0x10D, "ff_zwst_tmax", "B", "tmst count", "E2: the start advance is 0 at and"
                                                " above this tmst count (117 = 39.75 degC)"),
+    (0x122, "ff_prail_enable", "B", "-", "E5 (#36): 1 = apply the rail-pressure"
+                                         " adder; 0 (shipped) pins prail_add at 0"),
+    (0x123, "ff_prail_rsv", "B", "-", "E5: 0, reserved; it is here so that"
+                                      " ff_prail_max and ff_diag_window_ms stay"
+                                      " 2-byte aligned inside the block"),
+    (0x124, "ff_prail_max", "H", "0.005 bar", "E5: prail_add ceiling; clamped to"
+                                              " FF_PRAIL_HARD_MAX (6000 = 30.0 bar)"
+                                              " in code, and KLPRMAX 22000 caps the"
+                                              " result whatever this says"),
+    (0x126, "ff_diag_window_ms", "H", "ms", "E5: length of the window over which"
+                                            " win_margin_min, prist_min and"
+                                            " msv_sat_ticks are accumulated"),
 )
 
 TABLES = (
@@ -138,7 +162,11 @@ TABLES = (
      " at both S1 sites. Calibrate from about 1.2x at a warm start upwards, and"
      " never past the injection window dwi (0x803088, injection.md section 8)"),
     (0xDC, "ff_prail_add", 8, "B", 0, "curve_1d", "0.1 MPa",
-     "RESERVED rail-pressure adder over ethanol % (docs/05 section 3.6); neutral 0"),
+     "SUPERSEDED BY ff_prail_curve (+0x128, E5 #36): unread, kept neutral 0 so"
+     " that nothing in the block moves. It was reserved by v1 as an 8 x u8"
+     " adder in 0.1 MPa with no axis at all; E5 needed 17 points on the same"
+     " ethanol grid as ff_F_curve and the ECU's own 0.005 bar unit, so it"
+     " appended a proper table instead of bending this one"),
     (0xE8, "ff_dzw_nmot_axis", DZW_N, "H", 0, "axis", "0.25 rpm",
      "E1 (#34): the 8 row breakpoints of ff_dzw_map, every other breakpoint of"
      " the stock KFZW nmot axis 0x5C7736 (520..6520 rpm), so a cell lines up"
@@ -161,6 +189,15 @@ TABLES = (
      " counts. ALL ZERO as shipped. The knock retard is bypassed during the"
      " start (start.md section 5), so nothing downstream takes this back:"
      " stay inside +2..+4 degCA = +3..+5 counts"),
+    (0x128, "ff_prail_curve", PRAIL_N, "H", 0, "curve_1d", "0.005 bar",
+     "E5 (#36): rail-pressure setpoint ADDER over ethanol %, 17 points"
+     " 0..100 step 6.25, on the same grid as ff_F_curve. ALL ZERO as shipped,"
+     " so the file is inert even with ff_prail_enable = 1; prail_curve[0] = 0"
+     " is what makes E0 bit-identical at 0x45845C. The adder goes in BEFORE"
+     " the stock KLPRMAX ceiling (22000 = 110.0 bar) and the pump-volume rate"
+     " limiter, so no value here can raise the rail past what the stock ECU"
+     " already allows - the useful range is 0..3000 (0..15 bar), the headroom"
+     " between KFPRSOLHOM's 19000 and KLPRMAX (re/findings/rail.md 12.1)"),
 )
 
 CRC_OFF = LENGTH - 2
@@ -171,6 +208,7 @@ DEFAULT_TABLES = {
     "ff_dzw_map": [0] * 64,
     "ff_fst_map": [1024] * (FST_N * FST_N),
     "ff_prail_add": [0] * 8,
+    "ff_prail_curve": [0] * PRAIL_N,
     "ff_dzw_nmot_axis": list(DZW_NMOT_AXIS),
     "ff_dzw_rl_axis": list(DZW_RL_AXIS),
     "ff_fst_e_axis": list(FST_E_AXIS),
@@ -280,6 +318,35 @@ def build(params: dict) -> bytes:
         raise CalError(f"ff_fzwst_curve reaches {max(fzwst)} counts ="
                        f" {max(fzwst) * 0.75:.2f} degCA; the patch clamps to"
                        " FF_ZWST_HARD_MAX = 8 (6.00 degCA) in code")
+
+    # --- E5 (#36): the same three properties for the rail adder -----------
+    prail = struct.unpack_from(">" + "H" * PRAIL_N, blk, 0x128)
+    if prail[0] != 0:
+        raise CalError(f"ff_prail_curve[0] must be exactly 0 (no rail raise at"
+                       f" E0), got {prail[0]} - E0 would not be bit-identical"
+                       " at the 0x45845C store")
+    if any(b < a for a, b in zip(prail, prail[1:])):
+        raise CalError("ff_prail_curve must be monotonically non-decreasing:"
+                       " more ethanol never means less rail pressure")
+    if max(prail) > PRAIL_HARD_MAX:
+        raise CalError(f"ff_prail_curve reaches {max(prail)} ="
+                       f" {max(prail) * 0.005:.2f} bar; the patch clamps every"
+                       f" point to FF_PRAIL_HARD_MAX = {PRAIL_HARD_MAX}"
+                       f" ({PRAIL_HARD_MAX * 0.005:.1f} bar) in code")
+    prail_max = struct.unpack_from(">H", blk, 0x124)[0]
+    if prail_max > PRAIL_HARD_MAX:
+        raise CalError(f"ff_prail_max is {prail_max} = {prail_max * 0.005:.2f}"
+                       f" bar; the patch clamps to FF_PRAIL_HARD_MAX ="
+                       f" {PRAIL_HARD_MAX} ({PRAIL_HARD_MAX * 0.005:.1f} bar)"
+                       " in code, so anything above that is a calibration that"
+                       " lies")
+    win_ms = struct.unpack_from(">H", blk, 0x126)[0]
+    if win_ms < 1:
+        raise CalError("ff_diag_window_ms must be at least 1 ms; the patch"
+                       " floors the window at one activation anyway, but a 0"
+                       " here says something the author did not mean")
+    if blk[0x123] != 0:
+        raise CalError(f"ff_prail_rsv is reserved and must be 0, got {blk[0x123]}")
 
     crc = (~sum(blk[:CRC_OFF])) & 0xFFFF
     struct.pack_into(">H", blk, CRC_OFF, crc)

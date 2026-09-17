@@ -57,11 +57,15 @@
  *   +3A   2    persist_wait     D2        activations left of the commit rate limit
  *   +3C   2    persist_writes   D2        commits that finished OK (saturating)
  *   +3E   2    persist_fails    D2        commits that failed (saturating)
- *   --- core 2: appended by E2, checksummed like the first core -------------
+ *   --- core 2: appended by E2, grown by E5, checksummed like the first core -
  *   +40   2    fst_q10          tick      E2: f_st(E, tmst), 1/1024, 1024..2560
  *   +42   1    zwst_add         tick      E2: start-ignition advance, s8, 0.75 degCA
- *   +43   1    st_reserved      -         E2: 0, reserved for brief E5
- *   --- 0x44 -----------------------------------------------------------------
+ *   +43   1    msv_sat_ticks    tick      E5: MSV-saturated activations this window
+ *   +44   2    prail_add        tick      E5: rail setpoint adder, 0.005 bar
+ *   +46   2    win_margin_min   tick      E5: s16 worst injection-window margin
+ *   +48   2    prist_min        tick      E5: worst prist this window, 0.005 bar
+ *   +4A   2    diag_ticks       tick      E5: activations left of the window
+ *   --- 0x4C -----------------------------------------------------------------
  *
  * D2 (issue #38/#39, 2026-09-16) took the three reserved words at +3A..+3F for
  * the rate-limit counter and two saturating counters.  No offset D1 defined
@@ -97,6 +101,31 @@
  * block written by the D2/E1 blob is rejected by the length check and
  * re-initialised on the first activation -- which is the safe direction and
  * the same rule FFCAL001's strict version check follows.
+ *
+ * E5 (issue #36, 2026-09-17) GREW core 2 rather than adding a third range.
+ * Its five fields are all written by the periodic tick and by nothing else --
+ * `prail_add` is a CONTROL value that the 0x45845C stub consumes, and the four
+ * diagnostics come out of the same `ff_rail_update()` that produces it -- so
+ * extending FF_CORE2_LEN from 0x04 to 0x0C covers every one of them with the
+ * checksum and leaves `ff_core_csum()` summing exactly two ranges.  The byte
+ * E2 reserved at +0x43 is spent here, on `msv_sat_ticks`, which is what it was
+ * reserved for.  The length grew 0x44 -> 0x4C: still a multiple of four, which
+ * `ff_state_init()`'s word-wise clear needs, and still "FF01", so a block
+ * written by an E2 blob is rejected by the length check and re-initialised on
+ * the first activation.
+ *
+ * Why `prail_add` belongs in the core is E1's argument one step stronger: the
+ * stub that reads it runs in a DIFFERENT ERCOSEK task from the one that writes
+ * it (`hdrpsol_main` 0x45822C is called from set A's 20 ms task 0x45CAC4 id
+ * 23, the producer from set A's 10 ms task 0x4328E4 id 19 --
+ * re/findings/scheduler.md section 11.8), so nothing about the ordering can be
+ * relied on and a corrupted `prail_add` has to make the block re-initialise
+ * rather than sit in the rail-pressure path.  What bounds the value is the
+ * `ff_prail_max` clamp on the producing side, FF_PRAIL_HARD_MAX in code, and
+ * the stock `KLPRMAX` ceiling (22000 = 110.0 bar) and `PRSOLMN` floor that run
+ * four instructions after the hooked store and re-read the cell from memory
+ * (re/findings/rail.md section 12.1) -- three mechanisms, none of which the
+ * patch can switch off.
  *
  * The EEP_CONF request record is NOT part of this block.  The block manager
  * keeps a pointer to it for milliseconds after the call returns
@@ -146,7 +175,7 @@
 
 /* ------------------------------------------------------------ RAM state --- */
 #define FF_MAGIC   0x46463031u        /* "FF01" */
-#define FF_LENGTH  0x0044u            /* E2 grew it from 0x40 */
+#define FF_LENGTH  0x004Cu            /* E2 grew it 0x40 -> 0x44, E5 -> 0x4C */
 
 /*
  * Byte offsets inside `struct ff_state` that src/hooks.S addresses directly.
@@ -157,6 +186,7 @@
 #define FF_OFF_DZW_E    0x29
 #define FF_OFF_FST_Q10  0x40          /* E2, read by the two S1 stubs */
 #define FF_OFF_ZWST_ADD 0x42          /* E2, read by the Z1 stub      */
+#define FF_OFF_PRAIL_ADD 0x44         /* E5, read by the R1 stub      */
 
 #define FF_MODE_INIT      0u
 #define FF_MODE_OK        1u
@@ -205,6 +235,23 @@
  */
 #define FF_ZWST_HARD_MAX 8
 
+/*
+ * E5 (#36).  The ceiling the CODE puts on `prail_add`, whatever `ff_prail_max`
+ * says -- the rail counterpart of FF_F_MAX, FF_FST_HARD_MAX and
+ * FF_ZWST_HARD_MAX.  Spelled here rather than with the rest of the rail
+ * constants because src/hooks.S may not see it... it does not, in fact: the R1
+ * stub does NOT re-clamp (see src/hooks.S), so this is a C-only constant and
+ * carries no `u` suffix only for consistency with its three neighbours.
+ *
+ * 6000 = 30.0 bar is twice the shipped `ff_prail_max` (3000 = 15.0 bar) and
+ * twice the whole headroom the stock calibration has: `KFPRSOLHOM` tops out at
+ * 19000 = 95 bar and `KLPRMAX` (0x5D5546) is 22000 = 110 bar, so 3000 is every
+ * count the map can actually use and anything past 6000 is a calibration that
+ * lies -- the KLPRMAX clamp four instructions after the hooked store eats it
+ * (re/findings/rail.md sections 3.3 and 12.1).
+ */
+#define FF_PRAIL_HARD_MAX 6000
+
 #ifndef __ASSEMBLER__
 
 struct ff_state {
@@ -247,16 +294,20 @@ struct ff_state {
     volatile u16 persist_wait;        /* +3A  D2 */
     volatile u16 persist_writes;      /* +3C  D2 */
     volatile u16 persist_fails;       /* +3E  D2 */
-    /* --- core 2, checksummed (E2) --------------------------------------- */
+    /* --- core 2, checksummed (E2, grown by E5) -------------------------- */
     volatile u16 fst_q10;             /* +40  E2 */
     volatile s8  zwst_add;            /* +42  E2 */
-    volatile u8  st_reserved;         /* +43  E2, always 0; for brief E5 */
+    volatile u8  msv_sat_ticks;       /* +43  E5, was E2's st_reserved */
+    volatile u16 prail_add;           /* +44  E5 */
+    volatile s16 win_margin_min;      /* +46  E5 */
+    volatile u16 prist_min;           /* +48  E5 */
+    volatile u16 diag_ticks;          /* +4A  E5 */
 };
 
 #define FF_CORE_OFF   0x08u           /* first checksummed byte */
 #define FF_CORE_LEN   0x24u           /* +08 .. +2B inclusive   */
 #define FF_CORE2_OFF  0x40u           /* E2: the second checksummed range */
-#define FF_CORE2_LEN  0x04u           /* +40 .. +43 inclusive   */
+#define FF_CORE2_LEN  0x0Cu           /* +40 .. +4B inclusive (E5 grew it) */
 
 extern struct ff_state ff_state;
 
@@ -334,8 +385,8 @@ void ff_diag_publish(void);
 
 /* ------------------------------------------------------ FFCAL001 layout --- */
 #define FF_CAL_BASE        0x005E2510u
-#define FF_CAL_VERSION     3u         /* E2 appended the start enrichment   */
-#define FF_CAL_LENGTH      0x0122u    /* what ffcal001.py emits today       */
+#define FF_CAL_VERSION     4u         /* E5 appended the rail adder         */
+#define FF_CAL_LENGTH      0x014Cu    /* what ffcal001.py emits today       */
 
 #define FF_CAL_MAGIC0      (FF_CAL_BASE + 0x00u)   /* "FFCA" */
 #define FF_CAL_MAGIC1      (FF_CAL_BASE + 0x04u)   /* "L001" */
@@ -375,7 +426,13 @@ void ff_diag_publish(void);
 #define FF_CAL_O_FST_E_AXIS  0x10Eu   /* 6 x u8, ethanol % (map rows)        */
 #define FF_CAL_O_FST_T_AXIS  0x114u   /* 6 x u8, tmst counts (map columns)   */
 #define FF_CAL_O_FZWST_CURVE 0x11Au   /* 6 x s8, counts, on the E axis above */
-#define FF_CAL_O_CRC         0x120u   /* u16 at length-2 */
+/* --- appended by E5 (issue #36); v3 ended at 0x120 with the checksum ----- */
+#define FF_CAL_O_PRAIL_ENABLE 0x122u  /* u8, 0 = prail_add is permanently 0  */
+#define FF_CAL_O_PRAIL_RSV    0x123u  /* u8, 0; keeps the two u16 below even */
+#define FF_CAL_O_PRAIL_MAX    0x124u  /* u16, prail_add ceiling, 0.005 bar   */
+#define FF_CAL_O_DIAG_WIN_MS  0x126u  /* u16, ms of the diagnostic window    */
+#define FF_CAL_O_PRAIL_CURVE  0x128u  /* 17 x u16, 0.005 bar, on the E grid  */
+#define FF_CAL_O_CRC         0x14Au   /* u16 at length-2 */
 
 #define FF_CURVE_N     17u
 #define FF_CURVE_STEP  100u           /* 6.25 % in 1/16 % units */
@@ -446,6 +503,74 @@ void ff_start_update(void);
  * to nearest: degC = (count * 3 + 2) / 4 - 48.
  */
 #define FF_TMST_BIAS     48           /* degC at count 0 is -48              */
+
+/* --------------------------------- E5: the rail adder (#36) -------------- */
+/*
+ * `ff_prail_curve` is 17 points on the SAME ethanol grid as `ff_F_curve` and
+ * `ff_fzw_curve` (one breakpoint every 6.25 % = FF_CURVE_STEP counts of
+ * 1/16 %), so the three read with one mental model and one interpolator shape.
+ */
+#define FF_PRAIL_N       FF_CURVE_N
+
+/*
+ * The injection-window margin of re/findings/rail.md section 11:
+ *
+ *     margin = wbho1s (0x80307E, s16) - dwi (0x803088, u16)
+ *              - dwbho1smn_w (0x7FD290, u8) * FF_ANGLE_MAP_SCALE
+ *
+ * all in angle LSB of 3/128 degCA.  The subtrahend is NOT the literal 2144 the
+ * brief quotes: 2144 is 67 * 32, and 67 is what `awea_angles` happens to write
+ * into 0x7FD290 from the flat `KLWBHO1SMX` (0x5D3BE8) in THIS dataset.  Reading
+ * the RAM cell instead follows both a re-calibrated curve and the runtime
+ * value, exactly as emu/models/window.py does rather than hard-coding it.
+ * FF_ANGLE_MAP_SCALE is the `* 0x20` every %AWEA u8 angle map carries -- 32
+ * angle LSB = 0.75 degCA per map count (rail.md sections 8 and 14.1).
+ */
+#define FF_ANGLE_MAP_SCALE  32
+
+/*
+ * Formula 0x22 is `0.01 * A * (B - 128)`.  Groups 108 and 69 use A = 0x4B (75)
+ * = 0.75 degCA per count, copied from the stock knock handlers -- but that
+ * spans only -96.00 .. +95.25 degCA, and the window margin reaches about
+ * +280 degCA at a light-load 2000 rpm point (rail.md section 15), so it would
+ * sit pinned at its maximum nearly all the time.  Group 109 field 3 uses the
+ * same formula with **A = 225**, and 225 is not a round number by accident:
+ * 0.01 * 225 = 2.25 degCA is exactly FF_WIN_COUNT_LSB = 96 angle LSB of
+ * 3/128 degCA, so the handler converts with one exact integer division and no
+ * accumulated rounding.  The span is -288.00 .. +285.75 degCA, which covers
+ * the whole range `KFWBHO1SW` (210..330 degCA) can produce.  The resolution is
+ * coarse on purpose: the decision the field exists for is "does the margin
+ * approach zero", and 2.25 degCA is 0.3 % of a cycle.  The division FLOORS
+ * (towards minus infinity, not C's truncate-towards-zero), so the number a
+ * tester reads never overstates the margin at either end.
+ */
+#define FF_FMT_A_WIN     225u         /* 0.01 * 225 = 2.25 degCA per count   */
+#define FF_WIN_COUNT_LSB 96           /* 2.25 degCA in angle LSB: 96 * 3/128 */
+
+/* src/ff_rail.c; called from ff_finish() at the end of every activation. */
+void ff_rail_update(void);
+
+/* ---------------------------------- E5: the measuring block 109 (#36) ---- */
+/*
+ * Facts about the image, not choices the code makes: the handler pointers go
+ * into tbl_measuring_vars (0xA5658) ids 2184-2187 and the group words into
+ * tbl_measuring_groups (0x5C5518) group 109, both written by patch.json.
+ * Evidence: re/findings/measuring_vars.md section 8.6.
+ */
+#define FF_MW_ID_PRAIL   2184u        /* field 1, formula 0x53               */
+#define FF_MW_ID_PRIST   2185u        /* field 2, formula 0x53               */
+#define FF_MW_ID_WINMRG  2186u        /* field 3, formula 0x22, A = 250      */
+#define FF_MW_ID_MSVSAT  2187u        /* field 4, formula 0x36 (a count)     */
+#define FF_MW_GROUP_PR   109u         /* 0x6D; its 0x7F echo (236) is empty  */
+
+/*
+ * Formula 0x53 is `((A << 8) | B) * 0.01` bar, CROSS-CHECKED in
+ * re/findings/measuring_vars.md section 7.3 against the stock `prist` and
+ * `prsoll` handlers at 0x3DB94/0x3DBAC -- which emit the raw 0.005 bar word
+ * SHIFTED RIGHT BY ONE.  Group 109 fields 1 and 2 do exactly the same, so a
+ * tester reads bar with two decimals and the arithmetic is the stock one.
+ */
+#define FF_FMT_BAR       0x53u
 
 #endif /* __ASSEMBLER__ */
 #endif /* FF_STATE_H */

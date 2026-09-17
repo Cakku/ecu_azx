@@ -34,9 +34,12 @@
 
 struct ff_state ff_state __attribute__((section(".bss.patch_state")));
 
-_Static_assert(sizeof(struct ff_state) == 0x44,
-               "the state block layout in ff_state.h and README.md is 68 bytes"
-               " since brief E2 (#35) appended the second core");
+_Static_assert(sizeof(struct ff_state) == 0x4C,
+               "the state block layout in ff_state.h and README.md is 76 bytes"
+               " since brief E5 (#36) grew E2's second core");
+_Static_assert(FF_LENGTH % 4u == 0u,
+               "ff_state_init() clears the block a WORD at a time, so the"
+               " length has to be a multiple of four");
 _Static_assert(sizeof(struct ff_state) == FF_LENGTH,
                "FF_LENGTH is the block length the header carries");
 _Static_assert(FF_CORE_OFF + FF_CORE_LEN == 0x2Cu,
@@ -155,6 +158,14 @@ static void ff_state_init(void)
  * remember.  It writes only `dzw_e` and `fzw_q8`, both core, both above, so
  * the checksum below still covers them.
  *
+ * E5 (#36): `ff_rail_update()` is here for the third time and for the third
+ * reason of the same shape: `prail_add` follows the #37 rule for anything that
+ * ADDS (pressure, this time), so it has to be 0 on the activation the mode
+ * leaves OK/HOLD/OVERRIDE.  Its three diagnostics run on every path too, which
+ * is what makes them usable while the adder is disabled -- which is how the
+ * file ships.  It writes only the five core-2 fields, so the checksum below
+ * covers them.
+ *
  * E2 (#35): `ff_start_update()` is here for the same reason and carries BOTH
  * #37 rules at once - its fuel half follows `e_filt` (so it inherits the hold
  * and the decay) and its ignition half drops to 0 on the activation the mode
@@ -165,6 +176,7 @@ static void ff_finish(void)
 {
     ff_zw_update();
     ff_start_update();
+    ff_rail_update();
     ff_diag_publish();
     ff_state.csum = ff_core_csum();
 }

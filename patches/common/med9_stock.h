@@ -92,5 +92,35 @@
  * Start finished, four cycles after 0x7FE920 */
 #define MED9_B_STEND           0x007FE921
 
+/* prsoll_raw  [VERIFIED-STATIC, ghidra]  sram_ext, size 0x2
+ * u16 KFPRSOL* map output before KLPRMAX, the floor and the rate limiter */
+#define MED9_PRSOLL_RAW        0x008031F0
+
+/* prist_w  [VERIFIED-STATIC, ghidra]  sram_ext, size 0x2
+ * for the use, COMMUNITY for the name */
+#define MED9_PRIST_W           0x008031DA
+
+/* vmsv_limited  [VERIFIED-STATIC, ghidra]  sram_ext, size 0x2
+ * u16 MSV volume request after the pump volume limit VMSVMX (0x5D4BC6 = 5000) */
+#define MED9_VMSV_LIMITED      0x0080316E
+
+/* wbho1s_w  [VERIFIED-STATIC, ghidra]  sram_ext, size 0x2
+ * s16 start-of-injection angle actually used, 1 LSB = 3/128 degCA */
+#define MED9_WBHO1S_W          0x0080307E
+
+/* dwi_inj_angle  [VERIFIED-STATIC, ghidra]  sram_ext, size 0x2
+ * u16 injection duration expressed as a crank angle, (ti * 0x803072) >> 13, written by awea_ti_to_ */
+#define MED9_DWI               0x00803088
+
+/* dwbho1smn_w  [VERIFIED-STATIC, ghidra]  sram_int, size 0x4
+ * u8 required end-of-injection margin from KLWBHO1SMX (0x5D3BF6); 67 = 50.25 degCA in this dataset */
+#define MED9_WIN_MARGIN_W      0x007FD290
+
+
+/* ---- Stock calibration constants --------------------------------- */
+/* VMSVMX  [VERIFIED-STATIC, ghidra]  cal, size 0x2
+ * u16 = 5000, the MSV volume clamp in %AMSV: 0x80316E = min(0x80316C, 5000) */
+#define MED9_VMSVMX 0x005D4BC6
+
 
 #endif /* MED9_STOCK_H */

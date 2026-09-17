@@ -608,7 +608,7 @@ class TestProducer(tff.EmuBase):
         self.arm_frame(emu, ff.frame(e_pct=85, counter=1))
         warm = emu.call(self.syms["ff_fuel_hook_b"], reset=False,
                         regs={"r1": TASK_STACK})
-        self.assertLess(first.insns, 2200, "the cold-start activation got heavy")
+        self.assertLess(first.insns, 2600, "the cold-start activation got heavy")
         self.assertLess(warm.insns, 1000, "the warm activation got heavy")
 
 

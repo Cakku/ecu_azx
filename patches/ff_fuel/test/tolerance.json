@@ -17,28 +17,513 @@
     "gasoline baseline is meaningless; procedure.md section 6 says what to",
     "check instead.",
     "",
-    "The ff_* variables are deliberately not listed: they exist only in the",
-    "patched log, so logcmp lists them as uncompared. Do not pass --strict.",
+    "CORRECTED 2026-09-17 (E4/E5): the ff_* variables are NOT absent from the",
+    "stock log. The session file reads them as plain RAM addresses, so on a",
+    "stock image they are whatever that RAM holds - in practice 0 - and logcmp",
+    "compares them like anything else. They are therefore listed below with",
+    "NULL limits, which is this file's way of saying 'expected to differ, do",
+    "not judge': a stock-vs-patched comparison of ff_e_filt is meaningless, but",
+    "the variable still has to appear so that a reader can see it was",
+    "considered rather than forgotten. The same treatment goes to the raster",
+    "counters, which start at a different power-up offset in every run (see the",
+    "alignment step in procedure.md section 4).",
     "",
     "These limits are a STARTING POINT from the signals' idle behaviour, not",
     "from two recorded runs. Record two stock runs first and tighten every line",
     "to what the ECU actually repeats; a tolerance wider than the repeatability",
     "proves nothing."
   ],
-  "default": { "max_abs": 1.0, "mean_abs": 0.5, "interp": "linear" },
+  "default": {
+    "max_abs": 1.0,
+    "mean_abs": 0.5,
+    "interp": "linear"
+  },
   "vars": {
-    "rk_fuel_mass":      { "max_abs": 30.0, "mean_abs": 6.0,  "_unit": "counts, u16, 0x803038; THE signal of this patch. At E0 the patched code never writes it, so the only spread here is the ECU's own cycle-to-cycle variation" },
-    "ti_sum":            { "max_abs": 0.40, "mean_abs": 0.10, "_unit": "ms, 1 us/LSB, 0x8030C4 (injection.md section 8)" },
-    "zwist_display_b1":  { "max_abs": 3.0,  "mean_abs": 1.0,  "_unit": "degCA, 0.75/LSB, 0x7FEF87; the idle controller hunts" },
-    "prist_w":           { "max_abs": 8.0,  "mean_abs": 2.0,  "_unit": "bar, 0.005/LSB, 0x8031DA; rail ripple at idle dominates. It must also stay ABOVE 13 bar in absolute terms (rail.md section 14)" },
-    "nmot_w":            { "max_abs": 60.0, "mean_abs": 20.0, "_unit": "rpm, 0.25/LSB, 0x7FEE74" },
-    "rl_for_fuel":       { "max_abs": 4.0,  "mean_abs": 1.0,  "_unit": "%, 100/4096, 0x7FED38" },
-    "dwi_inj_angle":     { "max_abs": 5.0,  "mean_abs": 2.0,  "_unit": "degCA, 0x803088; the injection-window signal, rises with rk" },
-    "tmot":              { "max_abs": 2.0,  "mean_abs": 0.8,  "_unit": "degC, 0.75/LSB -48, 0x8021EF" },
-    "fr_bank_a":         { "max_abs": 0.06, "mean_abs": 0.02, "_unit": "-, Q15 1.0 = 32768, 0x802DF8, measuring id 29, VCDS 001.3. The closed-loop lambda factor: at E0 it must sit where it sat on stock" },
-    "fr_bank_b":         { "max_abs": 0.06, "mean_abs": 0.02, "_unit": "-, Q15, 0x802E00, measuring id 28, VCDS 001.4" },
-    "frm_bank_a":        { "max_abs": 0.04, "mean_abs": 0.01, "_unit": "-, Q15, 0x801E36, measuring id 33, VCDS 032.2. Multiplicative adaptation; it moves slowly, so a step here is the first sign the patch changed fuelling" },
-    "frm_bank_b":        { "max_abs": 0.04, "mean_abs": 0.01, "_unit": "-, Q15, 0x801E28, measuring id 34, VCDS 032.4" }
+    "rk_fuel_mass": {
+      "max_abs": 30.0,
+      "mean_abs": 6.0,
+      "_unit": "counts, u16, 0x803038; THE signal of this patch. At E0 the patched code never writes it, so the only spread here is the ECU's own cycle-to-cycle variation"
+    },
+    "ti_sum": {
+      "max_abs": 0.4,
+      "mean_abs": 0.1,
+      "_unit": "ms, 1 us/LSB, 0x8030C4 (injection.md section 8)"
+    },
+    "zwist_display_b1": {
+      "max_abs": 3.0,
+      "mean_abs": 1.0,
+      "_unit": "degCA, 0.75/LSB, 0x7FEF87; the idle controller hunts"
+    },
+    "prist_w": {
+      "max_abs": 8.0,
+      "mean_abs": 2.0,
+      "_unit": "bar, 0.005/LSB, 0x8031DA; rail ripple at idle dominates. It must also stay ABOVE 13 bar in absolute terms (rail.md section 14)"
+    },
+    "nmot_w": {
+      "max_abs": 60.0,
+      "mean_abs": 20.0,
+      "_unit": "rpm, 0.25/LSB, 0x7FEE74"
+    },
+    "rl_for_fuel": {
+      "max_abs": 4.0,
+      "mean_abs": 1.0,
+      "_unit": "%, 100/4096, 0x7FED38"
+    },
+    "dwi_inj_angle": {
+      "max_abs": 5.0,
+      "mean_abs": 2.0,
+      "_unit": "degCA, 0x803088; the injection-window signal, rises with rk"
+    },
+    "tmot": {
+      "max_abs": 2.0,
+      "mean_abs": 0.8,
+      "_unit": "degC, 0.75/LSB -48, 0x8021EF"
+    },
+    "fr_bank_a": {
+      "max_abs": 0.06,
+      "mean_abs": 0.02,
+      "_unit": "-, Q15 1.0 = 32768, 0x802DF8, measuring id 29, VCDS 001.3. The closed-loop lambda factor: at E0 it must sit where it sat on stock"
+    },
+    "fr_bank_b": {
+      "max_abs": 0.06,
+      "mean_abs": 0.02,
+      "_unit": "-, Q15, 0x802E00, measuring id 28, VCDS 001.4"
+    },
+    "frm_bank_a": {
+      "max_abs": 0.04,
+      "mean_abs": 0.01,
+      "_unit": "-, Q15, 0x801E36, measuring id 33, VCDS 032.2. Multiplicative adaptation; it moves slowly, so a step here is the first sign the patch changed fuelling"
+    },
+    "frm_bank_b": {
+      "max_abs": 0.04,
+      "mean_abs": 0.01,
+      "_unit": "-, Q15, 0x801E28, measuring id 34, VCDS 032.4"
+    },
+    "dwkrz_0": {
+      "max_abs": 0.75,
+      "mean_abs": 0.2,
+      "_unit": "degCA, 0.75/LSB, 0x7FCE57; per-cylinder knock retard, ONE ROW EACH because a single cylinder is what knocks. At E0 with ff_zw_enable = 0 the patch adds no advance at all, so any step here is the ECU's own run-to-run knock behaviour - but a systematic move on one cylinder is the first thing to look at (ignition.md section 6)"
+    },
+    "dwkrz_1": {
+      "max_abs": 0.75,
+      "mean_abs": 0.2,
+      "_unit": "degCA, 0.75/LSB, 0x7FCE58; per-cylinder knock retard, ONE ROW EACH because a single cylinder is what knocks. At E0 with ff_zw_enable = 0 the patch adds no advance at all, so any step here is the ECU's own run-to-run knock behaviour - but a systematic move on one cylinder is the first thing to look at (ignition.md section 6)"
+    },
+    "dwkrz_2": {
+      "max_abs": 0.75,
+      "mean_abs": 0.2,
+      "_unit": "degCA, 0.75/LSB, 0x7FCE59; per-cylinder knock retard, ONE ROW EACH because a single cylinder is what knocks. At E0 with ff_zw_enable = 0 the patch adds no advance at all, so any step here is the ECU's own run-to-run knock behaviour - but a systematic move on one cylinder is the first thing to look at (ignition.md section 6)"
+    },
+    "dwkrz_3": {
+      "max_abs": 0.75,
+      "mean_abs": 0.2,
+      "_unit": "degCA, 0.75/LSB, 0x7FCE5A; per-cylinder knock retard, ONE ROW EACH because a single cylinder is what knocks. At E0 with ff_zw_enable = 0 the patch adds no advance at all, so any step here is the ECU's own run-to-run knock behaviour - but a systematic move on one cylinder is the first thing to look at (ignition.md section 6)"
+    },
+    "dwkrz_4": {
+      "max_abs": 0.75,
+      "mean_abs": 0.2,
+      "_unit": "degCA, 0.75/LSB, 0x7FCE5B; per-cylinder knock retard, ONE ROW EACH because a single cylinder is what knocks. At E0 with ff_zw_enable = 0 the patch adds no advance at all, so any step here is the ECU's own run-to-run knock behaviour - but a systematic move on one cylinder is the first thing to look at (ignition.md section 6)"
+    },
+    "dwkrz_5": {
+      "max_abs": 0.75,
+      "mean_abs": 0.2,
+      "_unit": "degCA, 0.75/LSB, 0x7FCE5C; per-cylinder knock retard, ONE ROW EACH because a single cylinder is what knocks. At E0 with ff_zw_enable = 0 the patch adds no advance at all, so any step here is the ECU's own run-to-run knock behaviour - but a systematic move on one cylinder is the first thing to look at (ignition.md section 6)"
+    },
+    "wkrm": {
+      "max_abs": 0.75,
+      "mean_abs": 0.2,
+      "_unit": "degCA, 0.75/LSB, 0x7FCE76; the MEAN knock retard, the input of the stock low-octane detector. It has to repeat at E0"
+    },
+    "zw_low_octane_latch": {
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "_unit": "-, 0x7FD31B & 3; the stock low-octane latch. It must be IDENTICAL, and in practice 0, in both runs: a bit set on the patched run only would mean the patch changed the ignition at E0, which it must not"
+    },
+    "rl_w": {
+      "max_abs": 4.0,
+      "mean_abs": 1.0,
+      "_unit": "%, 100/4096 per LSB, 0x7FEFB2; the KFZW column-axis input the blend reads. E1 found this is rl_w - 0x7FED38 is rl_for_fuel, a different cell"
+    },
+    "eep_blk8_mirror_b0": {
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "_unit": "-, 0x7F9F80; the EEP_CONF block 8 BLOCK ID byte. It must be 0x08 in both runs and never move: a mismatch makes nvm_read_all_blocks discard the block (eeprom.md section 10.5)"
+    },
+    "eep_blk8_mirror_b1": {
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "_unit": "-, 0x7F9F81; the VERSION byte of the same stamp. Same rule"
+    },
+    "eep_blk8_mirror_b2": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "%, 0x7F9F82; WHERE THE PATCH STORES the ethanol estimate since the E4 correction (ff_persist_offset = 2). It is 0xFF or a stale value on the stock run and the current estimate on the patched one, so it cannot be compared - check it against ff_e_persist instead (procedure_d2.md B2)"
+    },
+    "eep_blk8_mirror_b14": {
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "_unit": "-, 0x7F9F8E; the ONE byte stock code writes (call site 0x134380). The patch must never move it, in either run"
+    },
+    "eep_blk8_mirror_b29": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7F9F9D; the manager's own ReplV byte. It MOVES on the first commit (0xFF -> 0x00 -> 0x01), so it differs between a run that committed and one that did not. The rule is 'the patch never writes it', which is asserted in the emulator, not on this line (eeprom.md 10.6)"
+    },
+    "eep_blk8_mirror_csum": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7F9F9E; the block checksum. It follows every payload change, so it differs whenever the patched run committed. What has to hold is the INVARIANT sum(+0..+29) + csum == 0xFFFF in every sample of both runs, which logcmp cannot express - procedure_d2.md B2 checks it"
+    },
+    "nvm_queue_state": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FADAB; the block manager's queue state. It is 0x20/0x21 in both runs but steps through other values whenever a commit is in flight, which only the patched run does"
+    },
+    "raster_setA_10ms_count": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "count, 0x7FD754; EXCLUDED ON PURPOSE. These are free-running counters whose value depends on how long the ECU has been powered before the log starts, so a stock-vs-patched difference means nothing. They are the ALIGNMENT signal instead: procedure.md section 4 shifts the candidate log by (raster_cand - raster_base) / 100 s before logcmp runs. What must hold is the SLOPE, about 100 counts per second"
+    },
+    "raster_setB_10ms_count": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "count, 0x7FD758; EXCLUDED ON PURPOSE. These are free-running counters whose value depends on how long the ECU has been powered before the log starts, so a stock-vs-patched difference means nothing. They are the ALIGNMENT signal instead: procedure.md section 4 shifts the candidate log by (raster_cand - raster_base) / 100 s before logcmp runs. What must hold is the SLOPE, about 100 counts per second"
+    },
+    "raster_setB_1ms_count": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "count, 0x7FD760; EXCLUDED ON PURPOSE. These are free-running counters whose value depends on how long the ECU has been powered before the log starts, so a stock-vs-patched difference means nothing. They are the ALIGNMENT signal instead: procedure.md section 4 shifts the candidate log by (raster_cand - raster_base) / 100 s before logcmp runs. What must hold is the SLOPE, about 100 counts per second"
+    },
+    "can_rx_spare0_b0": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "%, 0x803F9C; byte 0 of the Pico frame in the driver shadow. Nothing writes it on a stock image, so it is 0 there and the raw ethanol percent on the patched one"
+    },
+    "can_rx_spare0_ctr": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x803F9F; byte 3, the Pico's rolling counter. Same reason"
+    },
+    "tmst": {
+      "max_abs": 1.5,
+      "mean_abs": 0.5,
+      "_unit": "degC, 0.75/LSB -48, 0x8021F6; latched at start, so it only differs if the two runs started at different coolant temperatures - which is worth knowing"
+    },
+    "ksta_adapted": {
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "_unit": "-, Q10 1024 = 1.00x, 0x80302C; the cranking lever, and the cell E2's two S1 stubs publish. At E0 with ff_st_enable = 0 it must be IDENTICAL - this is the E0 proof for the start half, and outside the start it is pinned at 0x400 in both runs"
+    },
+    "zwstt": {
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "_unit": "degCA, 0.75/LSB, 0x802096; the start ignition angle E2's Z1 stub publishes. Identical at E0, same argument, and it matters more than most: the knock retard is BYPASSED during the start"
+    },
+    "B_st": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FE91D; start attempt active. A start-phase signal: the two runs are separate drives and their starts do not line up in time, so a sample-by-sample comparison is meaningless. Compare the start SERIES against anztist / zdgz instead (procedure_e2.md B3)"
+    },
+    "B_stend": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FE921; start finished; THE gate of both S1 stubs. A start-phase signal: the two runs are separate drives and their starts do not line up in time, so a sample-by-sample comparison is meaningless. Compare the start SERIES against anztist / zdgz instead (procedure_e2.md B3)"
+    },
+    "anztist": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FD269; injections since start. A start-phase signal: the two runs are separate drives and their starts do not line up in time, so a sample-by-sample comparison is meaningless. Compare the start SERIES against anztist / zdgz instead (procedure_e2.md B3)"
+    },
+    "zdgz": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FCE14; ignitions since start. A start-phase signal: the two runs are separate drives and their starts do not line up in time, so a sample-by-sample comparison is meaningless. Compare the start SERIES against anztist / zdgz instead (procedure_e2.md B3)"
+    },
+    "tnst_w": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x8011D8; the after-start timer. A start-phase signal: the two runs are separate drives and their starts do not line up in time, so a sample-by-sample comparison is meaningless. Compare the start SERIES against anztist / zdgz instead (procedure_e2.md B3)"
+    },
+    "fr_w_b1": {
+      "max_abs": 0.06,
+      "mean_abs": 0.02,
+      "_unit": "-, Q15 1.0 = 32768, 0x802DF8; the bank-1 lambda correction. Clamped out of the loop during the start, so this is a POST-start signal; at E0 it must settle where it settled on stock"
+    },
+    "rlsol_req": {
+      "max_abs": 4.0,
+      "mean_abs": 1.0,
+      "_unit": "%, 100/32768 per LSB, 0x803510, measuring id 375; the charge REQUEST. It is what a start or a window limit has to be read against, and at E0 the same drive must ask for the same thing"
+    },
+    "rl_max_arb": {
+      "max_abs": 4.0,
+      "mean_abs": 1.0,
+      "_unit": "%, 100/65536 per LSB, 0x80235A, measuring id 2051; the ARBITRATED charge limit. Normally 0xFFFF; anything lower on the patched run only would mean a limiter armed that did not arm on stock"
+    },
+    "prsoll_raw": {
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "_unit": "bar, 0.005/LSB, 0x8031F0; the cell E5's stub publishes. At E0 with ff_prail_enable = 0 it must be BIT-IDENTICAL, not close: the stub stores the same halfword the stock sth would have. This line is the E0 proof for the rail half"
+    },
+    "prsoll_clamped": {
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "_unit": "bar, 0.005/LSB, 0x8031F2; prsoll_raw after PRSOLMN and KLPRMAX. Identical at E0, and in ABSOLUTE terms it may never exceed 22000 counts = 110.0 bar in either run"
+    },
+    "prsoll_rate": {
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "_unit": "bar, 0.005/LSB, 0x8031EE; after the pump-volume rate limiter. Identical at E0"
+    },
+    "prsoll_w": {
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "_unit": "bar, 0.005/LSB, 0x8031F4, measuring id 501; the setpoint the controller works to. Identical at E0"
+    },
+    "prdiff": {
+      "max_abs": 8.0,
+      "mean_abs": 2.0,
+      "_unit": "bar, 0.005/LSB, 0x8031CA, measuring id 1691; prsoll - prist. Rail ripple dominates, as it does for prist_w. A systematic positive shift on the patched run is 'the pump cannot follow'"
+    },
+    "vhdp_spare": {
+      "max_abs": 2000.0,
+      "mean_abs": 500.0,
+      "_unit": "-, 0x8031F6; spare pump volume. Noisy, but it may never sit at 0 in either run - that is an absolute check, not a comparison"
+    },
+    "vmsv_limited": {
+      "max_abs": 200.0,
+      "mean_abs": 50.0,
+      "_unit": "-, 0x80316E; the MSV volume request after the VMSVMX clamp. The number that matters is absolute: pinned at 5000 means the pump is saturated"
+    },
+    "wbho1s_w": {
+      "max_abs": 2.0,
+      "mean_abs": 0.5,
+      "_unit": "degCA, 3/128 per LSB, 0x80307E; start of injection. No stock measuring id, so this needs the DDLI route. It must repeat at E0"
+    },
+    "win_margin_req": {
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "_unit": "0.75 degCA per count, 0x7FD290; the required end-of-injection margin awea_angles writes from KLWBHO1SMX. A calibration-driven constant (67 in this dataset): it must be identical in both runs"
+    },
+    "ff_magic": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FFB00; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_length": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "B, 0x7FFB04; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_csum": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FFB06; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_e_filt": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "%, 0x7FFB08; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_f_q10": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FFB0A; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_mode": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FFB0C; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_status": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FFB0D; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_e_raw": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "%, 0x7FFB0E; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_t_fuel": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "degC, 0x7FFB0F; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_frame_ctr": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FFB10; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_fw_ver": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FFB11; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_cal_mode": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FFB12; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_cal_ok": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FFB13; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_age_ticks": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "s, 0x7FFB14; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_hold_ticks": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "s, 0x7FFB16; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_frames": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "count, 0x7FFB18; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_faults": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "count, 0x7FFB1A; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_stall": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "count, 0x7FFB1C; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_src_owner": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FFB1D; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_src_seen": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FFB1E; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_src_foreign": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "count, 0x7FFB1F; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_ticks": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "count, 0x7FFB20; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_e_key": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "%, 0x7FFB24; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_e_frac": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FFB26; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_frame_bad": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FFB28; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_dzw_e": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "degCA, 0x7FFB29; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_fzw_q8": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FFB2A; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_rk_calls": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "count, 0x7FFB2C; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_e_persist": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "%, 0x7FFB30; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_persist_state": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FFB32; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_persist_err": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FFB33; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_diag_e_pct": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "%, 0x7FFB34; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_diag_f_pct": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "%, 0x7FFB36; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_diag_t_degc": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "degC, 0x7FFB38; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_persist_wait": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "s, 0x7FFB3A; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_persist_writes": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "count, 0x7FFB3C; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_persist_fails": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "count, 0x7FFB3E; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_fst_q10": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FFB40; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_zwst_add": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "degCA, 0x7FFB42; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_msv_sat_ticks": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "count, 0x7FFB43; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_prail_add": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "bar, 0x7FFB44; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_win_margin_min": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "degCA, 0x7FFB46; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_prist_min": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "bar, 0x7FFB48; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_diag_ticks": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "count, 0x7FFB4A; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    }
   },
   "_open": [
     "fra, the ADDITIVE lambda adaptation at 0x801D1A (injection.md section 9),",

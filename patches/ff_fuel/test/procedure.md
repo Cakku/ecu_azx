@@ -86,7 +86,8 @@ moves. The DDLI recipe itself is `patches/ff_counter/test/procedure.md` §2 with
 
 **Checks, in this order. Stop at the first one that fails.**
 
-1. `ff_magic == 1179599921` (0x46463031) and `ff_length == 64`.
+1. `ff_magic == 1179004977` (0x46463031) and `ff_length == 76`
+   (0x4C since brief E5; it was 68 after E2 and 64 before that).
    If both are 0, no periodic hook has run — go to check 2 before blaming the
    flash.
 2. **`ff_src_seen` answers `re/findings/scheduler.md` §11.7 in one sample:**
@@ -149,16 +150,41 @@ At E0, `ff_f_q10` is exactly **1024** and the patched `ff_rk_scale()` takes its
 early return without writing 0x803038 at all, so the two logs must be the same
 run twice:
 
+> **Align the two logs first (added 2026-09-17, brief E4).** Two runs are two
+> separate power-ups. The logger's `t = 0` is its own first sample, and the
+> tens of milliseconds between "the ECU powered on" and "the tester finished
+> the DDLI setup" are not the same twice. On a ramp of 110 rpm/s that offset
+> alone is worth **more than half the `nmot_w` budget** in `tolerance.json`,
+> and it says nothing about the software.
+>
+> The fix is that both logs carry the ECU's own clock: the raster activation
+> counter runs at exactly 100 per second (`re/findings/scheduler.md` §11), so
+> the offset is measurable rather than guessable.
+>
+> ```
+> shift = (raster_cand[0] - raster_base[0]) / 100      # seconds of ECU time
+>         - (t_cand[0] - t_base[0])                    # seconds of logger time
+> ```
+>
+> Add `shift` to **every** candidate timestamp before calling `logcmp`.
+> `logging/bench_rehearsal.py::_align_on_raster` (E4) is the implementation and
+> the worked example; use `raster_setA_10ms_count` or `raster_setB_10ms_count`
+> according to what `ff_src_seen` says is live. Without this step the E0
+> comparison fails on timing, not on behaviour.
+
 ```bash
-python3 tools/logcmp.py patches/ff_fuel/test/baseline.csv logs/2026-xx-xx_ff_fuel.csv \
+python3 tools/logcmp.py patches/ff_fuel/test/baseline.csv logs/2026-xx-xx_ff_fuel_aligned.csv \
         -t patches/ff_fuel/test/tolerance.json --json work/logcmp.json
 ```
 
-Exit 0 is the criterion. Do **not** pass `--strict` — the `ff_*` variables
-exist only in the candidate log. `baseline.csv` is the stock run and is
-recorded on the bench, so it is not in this directory yet; record it **before**
-flashing, because afterwards the only way back to a stock baseline is
-reflashing.
+Exit 0 is the criterion. Do **not** pass `--strict`. (`tolerance.json` used to
+say the `ff_*` variables exist only in the candidate log — **that was wrong**:
+the session file reads plain RAM addresses, so on a stock image they are
+present and read 0. They are now listed in `tolerance.json` with null limits,
+i.e. "expected to differ, do not judge".) `baseline.csv` is the stock run and
+is recorded on the bench, so it is not in this directory yet; record it
+**before** flashing, because afterwards the only way back to a stock baseline
+is reflashing.
 
 Expected log lines on the patched run (prediction, not a recording):
 
@@ -168,8 +194,8 @@ Expected log lines on the patched run (prediction, not a recording):
 # dump_sha256: <from work/ff_fuel.sha256>
 # transport: KWP2000 0x2C/0x21 over TP2.0
 time_s,var,value,unit
-0.000,ff_magic,1179599921,-
-0.000,ff_length,64,B
+0.000,ff_magic,1179004977,-
+0.000,ff_length,76,B
 0.000,ff_src_seen,2,-
 0.000,ff_mode,3,-
 0.000,ff_e_filt,0.00,%
@@ -191,6 +217,24 @@ Engine idling and warm, Pico running at a steady E-value first (let `ff_e_filt`
 settle, which takes about `E/2` seconds at the 2 %/s slew — 40 s from E0 to
 E80). Then, one step at a time, wait for the stated time and record the row.
 
+> **Settle at the blend, then apply the fault (added 2026-09-17, brief E4).**
+> Rows 1, 3, 4 and 5 are all "*something breaks while the engine is running on
+> the blend*", and a row that injects its fault before `ff_e_filt` has reached
+> the target proves nothing: the factor that gets held is whatever the filter
+> happened to have reached. Each of those rows therefore has a **settle node**
+> in front of it — send good frames at the target E% until `ff_e_filt` is
+> within 1 % of it *and* `ff_f_q10` has stopped moving, and only then trip the
+> fault. `logging/ethanol_frame_send.py --node-fault-after S` (E4) is the knob
+> that does exactly that: it sends good frames for S seconds and then applies
+> the fault the other flags select, so the settle and the trip are one command
+> and the timing is not a stopwatch job.
+>
+> *Note for the integrator:* on `agent/E4` as read on 2026-09-17,
+> `ethanol_frame_send.py`'s `main()` passes `fault_after=a.fault_after` to
+> `EthanolNode` but the parser has no matching `add_argument`, so the flag is
+> unreachable from the command line. One line in E4's file fixes it; this
+> procedure names the flag the way the brief specifies it.
+
 | # | Action | After | `ff_mode` | `ff_f_q10` | Other |
 |---|---|---|---|---|---|
 | 0 | steady state, status 0 | — | 1 OK | `ff_F_curve(ff_e_filt)` | `ff_frames` +10/s, `ff_stall` 0 |
@@ -210,9 +254,11 @@ E80). Then, one step at a time, wait for the stated time and record the row.
 
 Rows 1, 2 and 4 are the three that matter for safety, and they all end the same
 way: **the fuel factor is held, never dropped**, so a transient dropout cannot
-lean the engine out. That asymmetry is deliberate (docs/05 §3.2). The ignition
-and rail blends, which must drop to the gasoline map *immediately*, do not
-exist yet — they are §3.4 and §3.6 and a later patch.
+lean the engine out. That asymmetry is deliberate (docs/05 §3.2). The three
+features that must drop to the gasoline value *immediately* now exist and each
+has its own matrix: the ignition blend (`procedure_e1.md`), the start advance
+(`procedure_e2.md` §C3) and the rail adder (`procedure_e5.md` §B4). Run this
+matrix with all three enables at 0 first; then run theirs.
 
 Every row above is also an emulator test in `tests/test_ff_fuel_patch.py` and
 `tests/test_flexfuel_model.py`. If the car disagrees with the table, the model

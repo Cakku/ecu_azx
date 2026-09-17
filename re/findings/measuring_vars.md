@@ -697,8 +697,100 @@ a cold start has to see `tmst` and the cranking factor either way.
 | D2 (#39) | 2196-2199 | 111 | yes |
 | E1 (#34) | 2192-2195 | 108 | yes |
 | **E2 (#35)** | **2188-2191** | **69** | **yes** |
-| E5 (#36) | 2184-2187 | 109 | reserved |
+| E5 (#36) | 2184-2187 | 109 | **taken — see §8.6** |
 
 Twelve of the 1507 spare ids and three of the sixteen free groups are now
 spent. The remaining free groups are 17, 19, 25, 29, 40, 45, 48, 49, 58, 59,
 65, 67 and 109.
+
+## 8.6 The rail adder: ids 2184-2187 and group 109 (E5, 2026-09-17, #36)
+
+Brief **E5** took the last of the four slots the wave-E budget in
+`docs/agent_briefs/README.md` assigned. Re-checked before taking it, as the
+2026-09-17 rules require:
+
+```bash
+./.venv/bin/python3 tools/measuring_vars.py data/passat_azx_ori.bin --free
+#   spare variable ids (stub handler AND named by no group): 1507 of 2200
+#   free groups ...: [17, 19, 25, 29, 40, 45, 48, 49, 58, 59, 65, 67, 69,
+#                     108, 109, 111]
+#   group 109 (0x6D) words: 0x5c55f2, 0x5c57f0, 0x5c59ee, 0x5c5bec
+```
+
+### The ids: 2184-2187, the four entries below E2's
+
+Table words **0x0A7878-0x0A7887**, stock content `00 03 8E C4` four times, so
+the edit is one contiguous 16-byte range immediately below E2's — the fourth
+and last step of the downward walk from the end of the 2200-entry table
+(D2 took 2196-2199, E1 2192-2195, E2 2188-2191).
+
+| id | handler | field | emits | reads |
+|---|---|---|---|---|
+| 2184 | `ff_diag_prail` | 1 | `(0x53, A = v>>9, B = (v>>1) & 0xFF)` | `ff_state.prail_add` |
+| 2185 | `ff_diag_prist_min` | 2 | the same shape | `ff_state.prist_min` |
+| 2186 | `ff_diag_win_margin` | 3 | `(0x22, A = 225, B = margin/96 + 128)` | `ff_state.win_margin_min` |
+| 2187 | `ff_diag_msv_sat` | 4 | `(0x36, 0, count)` | `ff_state.msv_sat_ticks` |
+
+The three negative searches, all reproduced in
+`tests/test_ff_rail_patch.py::TestStockFacts`:
+
+* `find_abs_refs.resolve()` over the whole image finds **no** `lis` + D-form
+  pair resolving into 0x0A7878-0x0A7887;
+* `find_branch_refs.scan()` finds no branch and no stored pointer to any of
+  the four words, nor to any of the four group words;
+* `free_slots()` still lists all four ids as spare and group 109 as free.
+
+### The group: 109 (0x6D)
+
+Words **0x5C55F2 / 0x5C57F0 / 0x5C59EE / 0x5C5BEC**, i.e.
+`0x5C5518 + field * 0x1FE + 109 * 2`, all four `00 00` in the stock image. Its
+`+0x7F` echo, group **236**, is empty too, so the whole 25-byte answer to
+`21 6D` belongs to the patch. All four words are inside the guarded stock
+calibration 0x1C0000-0x1DFFFF and carry `"calibration_edit": true`.
+
+### Formula choices, and the one that is new
+
+Fields 1 and 2 are **0x53 over the raw word shifted right by one** — not a
+choice but a copy, exactly as E1's 0x22/0x4B was. The stock `prist` and
+`prsoll` handlers at 0x3DB94 and 0x3DBAC are literally
+`lhz r6,0x31EA(r13) ; li r3,0x53 ; rlwinm r5,r6,31,17,31 ; sth r5,... ;
+rlwinm r4,r5,24,24,31`, i.e. they halve the 0.005 bar word and hand the tester
+`((A<<8)|B) × 0.01` bar. §7.3 cross-checked that arithmetic against the
+controller code, so these two fields read in the same unit, on the same scale
+and through the same code path as VCDS ids 500 and 501 already do.
+
+**Field 3 is the one formula/A pair in this patch that has no stock
+precedent**, and the reason is a range problem. Formula 0x22 is
+`0.01 × A × (B − 128)`; groups 108 and 69 use A = 0x4B (75) = 0.75 °CA per
+count, which spans only −96.00 … +95.25 °CA, and the window margin reaches
+about **+280 °CA** at a light-load 2000 rpm point (`rail.md` §15) — the field
+would sit pinned at its maximum nearly all the time. **A = 225** gives
+2.25 °CA per count and a span of −288.00 … +285.75 °CA, which covers the whole
+range `KFWBHO1SW` (210…330 °CA) can produce. 225 is not a round number by
+accident either: 2.25 °CA is exactly **96 angle LSB** of 3/128 °CA, so the
+handler converts with one exact integer division and no accumulated rounding.
+The division **floors** (towards −∞, not C's truncate-towards-zero), so the
+margin a tester reads never overstates the room there is.
+
+Field 4 is a plain count, formula 0x36 with A = 0.
+
+**All four fields check the state-block header** and answer `(0x25, 0, 0)`
+when it does not hold — unlike groups 108 and 69, whose fields 3 and 4 report
+stock cells directly. Here even the two fields derived from stock RAM report a
+**minimum**, which is the patch's own value and would be a lie if it were
+stale. A tester who sees "not available" reads the stock rail groups instead
+(106 field 1 = `prist`, 231 fields 2/3 = `prsoll`/`prist`, §7.3).
+
+### The budget after E5
+
+| Brief | ids | group | taken |
+|---|---|---|---|
+| D2 (#39) | 2196-2199 | 111 | yes |
+| E1 (#34) | 2192-2195 | 108 | yes |
+| E2 (#35) | 2188-2191 | 69 | yes |
+| **E5 (#36)** | **2184-2187** | **109** | **yes** |
+
+Sixteen of the 1507 spare ids and four of the sixteen free groups are spent.
+The remaining free groups are 17, 19, 25, 29, 40, 45, 48, 49, 58, 59, 65
+and 67 — the whole wave-E budget of `docs/agent_briefs/README.md` is now
+allocated, and the next brief that wants a block picks from those twelve.

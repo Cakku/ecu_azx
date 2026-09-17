@@ -785,6 +785,89 @@ is the map the engine runs on in every normal driving condition; it is a bare
   no code at all; re-purposing its temperature fade curve for E% costs one
   `lbz` redirect.
 
+#### Added 2026-09-17 (E5, #36): the insertion instruction is **0x45845C**, and what it costs
+
+Brief E5 chose the code route rather than the `KFPRSOLOFF` re-purposing above,
+because the offset map's fade curve is a *temperature* fade that the warm-up
+strategy still needs, and because an E-dependent adder has to be switchable
+from one calibration byte. The instruction is
+
+```
+0045845C  B3 CD 32 00  sth  r30,0x3200(r13)      ; 0x8031F0 = prsoll_raw
+```
+
+**the one and only store of `prsoll_raw`**, and it sits exactly where §3.2 ends
+and §3.3 begins: after the map bank has produced a value and before `KLPRMAX`,
+`PRSOLMN` and the pump-volume rate limiter. All three keep acting on the raised
+value, because the clamp *re-reads the cell from memory* four instructions
+later (`lhz r30,0x3200(r13)` at 0x458480) rather than re-using the register.
+That is what makes an adder at this word safe: the ceiling of 22000 = 110 bar
+cannot be exceeded by any calibration. **VERIFIED-STATIC**, `blobdis.py
+--file-off 0x25422C --addr 0x45822C`.
+
+**Every path into and past the word** (`tools/find_branch_refs.py
+data/passat_azx_ori.bin 0x45845C` — three branches, no pointer word):
+
+| From | Kind | Path of §3.2 | r30 at the word |
+|---|---|---|---|
+| 0x458260 | `b` | `CWPRSOL & 1`: the fixed value `u16 @ 0x5D5574` | `lhz` — zero-extended |
+| 0x4583B4 | `b` | `KFPRSOLHKS` **+ `KFPRSOLOFF`** | clamped to 0..0xFFFF at 0x458390-0x4583B0 |
+| 0x45843C | `b` | `KFPRSOLHOM` **+ `KFPRSOLOFF`** | clamped to 0..0xFFFF at 0x458418-0x458438 |
+| fall-through 0x458458 | — | `KFPRSOLKH` / `KFPRSOLHMM` / `KFPRSOLHKS` / `KFPRSOLHOM` without the offset (each `b 0x458458` from 0x4582C8 / 0x458300 / 0x4583D0 / 0x4583F4) | `interp_2d_u16`'s return, and its last instruction is `clrlwi r3,r8,0x10` (0x40C4C8) |
+
+So **all six map-selection paths of §3.2 pass through this word**, and on every
+one of them `r30` is already a clean 16-bit value — three independent
+constructions, which is why E5's stub needs no mask before it adds.
+
+**One path does not reach the word at all**, and that is the case brief E2's
+`start.md` §9 warns about (a stock branch *past* a hooked store, rather than
+into it):
+
+```
+00458264  lbz     r12,-0x2fa3(r13)   ; 0x7FD04D
+00458268  clrlwi. r12,r12,0x1f
+0045826C  bne     0x458460           ; bit 0 set -> SKIP the store entirely
+```
+
+`0x7FD04D & 1` is §3.2's "keep the previous `prsoll_raw`" path. It jumps to
+0x458460, i.e. **past** 0x45845C, so the stub does not run and the cell keeps
+whatever it held — which already includes the previous activation's adder. The
+behaviour is therefore consistent by construction, and no gate is needed in the
+stub. (Contrast E2's 0x41A680, where the early-out jumped *into* the hooked
+store and forced a `B_stend` test inside the stub.)
+
+**Registers, LR and CR at the word** — all **VERIFIED-STATIC** from the
+disassembly of 0x45822C-0x458734:
+
+* **live**: `r30` (the value), `r28` (= 0xFFFF, set once at 0x458244/0x45824C),
+  `r26` (`CWPRSOL`), `r27`, `r1`. The stub writes none of them.
+* **dead**: `r0`, `r11`, `r12`. `r11` was the frame pointer the save millicode
+  used at 0x45822C and is next *written* at 0x4584A0; `r12` is next written at
+  0x4584F8; neither is read in between. `r30` itself is dead after the store
+  (0x458480 reloads it from the cell), but the stub leaves it alone anyway.
+* **LR is dead.** The prologue is `addi r11,r1,0` / `stwu r1,-0x28(r1)` /
+  `mflr r0` / `bl 0xB8228`, and 0xB8228 is the EABI `_savegpr_25` millicode
+  whose tail at **0xB8244** is `stw r0,4(r11)` — LR is already in the caller's
+  frame. The epilogue at 0x458730 rebuilds `r11` and calls `_restgpr_25_x`
+  (0xB81AC), which restores it. A `bl` at 0x45845C therefore clobbers a value
+  nobody reads again.
+* **CR0 is dead.** There is no conditional branch between 0x458460 and
+  0x458488, where `cmpw r3,r30` writes CR0 before the `bgt` at 0x45848C reads
+  it — and `bl 0x40F600` at 0x458478 would have clobbered it in any case. CTR
+  and XER are untouched.
+
+**The task.** `hdrpsol_main`'s only caller is `bl` at **0x45CC08**, inside task
+set A's **20 ms** task 0x45CAC4 (id 23) — §7 and `scheduler.md` §11.8. The
+producer that writes `prail_add` is `ff_fuel`'s 10 ms tick hook at 0x432940, in
+set A's task id 19: a *different* ERCOSEK task, which is why the stub checks
+the state-block magic instead of relying on ordering.
+
+**The word is in the on-chip flash** 0x404000-0x47FFFF, so it carries
+`"onchip_edit": true` and has **no external-flash alternative**: `hdrpsol_main`
+is the single writer of `prsoll_raw` in the running engine (the only other
+store, 0x132300 in `prsoll_default_init`, is a one-shot initialiser — §11.8),
+and it lives entirely on-chip.
+
 ### 12.2 The real constraint is the pump, not the map
 
 `0x8031F6` (spare pump volume) and `0x80316E` (MSV volume request, clamped at

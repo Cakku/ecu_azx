@@ -612,6 +612,75 @@ past intake-valve opening.
 via the DDLI logger, since neither has a measuring id — **`dwi` 0x803088** and
 **`wbho1s` 0x80307E**, whose margin is `0x80307E - 0x803088 - 2144`.
 
+#### Added 2026-09-17 (brief E5, issue #36) — implemented in `patches/ff_fuel`
+
+The **trimmed** half of #36: an E-dependent setpoint adder *inside* the stock
+ceiling, plus the diagnostics that say whether the pump follows. The torque
+limiter this section used to assume and any `KLPRMAX` raise are **out of
+scope** until bench data exist (`re/findings/rail.md` §12.3, §14.4); the
+design note for the limiter is `patches/ff_fuel/test/procedure_e5.md` §6.
+
+```
+10 ms tick            ff_rail_update()  in src/ff_rail.c, from ff_finish()
+                        prail_add = clamp(interp17(ff_prail_curve, e_filt),
+                                          0, min(ff_prail_max, 6000))
+                      plus, unconditionally, the three window statistics
+
+per 20 ms activation  ff_prail_hook  in src/hooks.S, 12 instructions
+                        prsoll_raw = min(map_output + prail_add, 0xFFFF)
+```
+
+**Where it lands, and why that is the whole safety argument.** The hook is the
+`sth r30,0x3200(r13)` at **0x45845C**, the single store of `prsoll_raw`
+0x8031F0 inside `hdrpsol_main` — after the six-map bank of `rail.md` §3.2 and
+**before** the `PRSOLMN` floor (7000 = 35.0 bar), the **`KLPRMAX` ceiling
+(22000 = 110.0 bar)** and the pump-volume rate limiter of §3.3-§3.4. All three
+still bind, because the clamp *re-reads the cell from RAM* four instructions
+later (`lhz r30,0x3200(r13)` at 0x458480) instead of re-using the register the
+store came from. **No calibration of this patch can put more pressure in the
+rail than the stock ECU already allows itself** — which is what makes a code
+hook acceptable here at all.
+
+All six map-selection paths reach that word; the one path that must not be
+touched — `0x7FD04D & 1`, "hold the previous setpoint" — branches *past* it
+(`bne 0x458460`), so unlike E2's 0x41A680 the stub needs no gate.
+`rail.md` §12.1 has the disassembly, the dead-register set and the proof that
+r30 is a clean halfword on every path in.
+
+**What it is for.** `KFPRSOLHOM` tops out at 19000 = 95 bar, so the headroom
+inside the ceiling is **+15 bar** = +15.8 % pressure = **7.6 % more flow** at
+the same `ti`. That is a mixture-preparation and injector-duty measure and
+nothing more: E85's +40 % fuel **mass** comes from `rk` and the F curve of
+§3.3 (`rail.md` §12.1). `ff_prail_max` therefore ships at exactly 3000 = the
+whole headroom, and the code ceiling `FF_PRAIL_HARD_MAX` is 6000 = 30.0 bar.
+
+**The #37 rule, rail flavour.** `prail_add` is **0 on the activation the mode
+leaves OK/HOLD/OVERRIDE** — no hold, no ramp, the same side of the line as the
+ignition blend and the start advance. §3.4's sentence now covers three
+features: a stale-rich mixture is safe, a stale *advance* or a stale
+*pressure demand* is not.
+
+**The diagnostics are the other half of the brief, and they run even with the
+adder disabled**, because they observe stock cells:
+
+| Field | What | Why |
+|---|---|---|
+| `win_margin_min` | `wbho1s − dwi − 0x7FD290 × 32`, the worst of the window | **`dwi` and `wbho1s` have no stock measuring id at all** (`rail.md` §11), so before E5 the injection window could not be watched on a car |
+| `prist_min` | the worst `prist` of the window | below `PRWBHMX` = 2600 = **13.0 bar** the driver cut-off, the injection-angle clamp and the fault charge limit arm **together** (`rail.md` §14.3) |
+| `msv_sat_ticks` | activations with `0x80316E` at `VMSVMX` | "the pump is out of volume", the early warning of §12.2 |
+
+They are a **tumbling** window of `ff_diag_window_ms` (1000 ms) with continuous
+publication, not a sliding minimum: a sliding one needs a ring buffer of up to
+6553 samples and patch code does not get to allocate that. `diag_ticks` is in
+the state block so a logger can see where in the window a sample sits. All
+three, plus the adder, are **VCDS measuring block 109** (`21 6D`), ids
+2184-2187, with the cross-checked pressure formula 0x53 for the two bar fields
+(`re/findings/measuring_vars.md` §7.3, §8.6).
+
+The required margin is read from the RAM cell `awea_angles` writes
+(**0x7FD290**), not from the literal 2144 above: 2144 is 67 × 32 and 67 is
+what `KLWBHO1SMX` happens to hold in *this* dataset.
+
 ### 3.7 Diagnostics
 Expose `E_filt`, `T_fuel`, `status/mode`, `F`, `f_zw` in a spare measuring
 block (VCDS-readable) or via the DDLI logger, and later as OBD PID 0x52 if the
@@ -654,7 +723,7 @@ fuel.
 > Evidence and full derivation: `re/findings/eeprom.md`. Reproduce the layout
 > with `python3 tools/eeprom_map.py data/passat_azx_ori.bin --clients`.
 >
-> **Primary route — EEP_CONF block 8, payload offset +0, one byte.
+> **Primary route — EEP_CONF block 8, payload offset +2, one byte.
 > VERIFIED-STATIC for everything except the factory contents of that byte.**
 >
 > * The SPI EEPROM is a 2 KB **M95160-class** part on **PCS0** of the QSMCM
@@ -758,6 +827,36 @@ fuel.
 > proves the factory leaves block 8 payload +0 at 0xFF.** `ff_persist_offset`
 > and `ff_persist_block` are calibration bytes precisely so that a bench read
 > can move the store without a rebuild.
+
+#### Correction 2026-09-17 (brief E4, issue #38) — the offset was wrong, and silently so
+
+`ff_persist_offset` shipped as **0** and has been changed to **2**.
+
+Payload **+0 and +1 of every EEP_CONF block are a `{block id, version}`
+stamp**. `nvm_read_all_blocks` (**0x06227C** — the entry is four bytes below
+the 0x062280 this document and `eeprom.md` §3.5 quoted) compares the first
+halfword of each block against that block's record in the flash default table
+at 0x060458-0x060470, and on a mismatch it **discards the block and reloads
+the defaults**. Block 8's default record is
+`08 01 00 80 80 80 80 00 00 80 00 80 80 FF`.
+
+So the ethanol percent was being written on top of the block id. Every cold
+start threw the block away, the mirror byte the patch read back was `0x08`,
+and `ff_persist_init()` accepted it as a perfectly plausible **8 %** — not the
+`0xFF` that would have meant "nothing known". **#38 did not work, and nothing
+said so.** It took a QSPI device model and a run of the real
+`nvm_read_all_blocks` to see it (`re/findings/eeprom.md` §10.5, §10.6).
+
+Three things follow:
+
+* the free payload offsets for block 8 are **+2..+13**, not +0..+13, and the
+  same correction applies to blocks 1, 3, 7, 11 and 12 in `eeprom.md` §5;
+* payload **+29 moves** on the first commit (0xFF → 0x00 → 0x01): it is the
+  manager's ReplV byte. The rule is "the patch never writes it", not "it never
+  changes";
+* the fix needed no code — one calibration byte — which is the argument for
+  having put the block, the offset and the rate limit in FFCAL001 in the first
+  place.
 
 ## 4. New calibration data
 
@@ -884,6 +983,38 @@ field 1 can carry (formula 0x21, A = 100), so there is no `f_st` the patch can
 produce that a tester cannot see. `FF_ZWST_HARD_MAX` = 8 counts = 6.00 °CA,
 twice the shipped ceiling — and it is the clamp that matters most in the whole
 patch, because the knock retard is bypassed during the start.
+
+#### Added 2026-09-17 (brief E5, issue #36) — FFCAL001 **v4**, 332 bytes
+
+The fourth version, and the fourth time nothing moved: everything up to
++0x121 is exactly where v3 left it, and E5's parameters start at **+0x122**,
+which is where v3's checksum used to be.
+
+| Off | Type | Name | Shipped | Unit |
+|---|---|---|---|---|
+| +122 | u8 | `ff_prail_enable` | **0** | 1 applies the adder; 0 pins `prail_add` at 0 for ever |
+| +123 | u8 | `ff_prail_rsv` | 0 | reserved; it is here only so the two words below stay 2-byte aligned |
+| +124 | u16 | `ff_prail_max` | 3000 | 0.005 bar = **15.0 bar**, exactly the headroom `KLPRMAX` 22000 leaves above `KFPRSOLHOM`'s 19000 |
+| +126 | u16 | `ff_diag_window_ms` | 1000 | ms of the diagnostic window |
+| +128 | 17×u16 | `ff_prail_curve` | **0** | 0.005 bar over E 0..100 step 6.25 %, the same grid as `ff_F_curve` |
+| +14A | u16 | crc | | |
+
+`ffcal001.py` refuses to build a block with `ff_prail_curve[0] != 0` (E0 would
+stop being bit-identical at 0x45845C), a non-monotonic curve (more ethanol may
+not mean less pressure), any point or an `ff_prail_max` above
+`FF_PRAIL_HARD_MAX` = 6000, an `ff_diag_window_ms` of 0, or a non-zero
+`ff_prail_rsv`.
+
+**The v1 reservation is superseded, not re-used.** `ff_prail_add` at +0xDC —
+eight u8 in 0.1 MPa with no axis at all — stays in place, neutral and unread,
+so that nothing in the block moves. It was the wrong shape: E5 needed
+seventeen points on the ethanol grid the rest of the block already uses, in
+the ECU's own 0.005 bar rather than in 0.1 MPa, so it appended a proper table.
+
+**The code ceiling is arithmetic again.** `FF_PRAIL_HARD_MAX` = 6000 = 30.0 bar
+is twice the shipped ceiling and twice the entire headroom the stock
+calibration has, and anything above it is a calibration that lies: the stock
+`KLPRMAX` clamp four instructions after the hooked store eats it.
 
 ## 5. RAM
 
