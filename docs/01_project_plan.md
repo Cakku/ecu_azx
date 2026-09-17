@@ -42,6 +42,26 @@ fuel change) is the owner's responsibility and is not covered here.
 > ff_fuel MVP patch (#32/#37), diagnostics and persistence (#38/#39) and the
 > calibration definition (#41).
 
+> **Update 2026-09-17.** Waves C and D are merged (`main` 8c93421, 365
+> tests). The desk side of Phases 2-4 is done as far as it can be without an
+> ECU: patch framework and Flash-1 counter (#25 closed, #27 software), the
+> static RAM survey and the patch RAM block 0x7FFB00 (#23), the KWP logger
+> proven against an emulated ECU (#20), the ERCOSEK rasters (10x faster than
+> assumed, #44), the **flex-fuel MVP patch `patches/ff_fuel`** with its E0
+> bit-identity proven in the emulator (#32, rules of #37), VCDS measuring
+> block 111 and E% persistence in EEPROM block 8 (#39, #38), and the first
+> scaled calibration definition (#41, 157 named objects). Nothing is
+> flashable yet: the RAM block is VERIFIED-STATIC only, and two of the three
+> hook words are in the on-chip flash, which KESSv2 has not been shown to
+> write. The next desk work is **wave E** (`docs/agent_briefs/README.md`):
+> ignition, start and rail-pressure code as disabled, enable-gated extensions
+> of the same patch (#34-#36), a second naming pass (#41), a simulator that
+> runs the patch and an EEPROM device model so every bench procedure is
+> rehearsed (#37-#39), the firmware's own flash-programming route read out of
+> the dump to settle the on-chip question (#26-#28, #32), and the workflow
+> walkthrough (#42). Hardware items unchanged: #1-#4, #22, #26-#28, #30-#31,
+> #33, #40, #45.
+
 ## 3. Principles
 
 1. **Evidence before action.** A fact is used only at the level it has been

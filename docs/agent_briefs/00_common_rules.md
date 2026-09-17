@@ -79,3 +79,52 @@ does after review. You may tick checklist items in the issue body with
   brief says otherwise.
 - Patch code follows `docs/04_re_guidelines.md` §7 and the framework in
   `patches/common/` once it exists. Nothing an agent produces is flashed.
+
+## Added 2026-09-17 (after wave D, for wave E)
+
+- **Worktree set-up, first two commands:** `git branch -m agent/<brief-id>`
+  (the worktree tool names the branch itself) and
+  `ln -s /Users/carlo/ecu_azx/.venv .venv` (gitignored). Then use
+  `./.venv/bin/python3` everywhere — the bare `python3` on this Mac is a
+  different interpreter without the project's packages. `make` in a patch
+  directory already uses `$(REPO)/.venv/bin/python3` and the LLVM at
+  `/Users/carlo/toolchains/LLVM-23.1.1-macOS-ARM64`.
+- **`patches/ff_fuel` is one patch that grows** (D1 → D2 → E1 → E2 → E5), not
+  a family of patches: one blob, one state block, one FFCAL001. A feature is
+  its own `src/ff_<feature>.c`, gated by an `ff_<feature>_enable` byte in
+  FFCAL001 that **defaults to 0**, with neutral tables, and its trampolines
+  live in `hooks.S`. Only the brief named in the README's ownership table
+  edits `patches/ff_fuel/**`, `emu/models/flexfuel.py`, the `tests/test_ff_*`
+  files, `logging/sessions/ff_fuel.json` and docs/05 at any one time.
+- **FFCAL001 changes append; nothing moves.** Bump `VERSION` and `LENGTH` in
+  `ffcal001.py`, mirror them in `ff_state.h`, make `ff_cal_ok()` accept the
+  new version only, regenerate `ffcal001_rows.csv`, and update the model, the
+  tests and `ff_fuel.json` in the **same commit**. `struct ff_state` grows
+  only past its current end (D2's `ff_nvm_req` sits at +0x40..+0x4B, then
+  `ff_persist_buf`); the core/annex checksum split is documented in the
+  header and must stay true.
+- **Two proofs per feature, in the emulator:** the hooked stock code is
+  bit-identical (a) with the feature disabled and (b) with it enabled at
+  neutral calibration, shown by a whole-SRAM diff that moves nothing outside
+  the state block. Segment-synchronous stubs check the state-block magic (or
+  the brief proves the producer runs first), use only registers proven dead
+  at the site, address RAM absolutely (never r2/r13), and state their
+  instruction count in the README.
+- **On-chip hook words** (0x404000-0x47FFFF) carry `"onchip_edit": true`, are
+  counted in the patch README's hook table, and each names its external-flash
+  alternative or says there is none. Whether the OBD route writes that flash
+  is open until brief E6 and the bench read-back.
+- **The measuring-block budget is fixed in the README** (groups 111/108/69/109,
+  ids 2196-2199/2192-2195/2188-2191/2184-2187). Take only what your brief
+  names, after `python3 tools/measuring_vars.py data/passat_azx_ori.bin --free`
+  confirms it is still free.
+- **The #37 asymmetry, now a rule for every feature:** on FAULT the *fuel*
+  factor is held and then decayed; *ignition* and *rail* terms go to zero on
+  the activation the mode leaves OK/HOLD. No hold, no ramp, for anything that
+  adds advance or pressure.
+- **Simulated data is labelled.** Logs from `logging/ecu_sim.py` carry
+  `# simulated: true` and live under `logging/samples/`; they never enter a
+  bench comparison set or a `VERIFIED-DYNAMIC` claim about the ECU.
+- Findings files gain **dated sections**, never rewrites; when a brief settles
+  an open item listed in a findings file's "Open" table, mark that row
+  **SETTLED (date, brief, section)** in place, as C4 and D3 did.

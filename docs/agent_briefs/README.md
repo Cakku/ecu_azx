@@ -4,7 +4,7 @@ Self-contained task briefs for autonomous (Opus-class) sub-agents. Each brief
 maps to one or more GitHub issues, states prerequisites, deliverables and
 acceptance criteria, and assumes the rules in `00_common_rules.md`.
 
-## Status (2026-09-16)
+## Status (2026-09-16, updated 2026-09-17)
 
 Waves A and B are merged into `main` (647efe6). Phase 1 (static RE) is
 closed: 13/13 issues. Phase 0 is blocked on hardware (#1-#4); Phase 2 has
@@ -43,6 +43,16 @@ commit** in the image) is merged too. **Wave D is complete on
 `integration/wave-D`**; the human merges it into `main`. Nothing is flashable
 yet: `ram_status` stays `static` until the #23 snapshots, and whether KESSv2
 writes the on-chip flash (the fuel hook 0x42247C) is the first bench question.
+
+**Update 2026-09-17: wave D is merged into `main` (8c93421).** 365 tests OK,
+checksums ALL OK, `re/med9_draft.xdf` regenerated once with D1's FFCAL001
+rows; patched ff_fuel image sha256 `40e22a23…4cae7`. Issues #32, #37, #38,
+#39 and #41 carry integration notes and keep their bench halves open; no
+milestone is complete. **Wave E** (below) is the next desk work: it finishes
+the Phase 5 patch code (ignition, start, rail) as inert, enable-gated
+extensions of `patches/ff_fuel`, continues the calibration definition, makes
+every bench procedure runnable against the simulator, and answers the
+on-chip-flash question from the dump. Nothing in wave E needs the ECU.
 
 Rule learned in wave B: **run at most two agents at a time.** Four in
 parallel hit the API rate limit and lost their work. Agents commit after
@@ -89,7 +99,7 @@ C1 and C2 are independent (C1 uses a placeholder RAM address if C2 is not
 merged yet). C3 and C4 are independent of each other and of pair 1; C3 picks
 up C2's `ram_snapshot.json` and C1's counter address if they are merged.
 
-## Wave D — done on `integration/wave-D` (D1 + D3, then D2)
+## Wave D — done (merged 8c93421; D1 + D3, then D2)
 
 | Order | Brief | Issues | Needs |
 |---|---|---|---|
@@ -112,6 +122,42 @@ Issue bookkeeping after wave C (2026-09-16): #25 closed; #27, #20, #44 have
 their completed rows ticked; #11 carries the period correction; no milestone
 is complete yet (every remaining Phase 2/3 item needs the bench).
 
+## Wave E — next (2026-09-17): Phase 5 code, definition pass 2, simulator rehearsal, the on-chip question
+
+| Pair | Brief | Issues | Needs | Owns (nobody else edits these while it runs) |
+|---|---|---|---|---|
+| 1 | [E1 Ignition blend](E1_ignition_blend.md) | #34 software half, ignition rule of #37 | wave D merged | `patches/ff_fuel/**`, `emu/models/flexfuel.py`, `tests/test_ff_*`, `logging/sessions/ff_fuel.json`, docs/05 §3.4/§4, `ignition.md`, `scheduler.md` §11.8 |
+| 1 | [E3 Calibration naming pass 2](E3_calibration_naming_pass2.md) | #41 (continued), prepares #43 | — | `re/calibration_names.csv`, `re/findings/calibration_names.md`, `tests/test_draft_to_xdf.py`, dated notes in `rail.md`/`injection.md`/`measuring_vars.md` §7.4 |
+| 2 | [E2 Start enrichment](E2_start_enrichment.md) | #35 software half | **E1 merged** | the same set as E1, plus `start.md` |
+| 2 | [E4 Bench rehearsal in the simulator](E4_bench_rehearsal_simulator.md) | rehearses #37 #38 #39, prepares #22 | — | `emu/` (additive), `logging/ecu_sim.py`, `logging/med9kwp/`, new `logging/*.py`, `logging/samples/`, `tests/test_med9kwp.py` + new tests, `eeprom.md` §10. **Reads** `patches/**` and `ff_fuel.json`, never edits them |
+| 3 | [E5 Rail-pressure adder](E5_rail_pressure_adder.md) | #36 software half (trimmed) | **E2 merged** | the same set as E1, plus `rail.md` |
+| 3 | [E6 KWP programming route, on-chip writability](E6_kwp_programming_route.md) | blocker of #26 #27 #28 #32 | — | new `re/findings/flash_programming.md`, `kwp.md` §9, docs/02 §2/§6, docs/06 §6, optional `tools/flash_segments.py` |
+| filler | [E7 Workflow walkthrough](E7_workflow_doc.md) | #42 step 1 | **E4 merged** | new `docs/07_workflow.md`, `docs/README.md`, `tools/README.md`, docs/03 §7, docs/01 §2 |
+
+Why this order. E1 → E2 → E5 are **one patch growing** (`patches/ff_fuel`):
+each appends to FFCAL001 (v2 → v3 → v4), to `struct ff_state` and to
+`hooks.S`, so they cannot run side by side; E1 comes first because the
+ignition rule is the last unimplemented line of #37 and its insertion point
+is the cleanest. E3, E4 and E6 touch none of those files and fill the second
+slot. E6 is late only because it is research, not code; move it forward if
+the bench date approaches. Every feature ships **disabled** (`ff_*_enable`
+= 0) with neutral tables, so the flashable file stays the proven fuel-only
+MVP until the human enables one feature at a time (docs/01 §3 principle 5).
+
+Shared budget, decided here so the three patch briefs do not collide:
+measuring **groups 111 (D2) / 108 (E1) / 69 (E2) / 109 (E5)** and **ids
+2196-2199 (D2) / 2192-2195 (E1) / 2188-2191 (E2) / 2184-2187 (E5)**; each
+brief re-checks with `tools/measuring_vars.py --free`.
+
+The on-chip caveat applies to all of it: after wave E, six or seven of the
+patch's hook words are in 0x404000-0x47FFFF. E6 tells us from the dump
+whether the OBD route can write them; the bench read-back after Flash 0
+(`patches/ff_fuel/test/procedure.md` §1) is still the proof.
+
+Still hardware-only (no brief): #1-#4, #22, #26-#28, #30-#31, #33, #40, #45,
+the runtime half of #23 and #44, the generator test of #29, the TunerPro
+check of #41, and the calibration values of #34-#36.
+
 ## How to launch one
 
 From Claude Code (Agent tool), one agent per brief, each in its own worktree
@@ -121,18 +167,20 @@ so parallel agents do not collide on `re/symbols.csv` and the docs:
 subagent_type: general-purpose
 model: opus
 isolation: worktree
-name: C1
+name: E1
 prompt: |
-  You are working in a git worktree of /Users/carlo/ecu_azx on branch agent/C1.
-  Read docs/agent_briefs/00_common_rules.md, then docs/agent_briefs/C1_patch_framework_and_flash1.md,
-  and execute that brief completely. Commit on your branch after every
-  finding; do not push; do not modify data/passat_azx_ori.bin. Run
-  `python3 -m unittest discover -s tests` before you finish. End with the
-  report format from the rules file.
+  You are working in a git worktree of /Users/carlo/ecu_azx. First run
+  `git branch -m agent/E1` and `ln -s /Users/carlo/ecu_azx/.venv .venv`, and
+  use ./.venv/bin/python3 for every Python command (bare python3 is the
+  wrong interpreter). Read docs/agent_briefs/00_common_rules.md, then
+  docs/agent_briefs/E1_ignition_blend.md, and execute that brief completely.
+  Commit on your branch after every finding; do not push; do not modify
+  data/passat_azx_ori.bin. Run `./.venv/bin/python3 -m unittest discover -s
+  tests` before you finish. End with the report format from the rules file.
 ```
 
 Or paste the same text into a fresh `claude` session started inside a
-worktree (`git worktree add ../ecu_azx-C1 -b agent/C1`).
+worktree (`git worktree add ../ecu_azx-E1 -b agent/E1`).
 
 ## After an agent finishes
 
@@ -146,5 +194,5 @@ worktree (`git worktree add ../ecu_azx-C1 -b agent/C1`).
    `re/med9_draft.xdf` with `tools/draft_to_xdf.py` at merge time only.
 4. Push, then launch the next pair.
 5. Close the GitHub issue only when its exit criterion is met; otherwise
-   leave the agent's comment as the status (#25, #27, #20, #23, #32, #37,
-   #38, #39 all keep a hardware half open after these briefs).
+   leave the agent's comment as the status (#27, #20, #23, #32, #34-#39, #41
+   all keep a hardware half open after these briefs).
