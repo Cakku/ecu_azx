@@ -219,6 +219,11 @@ def main(argv=None) -> int:
                     help="report 101 %% ethanol (matrix row 5)")
     ap.add_argument("--not-ready", action="store_true",
                     help="report status 3 (matrix row 6)")
+    ap.add_argument("--fault-after", "--node-fault-after", dest="fault_after",
+                    type=float, default=None, metavar="S",
+                    help="send nominal frames first and apply the configured "
+                         "fault only after S seconds (procedure.md section 5: "
+                         "settle, then step)")
     ap.add_argument("-v", "--verbose", action="store_true")
     a = ap.parse_args(argv)
 

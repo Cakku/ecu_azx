@@ -526,7 +526,11 @@ class TestRailStub(RailBase):
         import re
 
         import blobdis
-        blob = (tff.FF_FUEL / "build" / "ff_fuel.bin").read_bytes()
+        # The committed blob out of patch.json, not build/ff_fuel.bin: the
+        # build directory exists only after a `make`, and this test must
+        # pass in a fresh checkout (integration, 2026-09-17).
+        blob = bytes.fromhex(next(c["new"] for c in tff.load_patch()["changes"]
+                                  if c.get("kind") == "blob"))
         base = self.syms["ff_prail_hook"]
         start = base - tff.PATCH_FLASH
         insns = list(blobdis.disassemble(blob[start:start + 16 * 4], base))
