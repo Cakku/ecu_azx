@@ -129,6 +129,8 @@ FR_MODULES = {
     "VSTMSV": "VSTMSV - MSV feed-forward, rail model",
     "GGDSKV": "GGDSKV - rail pressure sensor",
     "BGTMOT": "BGTMOT - coolant temperature",
+    "GGHFM": "GGHFM - hot-film air-mass signal",
+    "BBKR": "BBKR - knock-control operating conditions",
     "FFCAL": "FFCAL001 - flex-fuel calibration block",
 }
 UNNAMED_CATEGORY = "Unnamed candidates"
