@@ -290,16 +290,48 @@ def plan_chunks(variables: list[Variable], *, first_id: int = DDLI_FIRST,
 # ---------------------------------------------------------------------------
 # connection
 # ---------------------------------------------------------------------------
+def start_simulator(args):
+    """`logging/ecu_sim.py` on an in-process virtual bus, per the --sim flags.
+
+    `--sim-patch` also runs the patch's own hooks, so `ff_ticks` really
+    counts and `ff_rk_calls` really follows engine speed; `--eeprom` gives the
+    block manager a device that answers.  Time inside the simulator is
+    simulated: `--time-scale` sets how many simulated seconds one wall second
+    buys, and `--seconds` on `log` still counts WALL seconds, so a log of
+    `--seconds 10 --time-scale 2` covers twenty simulated seconds of ECU
+    behaviour.  If the host cannot keep up the simulated clock falls behind
+    and the run is simply slower than the ECU would be; nothing desynchronises,
+    because every animated cell reads the same simulated instant as the hooks.
+    """
+    from ecu_sim import AnimatedRam, DEFAULT_STATICS, EcuSimulator
+    channel = f"med9sim{os.getpid()}"
+    kw = {"seed": 0x12345678}
+    if getattr(args, "sim_dump", None):
+        kw["dump"] = args.sim_dump
+    if getattr(args, "sim_patch", None):
+        kw["patch_dir"] = args.sim_patch
+    if getattr(args, "eeprom", None):
+        kw["eeprom"] = args.eeprom
+    from ecu_sim import Med9Handlers
+    handlers = Med9Handlers(
+        kw.pop("dump", None) or str(REPO / "data" / "passat_azx_ori.bin"),
+        seed=kw.pop("seed"), patch_dir=kw.pop("patch_dir", None),
+        eeprom=kw.pop("eeprom", None),
+        time_scale=getattr(args, "time_scale", 1.0),
+        ram=AnimatedRam(live_task_set=getattr(args, "sim_task_set", "A"),
+                        statics=dict(DEFAULT_STATICS)))
+    sim = EcuSimulator.on_virtual_bus(channel, handlers=handlers)
+    return sim
+
+
+
 @contextlib.contextmanager
 def connection(args):
     """Yield a connected `KwpClient`, over the simulator or over real hardware."""
     sim = None
     if args.sim:
-        from ecu_sim import EcuSimulator
-        channel = f"med9sim{os.getpid()}"
-        sim = EcuSimulator.on_virtual_bus(
-            channel, seed=0x12345678,
-            **({"dump": args.sim_dump} if args.sim_dump else {}))
+        sim = start_simulator(args)
+        channel = sim.link.description.split(":", 1)[1]
         stack = contextlib.ExitStack()
         stack.enter_context(sim.background())
         spec = f"virtual:{channel}"
@@ -541,11 +573,8 @@ def cmd_probe(args) -> int:
     sim = None
     stack = contextlib.ExitStack()
     if args.sim:
-        from ecu_sim import EcuSimulator
-        channel = f"med9sim{os.getpid()}"
-        sim = EcuSimulator.on_virtual_bus(
-            channel, seed=0x12345678,
-            **({"dump": args.sim_dump} if args.sim_dump else {}))
+        sim = start_simulator(args)
+        channel = sim.link.description.split(":", 1)[1]
         stack.enter_context(sim.background())
         spec = f"virtual:{channel}"
     else:
@@ -609,6 +638,22 @@ def _add_bus_args(p) -> None:
                         "dump). Point it at work/<patch>.bin to rehearse a "
                         "patched ECU, e.g. measuring block 111 of "
                         "patches/ff_fuel")
+    p.add_argument("--sim-patch", metavar="DIR", default=None,
+                   help="with --sim: apply this patch directory to a "
+                        "temporary image AND run its hooks on a simulated "
+                        "10 ms raster, so the state block really moves "
+                        "(patches/ff_fuel; brief E4)")
+    p.add_argument("--eeprom", metavar="FILE", default=None,
+                   help="with --sim: back the simulated ECU's QSPI EEPROM "
+                        "with this 2 KB image, created from the firmware's "
+                        "own block defaults if it is missing and written back "
+                        "on exit. This is what makes the eep_blk8_* variables "
+                        "and a power-cut rehearsal real")
+    p.add_argument("--sim-task-set", choices=("A", "B"), default="A",
+                   help="with --sim: which OS task set is live "
+                        "(scheduler.md 11.8 -- A is the realistic default)")
+    p.add_argument("--time-scale", type=float, default=1.0, metavar="X",
+                   help="with --sim: simulated seconds per wall-clock second")
     p.add_argument("--address", type=lambda s: int(s, 0), default=0x01,
                    help="module logical address (default 0x01, engine)")
     p.add_argument("--rx-id", type=lambda s: int(s, 0), default=0x300,
