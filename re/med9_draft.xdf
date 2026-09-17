@@ -50431,7 +50431,7 @@
   </XDFCONSTANT>
   <XDFCONSTANT uniqueid="0x4C5" flags="0x0">
     <title>ff_cal_length</title>
-    <description>scalar at CPU 0x5E251A (file 0x1E251A), 1x1 u16. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; FFCAL001 header: block length, 290 B including the checksum [ffcal001_rows.csv]</description>
+    <description>scalar at CPU 0x5E251A (file 0x1E251A), 1x1 u16. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; FFCAL001 header: block length, 332 B including the checksum [ffcal001_rows.csv]</description>
     <CATEGORYMEM index="0" category="0x5"/>
     <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1E251A" mmedelementsizebits="16" mmedmajorstridebits="0" mmedminorstridebits="0"/>
     <units>-</units>
@@ -50693,7 +50693,55 @@
       <VAR id="X"/>
     </MATH>
   </XDFCONSTANT>
-  <XDFTABLE uniqueid="0x4DB" flags="0x30">
+  <XDFCONSTANT uniqueid="0x4DB" flags="0x0">
+    <title>ff_prail_enable</title>
+    <description>scalar at CPU 0x5E2632 (file 0x1E2632), 1x1 u8. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; E5 (#36): 1 = apply the rail-pressure adder; 0 (shipped) pins prail_add at 0 [-] [ffcal001_rows.csv]</description>
+    <CATEGORYMEM index="0" category="0x5"/>
+    <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1E2632" mmedelementsizebits="8" mmedmajorstridebits="0" mmedminorstridebits="0"/>
+    <units>-</units>
+    <decimalpl>0</decimalpl>
+    <outputtype>1</outputtype>
+    <MATH equation="X">
+      <VAR id="X"/>
+    </MATH>
+  </XDFCONSTANT>
+  <XDFCONSTANT uniqueid="0x4DC" flags="0x0">
+    <title>ff_prail_rsv</title>
+    <description>scalar at CPU 0x5E2633 (file 0x1E2633), 1x1 u8. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; E5: 0, reserved; it is here so that ff_prail_max and ff_diag_window_ms stay 2-byte aligned inside the block [-] [ffcal001_rows.csv]</description>
+    <CATEGORYMEM index="0" category="0x5"/>
+    <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1E2633" mmedelementsizebits="8" mmedmajorstridebits="0" mmedminorstridebits="0"/>
+    <units>-</units>
+    <decimalpl>0</decimalpl>
+    <outputtype>1</outputtype>
+    <MATH equation="X">
+      <VAR id="X"/>
+    </MATH>
+  </XDFCONSTANT>
+  <XDFCONSTANT uniqueid="0x4DD" flags="0x0">
+    <title>ff_prail_max</title>
+    <description>scalar at CPU 0x5E2634 (file 0x1E2634), 1x1 u16. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; E5: prail_add ceiling; clamped to FF_PRAIL_HARD_MAX (6000 = 30.0 bar) in code, and KLPRMAX 22000 caps the result whatever this says [0.005 bar] [ffcal001_rows.csv]</description>
+    <CATEGORYMEM index="0" category="0x5"/>
+    <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1E2634" mmedelementsizebits="16" mmedmajorstridebits="0" mmedminorstridebits="0"/>
+    <units>-</units>
+    <decimalpl>0</decimalpl>
+    <outputtype>1</outputtype>
+    <MATH equation="X">
+      <VAR id="X"/>
+    </MATH>
+  </XDFCONSTANT>
+  <XDFCONSTANT uniqueid="0x4DE" flags="0x0">
+    <title>ff_diag_window_ms</title>
+    <description>scalar at CPU 0x5E2636 (file 0x1E2636), 1x1 u16. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; E5: length of the window over which win_margin_min, prist_min and msv_sat_ticks are accumulated [ms] [ffcal001_rows.csv]</description>
+    <CATEGORYMEM index="0" category="0x5"/>
+    <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1E2636" mmedelementsizebits="16" mmedmajorstridebits="0" mmedminorstridebits="0"/>
+    <units>-</units>
+    <decimalpl>0</decimalpl>
+    <outputtype>1</outputtype>
+    <MATH equation="X">
+      <VAR id="X"/>
+    </MATH>
+  </XDFCONSTANT>
+  <XDFTABLE uniqueid="0x4DF" flags="0x30">
     <title>ff_F_curve</title>
     <description>curve_1d at CPU 0x5E2530 (file 0x1E2530), 17x1 u16. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; fuel MASS factor over ethanol %, 17 points 0..100 step 6.25; F(0) = 1024 is bit-identical to stock; read by ff_f_of() every activation [1/1024] [ffcal001_rows.csv]</description>
     <CATEGORYMEM index="0" category="0x7"/>
@@ -50752,7 +50800,7 @@
       </MATH>
     </XDFAXIS>
   </XDFTABLE>
-  <XDFTABLE uniqueid="0x4DC" flags="0x30">
+  <XDFTABLE uniqueid="0x4E0" flags="0x30">
     <title>ff_fzw_curve</title>
     <description>curve_1d at CPU 0x5E2552 (file 0x1E2552), 17x1 u8. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; E1 (#34): ignition blend factor over ethanol %, 17 points 0..100 step 6.25. f_zw(0) = 0 is what makes E0 bit-identical for the ignition too; 255 = 0.996 is the u8 maximum and the plateau from E50 on [1/256] [ffcal001_rows.csv]</description>
     <CATEGORYMEM index="0" category="0x7"/>
@@ -50811,7 +50859,7 @@
       </MATH>
     </XDFAXIS>
   </XDFTABLE>
-  <XDFTABLE uniqueid="0x4DD" flags="0x30">
+  <XDFTABLE uniqueid="0x4E1" flags="0x30">
     <title>ff_dzw_map</title>
     <description>map_2d at CPU 0x5E2564 (file 0x1E2564), 8x8 s8. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; E1 (#34): 8 nmot rows x 8 rl columns of ignition ADVANCE at f_zw = 1, read as interp_2d_s8(val, nx=8, key_nmot, key_rl). ALL ZERO as shipped, so the file is inert even with ff_zw_enable = 1; calibrate it from +0 towards +2 degCA only in cells where dwkrz stays 0 [0.75 degCA] [ffcal001_rows.csv]</description>
     <CATEGORYMEM index="0" category="0x6"/>
@@ -50854,7 +50902,7 @@
       </MATH>
     </XDFAXIS>
   </XDFTABLE>
-  <XDFTABLE uniqueid="0x4DE" flags="0x30">
+  <XDFTABLE uniqueid="0x4E2" flags="0x30">
     <title>ff_fst_map</title>
     <description>map_2d at CPU 0x5E25A4 (file 0x1E25A4), 6x6 u16. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; E2 (#35): start/warm-up fuel factor f_st, 6 ethanol rows x 6 tmst columns, read as interp(val, ny=6, nx=6, key_E, key_tmst) by src/ff_start.c. ALL 1024 as shipped, so the file is inert even with ff_st_enable = 1; ROW 0 (E0) must stay exactly 1024 - that is what makes E0 bit-identical at both S1 sites. Calibrate from about 1.2x at a warm start upwards, and never past the injection window dwi (0x803088, injection.md section 8) [1/1024] [ffcal001_rows.csv]</description>
     <CATEGORYMEM index="0" category="0x6"/>
@@ -50897,9 +50945,9 @@
       </MATH>
     </XDFAXIS>
   </XDFTABLE>
-  <XDFTABLE uniqueid="0x4DF" flags="0x30">
+  <XDFTABLE uniqueid="0x4E3" flags="0x30">
     <title>ff_prail_add</title>
-    <description>curve_1d at CPU 0x5E25EC (file 0x1E25EC), 8x1 u8. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; RESERVED rail-pressure adder over ethanol % (docs/05 section 3.6); neutral 0 [0.1 MPa] [ffcal001_rows.csv]</description>
+    <description>curve_1d at CPU 0x5E25EC (file 0x1E25EC), 8x1 u8. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; SUPERSEDED BY ff_prail_curve (+0x128, E5 #36): unread, kept neutral 0 so that nothing in the block moves. It was reserved by v1 as an 8 x u8 adder in 0.1 MPa with no axis at all; E5 needed 17 points on the same ethanol grid as ff_F_curve and the ECU's own 0.005 bar unit, so it appended a proper table instead of bending this one [0.1 MPa] [ffcal001_rows.csv]</description>
     <CATEGORYMEM index="0" category="0x7"/>
     <XDFAXIS id="x" uniqueid="0x0">
       <indexcount>8</indexcount>
@@ -50947,7 +50995,7 @@
       </MATH>
     </XDFAXIS>
   </XDFTABLE>
-  <XDFTABLE uniqueid="0x4E0" flags="0x30">
+  <XDFTABLE uniqueid="0x4E4" flags="0x30">
     <title>ff_dzw_nmot_axis</title>
     <description>axis at CPU 0x5E25F8 (file 0x1E25F8), 8x1 u16. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; E1 (#34): the 8 row breakpoints of ff_dzw_map, every other breakpoint of the stock KFZW nmot axis 0x5C7736 (520..6520 rpm), so a cell lines up with a stock KFZW row [0.25 rpm] [ffcal001_rows.csv]</description>
     <CATEGORYMEM index="0" category="0x1"/>
@@ -50997,7 +51045,7 @@
       </MATH>
     </XDFAXIS>
   </XDFTABLE>
-  <XDFTABLE uniqueid="0x4E1" flags="0x30">
+  <XDFTABLE uniqueid="0x4E5" flags="0x30">
     <title>ff_dzw_rl_axis</title>
     <description>axis at CPU 0x5E2608 (file 0x1E2608), 8x1 u16. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; E1 (#34): the 8 column breakpoints of ff_dzw_map, eight of the twelve breakpoints of the stock KFZW rl axis 0x5C7758 (10.2..103.9 %) [100/4096 %] [ffcal001_rows.csv]</description>
     <CATEGORYMEM index="0" category="0x1"/>
@@ -51047,7 +51095,7 @@
       </MATH>
     </XDFAXIS>
   </XDFTABLE>
-  <XDFTABLE uniqueid="0x4E2" flags="0x30">
+  <XDFTABLE uniqueid="0x4E6" flags="0x30">
     <title>ff_fst_e_axis</title>
     <description>axis at CPU 0x5E261E (file 0x1E261E), 6x1 u8. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; E2 (#35): the 6 ROW breakpoints of ff_fst_map, ethanol volume percent. Shared with ff_fzwst_curve. 85 is a breakpoint because E85 is the calibration target; 0 must stay 0 so row 0 is the E0 row [%] [ffcal001_rows.csv]</description>
     <CATEGORYMEM index="0" category="0x1"/>
@@ -51095,7 +51143,7 @@
       </MATH>
     </XDFAXIS>
   </XDFTABLE>
-  <XDFTABLE uniqueid="0x4E3" flags="0x30">
+  <XDFTABLE uniqueid="0x4E7" flags="0x30">
     <title>ff_fst_tmst_axis</title>
     <description>axis at CPU 0x5E2624 (file 0x1E2624), 6x1 u8. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; E2 (#35): the 6 COLUMN breakpoints of ff_fst_map, in tmst counts of 0.75 degC with a -48 degC offset. Six of the twelve stock KFWKSTT breakpoints (0x5C6C62), so every cell lines up with a stock row: 24/44/64/91/117/184 = -30/-15/0/+20.25/+39.75/+90 degC (re/findings/start.md section 9.4) [tmst count] [ffcal001_rows.csv]</description>
     <CATEGORYMEM index="0" category="0x1"/>
@@ -51143,7 +51191,7 @@
       </MATH>
     </XDFAXIS>
   </XDFTABLE>
-  <XDFTABLE uniqueid="0x4E4" flags="0x30">
+  <XDFTABLE uniqueid="0x4E8" flags="0x30">
     <title>ff_fzwst_curve</title>
     <description>curve_1d at CPU 0x5E262A (file 0x1E262A), 6x1 s8. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; E2 (#35): start-ignition ADVANCE over ethanol %, on ff_fst_e_axis, in s8 counts. ALL ZERO as shipped. The knock retard is bypassed during the start (start.md section 5), so nothing downstream takes this back: stay inside +2..+4 degCA = +3..+5 counts [0.75 degCA] [ffcal001_rows.csv]</description>
     <CATEGORYMEM index="0" category="0x7"/>
@@ -51186,11 +51234,70 @@
       </MATH>
     </XDFAXIS>
   </XDFTABLE>
-  <XDFCONSTANT uniqueid="0x4E5" flags="0x0">
+  <XDFTABLE uniqueid="0x4E9" flags="0x30">
+    <title>ff_prail_curve</title>
+    <description>curve_1d at CPU 0x5E2638 (file 0x1E2638), 17x1 u16. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; E5 (#36): rail-pressure setpoint ADDER over ethanol %, 17 points 0..100 step 6.25, on the same grid as ff_F_curve. ALL ZERO as shipped, so the file is inert even with ff_prail_enable = 1; prail_curve[0] = 0 is what makes E0 bit-identical at 0x45845C. The adder goes in BEFORE the stock KLPRMAX ceiling (22000 = 110.0 bar) and the pump-volume rate limiter, so no value here can raise the rail past what the stock ECU already allows - the useful range is 0..3000 (0..15 bar), the headroom between KFPRSOLHOM's 19000 and KLPRMAX (re/findings/rail.md 12.1) [0.005 bar] [ffcal001_rows.csv]</description>
+    <CATEGORYMEM index="0" category="0x7"/>
+    <XDFAXIS id="x" uniqueid="0x0">
+      <indexcount>17</indexcount>
+      <datatype>0</datatype>
+      <unittype>0</unittype>
+      <DALINK index="0"/>
+      <embedinfo type="0"/>
+      <LABEL index="0" value="0"/>
+      <LABEL index="1" value="1"/>
+      <LABEL index="2" value="2"/>
+      <LABEL index="3" value="3"/>
+      <LABEL index="4" value="4"/>
+      <LABEL index="5" value="5"/>
+      <LABEL index="6" value="6"/>
+      <LABEL index="7" value="7"/>
+      <LABEL index="8" value="8"/>
+      <LABEL index="9" value="9"/>
+      <LABEL index="10" value="10"/>
+      <LABEL index="11" value="11"/>
+      <LABEL index="12" value="12"/>
+      <LABEL index="13" value="13"/>
+      <LABEL index="14" value="14"/>
+      <LABEL index="15" value="15"/>
+      <LABEL index="16" value="16"/>
+      <units>-</units>
+      <decimalpl>0</decimalpl>
+      <MATH equation="X">
+        <VAR id="X"/>
+      </MATH>
+    </XDFAXIS>
+    <XDFAXIS id="y" uniqueid="0x0">
+      <indexcount>1</indexcount>
+      <datatype>0</datatype>
+      <unittype>0</unittype>
+      <DALINK index="0"/>
+      <embedinfo type="0"/>
+      <LABEL index="0" value="0"/>
+      <units>-</units>
+      <decimalpl>0</decimalpl>
+      <MATH equation="X">
+        <VAR id="X"/>
+      </MATH>
+    </XDFAXIS>
+    <XDFAXIS id="z" uniqueid="0x0">
+      <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1E2638" mmedelementsizebits="16" mmedmajorstridebits="0" mmedminorstridebits="0" mmedrowcount="1" mmedcolcount="17"/>
+      <units>-</units>
+      <indexcount>17</indexcount>
+      <decimalpl>0</decimalpl>
+      <min>0</min>
+      <max>65535</max>
+      <outputtype>1</outputtype>
+      <MATH equation="X">
+        <VAR id="X"/>
+      </MATH>
+    </XDFAXIS>
+  </XDFTABLE>
+  <XDFCONSTANT uniqueid="0x4EA" flags="0x0">
     <title>ff_cal_crc</title>
-    <description>scalar at CPU 0x5E2630 (file 0x1E2630), 1x1 u16. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; FFCAL001 header: bit-complement of the 16-bit sum of bytes [0, length-2) [ffcal001_rows.csv]</description>
+    <description>scalar at CPU 0x5E265A (file 0x1E265A), 1x1 u16. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; FFCAL001 header: bit-complement of the 16-bit sum of bytes [0, length-2) [ffcal001_rows.csv]</description>
     <CATEGORYMEM index="0" category="0x5"/>
-    <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1E2630" mmedelementsizebits="16" mmedmajorstridebits="0" mmedminorstridebits="0"/>
+    <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1E265A" mmedelementsizebits="16" mmedmajorstridebits="0" mmedminorstridebits="0"/>
     <units>-</units>
     <decimalpl>0</decimalpl>
     <outputtype>1</outputtype>
