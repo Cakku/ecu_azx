@@ -345,6 +345,82 @@ Full derivation and evidence: `re/findings/ignition.md`.
   applies `KFDZK` (0x5D597E); with E85 it must never latch, so its latch bits
   0x7FD31B bits 0/1 are a second acceptance signal.
 
+#### Added 2026-09-17 (brief E1, issue #34) — implemented in `patches/ff_fuel`
+
+This section is now code: `patches/ff_fuel/src/ff_ign.c` (the producer) and
+the hand-written `ff_zw_hook` in `patches/ff_fuel/src/hooks.S` (the consumer),
+specified by `emu/models/flexfuel.py` and compared with it tick by tick in
+`tests/test_ff_ign_patch.py` (51 tests). The bench and road procedure is
+`patches/ff_fuel/test/procedure_e1.md`.
+
+**Formats, all decided by the chain this sits in.**
+
+| Quantity | Format | Where |
+|---|---|---|
+| `f_zw(E)` | u8, **1/256**, 17 points over E 0..100 step 6.25 % | `ff_fzw_curve`, FFCAL001 +0x42 |
+| `dzw_E(nmot, rl)` | **8 × 8 s8, 0.75 °CA per count** | `ff_dzw_map`, FFCAL001 +0x54 |
+| its axes | 8 × u16 in `nmot_w` / `rl_w` units | FFCAL001 +0xE8 / +0xF8 |
+| `dzw_e` (the result) | **s8, 0.75 °CA**, positive = advance | `ff_state` +0x29 |
+| the ceiling | `ff_dzw_max` = 8 counts = 6.00 °CA, code-clamped to 16 | FFCAL001 +0xE7 |
+
+`dzw_e = clamp(round(f_zw × dzw_E / 256), ±min(ff_dzw_max, 16))`, computed in
+the 10 ms tick and consumed by ten instructions at 0x41D40C.
+
+**The axes are the stock ones.** `ff_dzw_nmot_axis` is every other breakpoint
+of `KFZW`'s nmot axis 0x5C7736 and `ff_dzw_rl_axis` is eight of the twelve of
+its rl axis 0x5C7758, so a cell lines up with a `KFZW` row and column and the
+`KFZWOP - KFZW` budget can be read against it directly. This section proposed
+"+0..+2 °, up to +6 at knock-limited high-load cells"; evaluated on that grid
+the ECU's own budget is **0 or negative in 26 of the 64 cells** (at low load
+`KFZW` is already at or past the modelled optimum, so there is nothing to win
+there) and 8-14 counts at 72-104 % load above 2900 rpm. The table is in
+`procedure_e1.md` §B4.
+
+**Deviation 1 — `f_zw` saturates at 255/256, not at 1.** The declared format
+is u8 × 1/256, and 256 is not a u8. The shipped curve is a ramp from 0 at E0
+to **255 at E50**, flat above; 255/256 = 0.996, i.e. 0.4 % low, which at whole
+0.75 ° counts is 0.003 counts and disappears in the rounding.
+
+**Deviation 2 — the map is read with `rl_w` (0x7FEFB2), not 0x7FED38.** Brief
+E1's text named 0x7FED38, which `re/symbols.csv` calls `rl_for_fuel`: the
+relative charge `gk_rk` uses, *selected from* `rl_w` at 0x418A3C
+(`start.md` §3.3). `rl_w` **is** the KFZW column-axis input (`lhz -0x103E(r13)`
+at 0x41D358, `ignition.md` §2), and aligning `ff_dzw_map`'s columns with
+`KFZW`'s is the whole reason for reusing its breakpoints. Both cells are in
+`logging/sessions/ff_fuel.json` so a log can tell them apart.
+
+**Deviation 3 — no new RAM, and the offset lives in the checksummed core.**
+`dzw_e` and `fzw_q8` took the two fields D1 reserved at `ff_state` +0x29 and
++0x2A. They are *control* values written only by the periodic tick, so the
+core is where they belong: a corrupted `dzw_e` makes the next activation
+re-initialise the block rather than leaving a stale advance in the ignition
+path. The consumer checks only the block's magic, exactly as `ff_rk_scale`
+does; what bounds it is the producing clamp, the stock s8 clamp at 0x41D410
+and the -54..+58.5 ° output clamp.
+
+**The #37 rule is structural, not a branch.** `ff_zw_update()` is called from
+`ff_finish()`, which runs on *every* path out of `ff_tick()`, so the activation
+on which the mode leaves OK/HOLD/OVERRIDE is already the activation on which
+`dzw_e` is 0 — no hold, no ramp, while the fuel factor keeps its 60 s hold in
+the same activation. HOLD keeps computing from the frozen `e_filt`, so the
+offset freezes rather than dropping; that distinction is step 6 of the fault
+matrix in `procedure_e1.md` §B2.
+
+**It ships disabled, three times over:** `ff_zw_enable` = 0, `ff_dzw_map` all
+zero, and `f_zw(E0)` = 0 (`ffcal001.py` refuses a curve that does not start at
+0). `tests/test_ff_ign_patch.py` runs task 41's `bl 0x41D38C` to completion on
+the stock and the patched image, with the feature off and with it on at the
+neutral map, and finds `zwgru` bit-identical and no SRAM byte moved outside
+the patch's own block.
+
+**Diagnostics: VCDS measuring block 108** (TKMWL ids 2192-2195) — `f_zw` in %,
+`dzw_e` in °CA, the worst of the six `dwkrz` bytes, and `0x7FD31B & 3`. The
+last two are the two acceptance signals this section names, so the whole
+calibration criterion is readable in one group.
+
+**Still open (the road half of #34):** every cell of `ff_dzw_map` is 0 and only
+a car with real fuel can fill them in. `procedure_e1.md` §B3 is the recipe.
+
 ### 3.5 Start and warm-up
 Ethanol needs roughly twice the cranking fuel around 10 C and barely ignites
 below ~10 C without heating. Scale the start quantity and the afterstart /
@@ -678,6 +754,39 @@ Differences from the table above:
 Descriptor rows for `re/calibration_draft.csv` are in
 `patches/ff_fuel/ffcal001_rows.csv` (D1 must not write that file while brief D3
 owns it); the integrator appends them and re-runs `tools/draft_to_xdf.py`.
+
+#### Added 2026-09-17 (brief E1, issue #34) — FFCAL001 **v2**, 266 bytes
+
+E1 **appended and moved nothing**. Everything up to +0xE5 is exactly where v1
+put it; the four new parameters start at +0xE6, which is where v1's checksum
+used to be, and the checksum followed the length to +0x108.
+
+| Off | Name | Type | Shipped | Unit |
+|---|---|---|---|---|
+| +E6 | `ff_zw_enable` | u8 | **0** | 1 applies the ignition blend |
+| +E7 | `ff_dzw_max` | u8 | 8 | 0.75 °CA counts; code clamps to 16 |
+| +E8 | `ff_dzw_nmot_axis[8]` | u16 | KFZW rows | `nmot_w`, 520…6520 rpm |
+| +F8 | `ff_dzw_rl_axis[8]` | u16 | KFZW cols | `rl_w`, 10.2…103.9 % |
+
+and two tables this section listed as reserved are now live: `ff_fzw_curve`
+(+0x42) carries the §3.4 ramp instead of zeros, and `ff_dzw_map` (+0x54) is
+read by `ff_ign.c` — it stays **all zero**, which is what keeps the shipped
+file inert even if `ff_zw_enable` is set to 1. `ff_fst_map` and `ff_prail_add`
+are still reservations, for briefs E2 and E5.
+
+**The version is now checked strictly.** `ff_cal_ok()` accepts **version 2
+only**, so a v1 block flashed under a v2 blob reads as corrupt and forces
+mode 0: `F = 1024`, no CAN, `dzw_e = 0`. That is the safe direction and it is
+the rule every later version bump follows — E2 will make it 3, E5 4.
+
+`ffcal001.py` refuses to *build* a block that would be unsafe, rather than
+leaving it to the ECU: `ff_F_curve[0] != 1024`, `ff_fzw_curve[0] != 0`, either
+curve non-monotonic, an axis that is not strictly increasing (the breakpoint
+search assumes it), or an `ff_dzw_max` above the code ceiling.
+
+`ff_dzw_map` also gains real **axes** in the descriptor rows, so it goes into
+the XDF as a `map_2d` with its own breakpoints rather than as a bare
+`map_2d_data` block.
 
 ## 5. RAM
 

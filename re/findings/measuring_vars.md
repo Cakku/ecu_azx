@@ -412,7 +412,7 @@ whole 25-byte response belongs to the patch: four flex-fuel fields followed by
 four `(0x25, 0, 0)` "not implemented" triples.
 
 108 and 109 are left free on purpose, for the ignition and rail blends of
-docs/05 §3.4 / §3.6.
+docs/05 §3.4 / §3.6. **108 is TAKEN as of 2026-09-17 — see §8.4.**
 
 The four words, all currently `00 00`:
 
@@ -459,3 +459,88 @@ Only formulas the logger can decode were used
 
 Every one of them is checked on the applied image in
 `tests/test_ff_diag_patch.py`.
+
+## 8.4 The ignition blend: ids 2192-2195 and group 108 (E1, 2026-09-17, #34)
+
+Brief **E1** took the second of the three slots §8.2 reserved. Re-checked
+before taking it, as the 2026-09-17 rules require:
+
+```bash
+./.venv/bin/python3 tools/measuring_vars.py data/passat_azx_ori.bin --free
+#   spare variable ids (stub handler AND named by no group): 1507 of 2200
+#   free groups ...: [17, 19, 25, 29, 40, 45, 48, 49, 58, 59, 65, 67, 69,
+#                     108, 109, 111]
+#   group 108 (0x6C) words: 0x5c55f0, 0x5c57ee, 0x5c59ec, 0x5c5bea
+```
+
+### The ids: 2192-2195, the four entries below D2's
+
+Table words **0x0A7898-0x0A78A7**, stock content `00 03 8E C4` four times, so
+the edit is again one contiguous 16-byte range and it sits immediately below
+D2's. Taking them downwards from the end of the table keeps every future
+brief's edit contiguous with the last one.
+
+| id | handler | field | emits | reads |
+|---|---|---|---|---|
+| 2192 | `ff_diag_fzw_pct` | 1 | `(0x21, A=0x64, B = f_zw %)` | `ff_state.fzw_q8` |
+| 2193 | `ff_diag_dzw` | 2 | `(0x22, A=0x4B, B = dzw_e + 0x80)` | `ff_state.dzw_e` |
+| 2194 | `ff_diag_dwkrz` | 3 | `(0x22, A=0x4B, B = max + 0x80)` | **stock** 0x7FCE57-0x7FCE5C |
+| 2195 | `ff_diag_zwlatch` | 4 | `(0x36, A=0, B = latch & 3)` | **stock** 0x7FD31B |
+
+The three negative searches, all reproduced in
+`tests/test_ff_ign_patch.py::TestStockFacts`:
+
+* `find_abs_refs.resolve()` over the whole image finds **no** `lis` + D-form
+  pair resolving into 0x0A7898-0x0A78A7;
+* `find_branch_refs.scan()` finds no branch and no stored pointer to any of
+  the four words, nor to any of the four group words;
+* the group table names no id above 1746, so nothing can reach 2192-2195
+  except through our own edit.
+
+### The group: 108 (0x6C)
+
+Its `+0x7F` echo, **235**, is empty too (all eight words `00 00`), so the whole
+25-byte answer to `21 6C` belongs to the patch: four fields followed by four
+`(0x25, 0, 0)` triples. Words, all inside the guarded stock calibration
+(file 0x1C0000-0x1DFFFF), hence `"calibration_edit": true`:
+
+| field | CPU | file |
+|---|---|---|
+| 1 | 0x5C55F0 | 0x1C55F0 |
+| 2 | 0x5C57EE | 0x1C57EE |
+| 3 | 0x5C59EC | 0x1C59EC |
+| 4 | 0x5C5BEA | 0x1C5BEA |
+
+**109 is still free, for brief E5's rail-pressure adder, and 69 for E2.**
+
+### Formula 0x22 with A = 0x4B is copied, not chosen
+
+§8.3 used only formulas `logging/med9kwp/vag_formulas.py` can decode. Fields 2
+and 3 carry an ignition angle, and the honest encoding for that is not a
+count: the **six stock per-cylinder knock-retard handlers** at
+0x039CD0-0x039D48 already emit exactly
+
+```
+00039CD0  38 60 00 22  li    r3,0x22          ; the formula
+00039CD4  88 AD CE 67  lbz   r5,-0x3199(r13)  ; dwkrz[0] = 0x7FCE57
+00039CD8  38 80 00 4B  li    r4,0x4b          ; A = 75
+00039CDC  38 A5 00 80  addi  r5,r5,0x80       ; B = byte + 128
+```
+
+for the very array field 3 reports, so `0.01 × 75 × (B − 128)` = **0.75 °CA
+per count** — §6's fixed point, and the same scaling VCDS groups 020-024 show.
+Brief E1's text offered formula 0x36 (a raw signed count) as a fallback if the
+angle formula of measuring id 9 (0x1B, A = 0x4B) could not be decoded, which
+it cannot; 0x22 was used instead because it *is* decodable, it is what the
+stock handlers for this exact quantity use, and it saves the tester converting
+by hand. **Caveat:** `vag_formulas.py`'s community table labels 0x22 "kW". The
+arithmetic is right and the unit string is the published table's, not the
+patch's; nothing in `logging/` was changed for this (brief E4 owns it).
+
+Field 4 uses **0x36** with A = 0, so the reading is the latch bits 0..3 as a
+plain count: 0 is the only acceptable value on E85.
+
+Fields 1 and 2 check the state-block header and answer `(0x25, 0, 0)` when it
+does not hold, as D2's do. Fields 3 and 4 **do not**: they report stock cells
+that are valid whether or not our block is, and a tester chasing knock has to
+be able to see them.
