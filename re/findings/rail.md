@@ -785,6 +785,89 @@ is the map the engine runs on in every normal driving condition; it is a bare
   no code at all; re-purposing its temperature fade curve for E% costs one
   `lbz` redirect.
 
+#### Added 2026-09-17 (E5, #36): the insertion instruction is **0x45845C**, and what it costs
+
+Brief E5 chose the code route rather than the `KFPRSOLOFF` re-purposing above,
+because the offset map's fade curve is a *temperature* fade that the warm-up
+strategy still needs, and because an E-dependent adder has to be switchable
+from one calibration byte. The instruction is
+
+```
+0045845C  B3 CD 32 00  sth  r30,0x3200(r13)      ; 0x8031F0 = prsoll_raw
+```
+
+**the one and only store of `prsoll_raw`**, and it sits exactly where §3.2 ends
+and §3.3 begins: after the map bank has produced a value and before `KLPRMAX`,
+`PRSOLMN` and the pump-volume rate limiter. All three keep acting on the raised
+value, because the clamp *re-reads the cell from memory* four instructions
+later (`lhz r30,0x3200(r13)` at 0x458480) rather than re-using the register.
+That is what makes an adder at this word safe: the ceiling of 22000 = 110 bar
+cannot be exceeded by any calibration. **VERIFIED-STATIC**, `blobdis.py
+--file-off 0x25422C --addr 0x45822C`.
+
+**Every path into and past the word** (`tools/find_branch_refs.py
+data/passat_azx_ori.bin 0x45845C` — three branches, no pointer word):
+
+| From | Kind | Path of §3.2 | r30 at the word |
+|---|---|---|---|
+| 0x458260 | `b` | `CWPRSOL & 1`: the fixed value `u16 @ 0x5D5574` | `lhz` — zero-extended |
+| 0x4583B4 | `b` | `KFPRSOLHKS` **+ `KFPRSOLOFF`** | clamped to 0..0xFFFF at 0x458390-0x4583B0 |
+| 0x45843C | `b` | `KFPRSOLHOM` **+ `KFPRSOLOFF`** | clamped to 0..0xFFFF at 0x458418-0x458438 |
+| fall-through 0x458458 | — | `KFPRSOLKH` / `KFPRSOLHMM` / `KFPRSOLHKS` / `KFPRSOLHOM` without the offset (each `b 0x458458` from 0x4582C8 / 0x458300 / 0x4583D0 / 0x4583F4) | `interp_2d_u16`'s return, and its last instruction is `clrlwi r3,r8,0x10` (0x40C4C8) |
+
+So **all six map-selection paths of §3.2 pass through this word**, and on every
+one of them `r30` is already a clean 16-bit value — three independent
+constructions, which is why E5's stub needs no mask before it adds.
+
+**One path does not reach the word at all**, and that is the case brief E2's
+`start.md` §9 warns about (a stock branch *past* a hooked store, rather than
+into it):
+
+```
+00458264  lbz     r12,-0x2fa3(r13)   ; 0x7FD04D
+00458268  clrlwi. r12,r12,0x1f
+0045826C  bne     0x458460           ; bit 0 set -> SKIP the store entirely
+```
+
+`0x7FD04D & 1` is §3.2's "keep the previous `prsoll_raw`" path. It jumps to
+0x458460, i.e. **past** 0x45845C, so the stub does not run and the cell keeps
+whatever it held — which already includes the previous activation's adder. The
+behaviour is therefore consistent by construction, and no gate is needed in the
+stub. (Contrast E2's 0x41A680, where the early-out jumped *into* the hooked
+store and forced a `B_stend` test inside the stub.)
+
+**Registers, LR and CR at the word** — all **VERIFIED-STATIC** from the
+disassembly of 0x45822C-0x458734:
+
+* **live**: `r30` (the value), `r28` (= 0xFFFF, set once at 0x458244/0x45824C),
+  `r26` (`CWPRSOL`), `r27`, `r1`. The stub writes none of them.
+* **dead**: `r0`, `r11`, `r12`. `r11` was the frame pointer the save millicode
+  used at 0x45822C and is next *written* at 0x4584A0; `r12` is next written at
+  0x4584F8; neither is read in between. `r30` itself is dead after the store
+  (0x458480 reloads it from the cell), but the stub leaves it alone anyway.
+* **LR is dead.** The prologue is `addi r11,r1,0` / `stwu r1,-0x28(r1)` /
+  `mflr r0` / `bl 0xB8228`, and 0xB8228 is the EABI `_savegpr_25` millicode
+  whose tail at **0xB8244** is `stw r0,4(r11)` — LR is already in the caller's
+  frame. The epilogue at 0x458730 rebuilds `r11` and calls `_restgpr_25_x`
+  (0xB81AC), which restores it. A `bl` at 0x45845C therefore clobbers a value
+  nobody reads again.
+* **CR0 is dead.** There is no conditional branch between 0x458460 and
+  0x458488, where `cmpw r3,r30` writes CR0 before the `bgt` at 0x45848C reads
+  it — and `bl 0x40F600` at 0x458478 would have clobbered it in any case. CTR
+  and XER are untouched.
+
+**The task.** `hdrpsol_main`'s only caller is `bl` at **0x45CC08**, inside task
+set A's **20 ms** task 0x45CAC4 (id 23) — §7 and `scheduler.md` §11.8. The
+producer that writes `prail_add` is `ff_fuel`'s 10 ms tick hook at 0x432940, in
+set A's task id 19: a *different* ERCOSEK task, which is why the stub checks
+the state-block magic instead of relying on ordering.
+
+**The word is in the on-chip flash** 0x404000-0x47FFFF, so it carries
+`"onchip_edit": true` and has **no external-flash alternative**: `hdrpsol_main`
+is the single writer of `prsoll_raw` in the running engine (the only other
+store, 0x132300 in `prsoll_default_init`, is a one-shot initialiser — §11.8),
+and it lives entirely on-chip.
+
 ### 12.2 The real constraint is the pump, not the map
 
 `0x8031F6` (spare pump volume) and `0x80316E` (MSV volume request, clamped at
@@ -803,6 +886,22 @@ limit for the window is wanted, the clean insertion point is the min-chain at
 `0x803070` and feeds the whole charge-limit arbitration — one extra `min()`
 there propagates to the throttle exactly the way the stock protection limits
 do, with no new path and no DTC.
+
+> **Added 2026-09-17 (E3, #41): the other four inputs of that min-chain are
+> now named, and they are almost all switched off.** `0x80234C` comes from
+> `rl_limit_charge_protect` 0x0FBE74 and `0x802358` / `0x802360` / `0x80235E`
+> from the previously unidentified **`rl_limit_rail_and_speed` 0x0FC250**.
+> In this dataset `cand_KLRLMXMI` (0x5D7E3A), `cand_KFRLMXBTS` (0x5D7DC2),
+> `cand_KFRLMXBTS2` (0x5D7E08) and `cand_KLRLMXN` (0x5D7E52) are **all
+> 0xFFFF**, the code word `cand_CWRLMXBTS` (0x5D7E5E) is 0, `cand_KFFRLMXN`
+> is all 128 and `cand_KLFRLMXT` all 255, and the rail-pressure limit
+> `0x80235E` is armed only below `cand_TMRLMXPR` = −20.25 °C. The **one**
+> calibrated limiter is `cand_KLRLMXNRED` (0x5D7EAE): 100 % of charge up to
+> 3520 rpm, then 71 / 60 / 55 / 52 / 50 % at 4000 / 4520 / 5000 / 5520 /
+> 6520 rpm, armed by the debounced flag 0x7FEA84. So the min-chain has room
+> for an extra `min()`, but a flex-fuel run that arms 0x7FEA84 loses half its
+> charge above 6000 rpm — log 0x802358 and 0x80235A.
+> `re/findings/calibration_names.md` §9.3.
 
 ### 12.4 Watch list
 
@@ -830,7 +929,7 @@ do, with no new path and no DTC.
 | Absolute meaning of VAG display format 0x53 (would confirm 0.005 bar/LSB from outside the image) | open — one VCDS log of group 106 against a known rail pressure settles it |
 | The period of the on-chip task at 0x45CAC4. B1 has it as 1000 ms (HYPOTHESIS); the entire rail-pressure controller, `%AWEA`'s angle maps and `rkti_pre` live in it, which a 1 Hz raster cannot support | **SETTLED 2026-09-16 (C4, #44): 20 ms**, VERIFIED-STATIC from the activation chain (alarm 1 at 10 ms -> task 0x4328E4 -> the /2 divider 0x40BEF0) and VERIFIED-DYNAMIC from `emu/os_clock.py`. See §7 and `scheduler.md` §11 |
 | `0x7FEA48` / `0x5D3CDC = 2600`: the sense of the 13 bar gate on the window model, and whether the angle clamp is live in normal operation | **SETTLED — see §14.** The gate is `prist > 13.0 bar`; in normal running the angle clamp, the driver cut-off and the charge limit are all disarmed |
-| Percent scaling of the u8 `rl` (0x7FEF74) that indexes `KFWBHO1SW`; the axis tops out at 107 counts | **SETTLED 2026-09-16 (D3, #41): 100/128 % per LSB = 0.78125 %**, so `axis_awea_rl` runs 10.2 … 83.6 %. VERIFIED-STATIC: `SRL11OPUW` (0x5CA3E6, the u8 load axis of `KFZWOP`) and `SRL12ZUUW` (0x5C775A, the u16 load axis of `KFZW`) are the same physical breakpoints, and the u8 counts are exactly the u16 counts divided by 32 (416/32 = 13 … 4256/32 = 133), so the u8 is `rl_w >> 5` and 1 LSB = 32 × 100/4096. Note that this is **not** what the VCDS display formula 0x21 with A = 133 would give (`measuring_vars.md` §7.4 assumed 133 counts = 100 %, this makes it 103.9 %); the internal grid is the evidence about the ECU, the display formula is still COMMUNITY. `re/findings/calibration_names.md` §2.1 |
+| Percent scaling of the u8 `rl` (0x7FEF74) that indexes `KFWBHO1SW`; the axis tops out at 107 counts | **SETTLED 2026-09-16 (D3, #41): 100/128 % per LSB = 0.78125 %**, so `axis_awea_rl` runs 10.2 … 83.6 %. VERIFIED-STATIC: `SRL11OPUW` (0x5CA3E6, the u8 load axis of `KFZWOP`) and `SRL12ZUUW` (0x5C775A, the u16 load axis of `KFZW`) are the same physical breakpoints, and the u8 counts are exactly the u16 counts divided by 32 (416/32 = 13 … 4256/32 = 133), so the u8 is `rl_w >> 5` and 1 LSB = 32 × 100/4096. **Confirmed outright 2026-09-17 (E3, #41): the shift is in the image** — `rlwinm r6,r5,0x1b,0x15,0x1f` at 0x419280 followed by `stb r6,-0x107c(r13)`, with the clamp `cmplwi r12,0x1fe0` (255 × 32) at 0x41926C — and the VCDS side is settled in the emulator: the id 2 handler emits the raw byte unchanged with A = 133, so A is a tester-side normalisation and never contradicted the internal LSB. `measuring_vars.md` §7.5, `calibration_names.md` §2.1 |
 | Which FR name belongs to which `KFPRSOL*` variant (the mode bits of 0x7FB69A were not decoded) | HYPOTHESIS — the addresses and the selection logic are VERIFIED-STATIC, the names are guesses |
 | The DTC number behind `0x80201E` bits 2/4/6 | open — the fault-path manager (0x4067FC family) was not followed |
 | Stock WOT `ti` (needed to turn §9.5 into a hard margin) | open — one logged WOT pull with VCDS group 002 |

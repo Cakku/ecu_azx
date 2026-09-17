@@ -60,10 +60,14 @@ which is this, from Python -- also what `tests/test_med9kwp.py` does::
 from __future__ import annotations
 
 import argparse
+import collections
 import contextlib
+import json
+import math
 import os
 import struct
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -89,6 +93,16 @@ SEC_LFSR_ROUNDS = 0x7FB770
 SEC_RETRY_FLAG = 0x7FB780
 H_SESSION_SET = 0x13CEE4             # kwp_session_set: stb r3,0x803D3E
 H_DDLI_WIPE = 0x35034                # kwp_sid_2C_h2: wipes all 10 dynamic ids
+#: `ddli_init` (kwp.md 4.1, dated note of 2026-09-17).  It fills the ten
+#: entry-array pointers at `ddli_def_table+4`: id 0xF0 -> 0x80366C (0xA0 B =
+#: 20 entries), ids 0xF1..0xF9 -> 0x80370C + (n-1)*0x18 (3 entries each).
+#: Nothing else in the image writes those words, `kwp_sid_2C_h2` clears only
+#: the count byte, and the firmware reaches this routine through the
+#: function-pointer table at 0x0B1B88 -- which the emulator never runs.  Left
+#: unrun, every pointer is 0, so all ten ids share one entry array at address
+#: 0 and the second dynamic id defined silently overwrites the first one's
+#: entries.  The simulator therefore calls the real routine at power-on.
+H_DDLI_INIT = 0x12E39C
 
 # scratch inside the external SRAM, above everything the application uses
 IO_STRUCT = 0x807800
@@ -98,6 +112,27 @@ IO_BUFFER_MAX = 0x100
 #: patches/ff_fuel's calibration block; its magic is how a patched image
 #: is recognised (patches/ff_fuel/src/ff_state.h).
 FFCAL001_BASE = 0x5E2510
+
+#: what both 10 ms background tasks call to drain the EEP_CONF request queue
+#: (re/findings/eeprom.md section 8.4)
+NVM_PUMP_WRAPPER = 0x061944
+#: the relative fuel mass the segment stub scales (injection.md section 6.1)
+RK_FUEL_MASS = 0x803038
+#: what the stock word at 0x42247C branches to, and what ff_fuel_rk_hook
+#: tail-branches to once it has scaled `rk` (injection.md section 6.2).  A
+#: STOCK baseline run calls this directly, so the two runs of the E0
+#: equivalence comparison execute the same stock code.
+RKSPLIT = 0x41C3A0
+
+#: Stack pointer for the hook calls.  `Med9Emu.call()` parks r1 at the boot
+#: stack top 0x7FEFFC, and a C function's frame there runs straight over
+#: application variables -- `zwist_display_b1` (0x7FEF87) is 0x75 bytes below
+#: it, and a stock-vs-patched comparison then differs by the frame rather than
+#: by the patch.  On the real part every task has its own stack; the OS task
+#: stacks are 0x7FF3C0-0x7FF76F (`re/findings/scheduler.md`, and the
+#: patches/ff_fuel README puts its RAM block deliberately above them), so the
+#: runner uses the top of that region.
+TASK_STACK_TOP = 0x7FF768
 
 #: wire sub-function -> (internal session number, required security state)
 SESSION_MAP = {
@@ -163,10 +198,23 @@ class AnimatedRam:
     live_task_set: str = "B"
     #: static values written once at power-on: {address: (bytes)}
     statics: dict = field(default_factory=dict)
+    #: number of cylinders, for the segment rate the `rk` hook is called at
+    cylinders: int = 6
+    #: False once a :class:`PatchRunner` owns 0x7FFB00, so the stand-in stops
+    #: writing a block the patch's own hooks are maintaining
+    owns_patch_ram: bool = True
 
     #: the reference model, created lazily so a stock image never builds one
     _ff: object = None
     _ff_ticks: int = 0
+    #: {address: the bytes this stand-in last wrote there}, for the cells that
+    #: step aside once something else writes them (see `apply`)
+    _owned: dict = field(default_factory=dict)
+
+    def _own(self, emu, addr: int, size: int) -> bool:
+        """True while `addr` still holds what this stand-in last put there."""
+        last = self._owned.get(addr)
+        return last is None or emu.read(addr, size) == last
 
     def flexfuel_block(self, t: float) -> bytes:
         """`struct ff_state` as the patch would have written it by time `t`."""
@@ -189,6 +237,44 @@ class AnimatedRam:
         tri = 2 * phase if phase < 0.5 else 2 * (1 - phase)
         return self.idle_rpm + (self.peak_rpm - self.idle_rpm) * tri
 
+    def load_pct(self, t: float) -> float:
+        """rl, 18 % at idle to 90 % at peak -- the ramp everything follows."""
+        rpm = self.rpm(t)
+        return 18.0 + 72.0 * (rpm - self.idle_rpm) / (self.peak_rpm - self.idle_rpm)
+
+    def rk_base(self, t: float) -> int:
+        """`rk` (0x803038) as the stock segment task would have produced it.
+
+        The stub at 0x42247C scales this cell **in place**, so a simulator
+        that calls the hook more than once has to re-produce the upstream
+        value first or `rk` would compound.  It is a plain function of load,
+        which is all the E0-equivalence comparison of `procedure.md` section 4
+        needs: at E0 the hook returns without writing, so the stock and the
+        patched run must show the identical trace.
+        """
+        return min(int(512 + 24.0 * self.load_pct(t)), 0xFFFF)
+
+    def dwkrz(self, t: float) -> bytes:
+        """Six per-cylinder knock retards, 0x7FCE57..0x7FCE5C.
+
+        `re/findings/ignition.md` section 5: the array is **s8 and <= 0** --
+        the knock controller only ever takes advance away.  A constant
+        positive value (which is what this file shipped until 2026-09-17)
+        makes a `21 6C` rehearsal read something the real controller cannot
+        produce, and `logging/sessions/ff_fuel.json` check 8a is exactly about
+        these bytes.  Cylinders 2 and 5 are the two that knock first here, and
+        the retard grows with load and decays between events, which is the
+        shape `wkrm` (0x7FCE76, the mean) is debounced from.
+        """
+        load = self.load_pct(t)
+        depth = max((load - 45.0) / 45.0, 0.0)           # nothing below 45 %
+        wobble = 0.5 + 0.5 * math.sin(2.0 * math.pi * t / 3.0)
+        counts = []
+        for cyl, weight in enumerate((0.2, 1.0, 0.4, 0.0, 0.8, 0.3)):
+            v = -int(round(8.0 * depth * weight * wobble))
+            counts.append(max(v, -32) & 0xFF)            # -24 degCA at worst
+        return bytes(counts)
+
     def apply(self, emu, t: float) -> None:
         rpm = self.rpm(t)
         # nmot_w, u16, 0.25 rpm/LSB (re/findings/scheduler.md, #44)
@@ -196,8 +282,26 @@ class AnimatedRam:
         # the measuring-block display byte for id 1: 40 rpm per count
         emu.write(0x7FCE95, bytes([min(int(rpm / 40), 0xFF)]))
         # rl, u16, 100/4096 % per LSB: follows the ramp between 18 % and 90 %
-        load = 18.0 + 72.0 * (rpm - self.idle_rpm) / (self.peak_rpm - self.idle_rpm)
+        load = self.load_pct(t)
         emu.write(0x7FED38, struct.pack(">H", int(load * 4096 / 100)))
+        # rl_w (0x7FEFB2), the KFZW column axis and ff_dzw_map's x input
+        emu.write(0x7FEFB2, struct.pack(">H", int(load * 4096 / 100)))
+        # rk (0x803038): re-produced every activation, see rk_base()
+        emu.write(0x803038, struct.pack(">H", self.rk_base(t)))
+        # dwkrz (0x7FCE57..5C) and its mean wkrm (0x7FCE76), both s8 and <= 0.
+        # These two yield to anyone who writes them: a test or a bench operator
+        # poking a knock pattern into the simulator must not have it wiped out
+        # by the next activation, which is how they behaved when they were
+        # static values rather than an animation.
+        knock = self.dwkrz(t)
+        signed = [b - 256 if b & 0x80 else b for b in knock]
+        mean = bytes([int(sum(signed) / len(signed)) & 0xFF])
+        if self._own(emu, 0x7FCE57, 6):
+            emu.write(0x7FCE57, knock)
+            self._owned[0x7FCE57] = knock
+        if self._own(emu, 0x7FCE76, 1):
+            emu.write(0x7FCE76, mean)
+            self._owned[0x7FCE76] = mean
         # tmot, u8, T = 0.75*x - 48 degC: 20 degC warming to 90 degC over 120 s
         degc = 20.0 + 70.0 * min(t / 120.0, 1.0)
         emu.write(0x8021EF, bytes([int((degc + 48.0) / 0.75) & 0xFF]))
@@ -216,6 +320,8 @@ class AnimatedRam:
         # a set-B task, so with set A live it never runs and the block stays
         # untouched -- the case the bench procedure has to be able to tell from
         # a failed flash.
+        if not self.owns_patch_ram:
+            return                      # a PatchRunner keeps 0x7FFB00 itself
         if self.flexfuel:
             emu.write(0x7FFB00, self.flexfuel_block(t if set_b else 0.0))
         else:
@@ -236,13 +342,14 @@ DEFAULT_STATICS = {
     0x8031DA: struct.pack(">H", 12000),    # prist, 0.005 bar  -> 60 bar
     0x8031F4: struct.pack(">H", 12200),    # prsoll            -> 61 bar
     0x7FEF87: bytes([0x14]),               # zw, s8, 0.75 deg  -> 15 deg
-    0x7FCE57: bytes([0, 1, 0, 2, 0, 1]),   # dwkrz, six cylinders
+    # dwkrz (0x7FCE57) is ANIMATED now, not static: it used to sit at
+    # {0,1,0,2,0,1}, and +2 is a value the knock controller cannot produce
+    # (ignition.md section 5: the array is s8 and <= 0).  AnimatedRam.dwkrz().
     0x803088: struct.pack(">H", 0x0140),   # dwi
     0x80307E: struct.pack(">H", 0x00C8),   # wbho1s
     0x80316E: struct.pack(">H", 0x0200),
     0x8031F6: struct.pack(">H", 0x0010),
     0x80235A: struct.pack(">H", 0x0080),
-    0x803038: struct.pack(">H", 0x0400),   # rk
     0x80302C: struct.pack(">H", 1024),     # ksta_kstaa, 1024 = 1.0
     0x802B08: struct.pack(">H", 0x0003),   # CAN 0x1A0 state word, module B
     0x802B72: struct.pack(">H", 0x0003),   # CAN 0x0C2 state word, module C
@@ -254,6 +361,208 @@ DEFAULT_STATICS = {
 
 
 # ---------------------------------------------------------------------------
+# running the patch: a simulated clock that drives the real hooks
+# ---------------------------------------------------------------------------
+def apply_patch_to_temp(patch_dir: str, dump_path: str = DUMP) -> str:
+    """Apply a patch directory to a temporary image and return its path.
+
+    `tools/patch_apply.py`'s checked-in `changes` are complete, so this needs
+    no cross compiler (`docs/03_tooling.md` section 5).
+    """
+    sys.path.insert(0, os.path.join(REPO, "tools"))
+    import patch_apply                                   # noqa: E402
+
+    import pathlib
+    data, report, _warnings = patch_apply.apply_patch(
+        pathlib.Path(dump_path), pathlib.Path(patch_dir))
+    if not report["ok"]:
+        raise RuntimeError(f"{patch_dir} did not apply: {report['issues']}")
+    out = os.path.join(tempfile.mkdtemp(prefix="ecu_sim_"),
+                       os.path.basename(os.path.normpath(patch_dir)) + ".bin")
+    with open(out, "wb") as fh:
+        fh.write(bytes(data))
+    return out
+
+
+class PatchRunner:
+    """Calls `patches/ff_fuel`'s own hooks on the simulator's `Med9Emu`.
+
+    Time here is **simulated**.  `advance(t)` runs whatever activations the
+    patch would have had between the last call and simulated second `t`:
+
+    * the 10 ms raster hook of the live task set, `1000 / ff_tick_ms` times
+      per simulated second (100, `re/findings/scheduler.md` section 11);
+    * the segment hook at 0x42247C once per simulated ignition segment, whose
+      rate follows the animated rpm (`rpm * cylinders / 120` for a four-stroke
+      engine), with `rk` re-produced upstream first (:meth:`AnimatedRam.rk_base`);
+    * `nvm_pump_wrapper` (0x061944) once per 10 ms activation, because that is
+      where the two stock background tasks call it (`eeprom.md` section 8.4)
+      and without it a queued EEPROM commit never completes.
+
+    The ignition stub at 0x41D40C is **not** called: it is a mid-function
+    trampoline that returns into `zwgru_build`, so calling it in isolation
+    would execute that function's tail with register state nobody produced.
+    `ff_dzw_e` and `ff_fzw_q8` are computed by the 10 ms producer anyway, so
+    measuring block 108 is live without it.
+    """
+
+    #: how much simulated time one `advance()` may make up in one go, so a
+    #: slow host cannot stall the CAN bus while it catches up
+    MAX_CATCHUP_S = 0.5
+
+    #: and how much WALL time it may spend doing so.  This is the one that
+    #: matters: the simulator answers TP2.0 from the same thread, and the
+    #: tester gives up on an ACK after T1 = 100 ms x 4 tries.  A 0.5 s
+    #: catch-up at `--time-scale 5` is fifty activations, which is 40 ms of
+    #: host CPU on an idle M2 and more than twice that when the test suite is
+    #: running beside it -- enough to lose a channel.  With a wall budget the
+    #: bus is serviced every few milliseconds whatever the scale, and
+    #: simulated time simply falls behind, which is already how a slow host
+    #: behaves (logging/README.md section 9).
+    MAX_CATCHUP_WALL_S = 0.005
+
+    def __init__(self, emu, patch_dir: str | None, *, task_set: str = "A",
+                 ram: "AnimatedRam | None" = None, segments: bool = True,
+                 nvm_pump: bool = True, tick_ms: float = 10.0):
+        from emu.toucan import SLOT15, RxMailbox
+
+        self.emu = emu
+        self.patch_dir = patch_dir
+        if patch_dir is None:
+            #: STOCK mode: no patch, so the only thing to run per segment is
+            #: what the unmodified word at 0x42247C calls.  This is what makes
+            #: a stock baseline comparable with a --sim-patch run instead of
+            #: differing by every cell rksplit touches.
+            self.syms = {}
+            self.hook = None
+            self.rk_hook = RKSPLIT
+        else:
+            with open(os.path.join(patch_dir, "patch.json"), encoding="utf-8") as fh:
+                build = json.load(fh)["build"]
+            self.syms = {k: int(v, 0) for k, v in build["symbols"].items()}
+            self.hook = self.syms["ff_fuel_hook_a" if task_set.upper() == "A"
+                                  else "ff_fuel_hook_b"]
+            self.rk_hook = self.syms.get("ff_fuel_rk_hook")
+        self.task_set = task_set.upper()
+        self.ram = ram
+        self.segments_enabled = segments and self.rk_hook is not None
+        self.nvm_pump = nvm_pump
+        self.tick_s = tick_ms / 1000.0
+        self.mailbox = RxMailbox(emu, SLOT15)
+        self.can_id = (int.from_bytes(emu.read(FFCAL001_BASE + 0x0C, 2), "big")
+                       if patch_dir is not None else 0x0EC)
+
+        self.sim_t = 0.0
+        self.ticks = 0
+        self.segments = 0
+        self.frames_in = 0
+        #: how often a catch-up ran out of its wall budget, i.e. how often the
+        #: simulated clock fell behind the wall clock
+        self.lagged = 0
+        self.errors: list[str] = []
+        self._seg_accum = 0.0
+        #: Frames wait in a short queue rather than overwriting one slot.  A
+        #: real mailbox does overwrite, but simulated time moves in bursts of
+        #: up to MAX_CATCHUP_S while the sender thread runs on the wall clock,
+        #: so one slot would drop most of a burst and the ECU would see 2 Hz
+        #: instead of 10.  The queue is bounded, so a runner that falls badly
+        #: behind still drops the oldest, exactly as the hardware would.
+        self._pending: "collections.deque[bytes]" = collections.deque(maxlen=8)
+        self._lock = threading.Lock()
+        self.mailbox.idle()
+
+    # -- the bus side ------------------------------------------------------
+    def on_frame(self, can_id: int, data: bytes) -> None:
+        """Every frame the simulator sees; ours is copied into the mailbox."""
+        if can_id == self.can_id and len(data) == 8:
+            with self._lock:
+                self._pending.append(bytes(data))
+                self.frames_in += 1
+
+    def _take_frame(self) -> bytes | None:
+        with self._lock:
+            return self._pending.popleft() if self._pending else None
+
+    # -- the clock ---------------------------------------------------------
+    def advance(self, target_s: float) -> None:
+        """Run the hooks forward to simulated second `target_s`."""
+        if target_s <= self.sim_t:
+            return
+        target_s = min(target_s, self.sim_t + self.MAX_CATCHUP_S)
+        wall_deadline = time.monotonic() + self.MAX_CATCHUP_WALL_S
+        while self.sim_t + self.tick_s <= target_s:
+            self.sim_t += self.tick_s
+            self._one_tick()
+            if time.monotonic() >= wall_deadline:
+                self.lagged += 1
+                return
+
+    def _one_tick(self) -> None:
+        if self.ram is not None:
+            self.ram.apply(self.emu, self.sim_t)
+        frame = self._take_frame()
+        if frame is not None:
+            self.mailbox.arm(frame)
+        else:
+            self.mailbox.idle()
+        if self.hook is not None:
+            self._call(self.hook, "10 ms hook")
+        self.ticks += 1
+        if self.nvm_pump:
+            self._call(NVM_PUMP_WRAPPER, "nvm pump", max_insns=4_000_000)
+        if self.segments_enabled:
+            self._run_segments()
+
+    def _run_segments(self) -> None:
+        rpm = self.ram.rpm(self.sim_t) if self.ram is not None else 0.0
+        cylinders = self.ram.cylinders if self.ram is not None else 6
+        self._seg_accum += rpm * cylinders / 120.0 * self.tick_s
+        n = int(self._seg_accum)
+        self._seg_accum -= n
+        base = (self.ram.rk_base(self.sim_t) if self.ram is not None else 1024)
+        for _ in range(min(n, 64)):
+            self.emu.write(RK_FUEL_MASS, struct.pack(">H", base))
+            self._call(self.rk_hook, "rk hook")
+            self.segments += 1
+
+    def _call(self, addr: int, what: str, max_insns: int = 2_000_000) -> None:
+        res = self.emu.call(addr, regs={"r1": TASK_STACK_TOP}, reset=False,
+                            max_insns=max_insns)
+        if not res.ok and len(self.errors) < 20:
+            self.errors.append(
+                f"{what} at {addr:#08x}: {res.stop_reason} at {res.pc:#08x} "
+                f"{res.issues[:1]}")
+
+    def status(self) -> str:
+        return (f"sim {self.sim_t:.2f} s, {self.ticks} activations, "
+                f"{self.segments} segments, {self.frames_in} frames in"
+                + (f", {self.lagged} catch-ups cut short" if self.lagged else "")
+                + (f", {len(self.errors)} hook errors" if self.errors else ""))
+
+
+class FrameTap:
+    """A `CanLink` proxy that shows every received frame to a callback.
+
+    `Tp20Server` drops anything that is not its own channel, so the ethanol
+    frame would otherwise be invisible.  Wrapping the link keeps
+    `logging/med9kwp/` free of any knowledge of the patch.
+    """
+
+    def __init__(self, link, on_frame):
+        self._link = link
+        self._on_frame = on_frame
+
+    def recv(self, timeout: float):
+        frame = self._link.recv(timeout)
+        if frame is not None:
+            self._on_frame(frame[0], frame[1])
+        return frame
+
+    def __getattr__(self, name):
+        return getattr(self._link, name)
+
+
+# ---------------------------------------------------------------------------
 # the handler layer
 # ---------------------------------------------------------------------------
 class Med9Handlers:
@@ -261,14 +570,26 @@ class Med9Handlers:
 
     def __init__(self, dump_path: str = DUMP, *, seed: int | None = None,
                  animate: bool = True, ram: AnimatedRam | None = None,
-                 clock=None, session_timeout_s: float | None = None):
+                 clock=None, session_timeout_s: float | None = None,
+                 patch_dir: str | None = None, eeprom: str | None = None,
+                 time_scale: float = 1.0, run_patch: bool = True,
+                 stock_tasks: bool = False, wip_polls: int = 0):
         from emu import Med9Emu
+        if patch_dir:
+            dump_path = apply_patch_to_temp(patch_dir, dump_path)
+        self.dump_path = dump_path
         self.emu = Med9Emu(dump_path, r2="app")
         self.seed_override = seed
         self.animate = animate
         self.ram = ram or AnimatedRam(statics=dict(DEFAULT_STATICS))
         self.clock = clock or time.monotonic
+        #: simulated seconds per wall-clock second (see logging/README.md)
+        self.time_scale = time_scale
         self.t0 = self.clock()
+        self.eeprom_path = eeprom
+        self.eeprom = None
+        self.qspi = None
+        self.runner: PatchRunner | None = None
         #: P3: drop back to session 0 after this long without a KWP request.
         #: `None` = never, which is what an emulator does on its own; the real
         #: ECU times out in ~5 s (kwp.md 2.2, exact value not extracted).
@@ -282,7 +603,42 @@ class Med9Handlers:
         #: `struct ff_state` rather than ff_counter's block (brief D2, #39).
         if self.emu.read(FFCAL001_BASE, 8) == b"FFCAL001":
             self.ram.flexfuel = True
+        if eeprom:
+            self._install_eeprom(eeprom, wip_polls)
+        if (patch_dir and run_patch) or stock_tasks:
+            self.runner = PatchRunner(self.emu, patch_dir if run_patch else None,
+                                      task_set=self.ram.live_task_set,
+                                      ram=self.ram if self.animate else None,
+                                      nvm_pump=self.eeprom is not None)
+            #: with the hooks running, `ff_state` is the patch's own, so the
+            #: AnimatedRam stand-in must keep its hands off 0x7FFB00
+            if patch_dir:
+                self.ram.flexfuel = False
+                self.ram.owns_patch_ram = False
         self.power_on()
+
+    # -- the EEPROM device -------------------------------------------------
+    def _install_eeprom(self, path: str, wip_polls: int) -> None:
+        """Attach `emu/qspi_eeprom.py` and run the start-up block read."""
+        from emu import qspi_eeprom as qe
+
+        if not os.path.exists(path):
+            image = qe.factory_image(DUMP)
+            with open(path, "wb") as fh:
+                fh.write(image)
+            self.log.append(f"created a factory EEPROM image at {path}")
+        self.eeprom = qe.M95160.load(path, wip_polls=wip_polls)
+        self.qspi, _binding = qe.install_eeprom(self.emu, device=self.eeprom)
+        if not qe.cold_start(self.emu):
+            self.log.append("WARNING: nvm_read_all_blocks never reached idle")
+
+    def save_eeprom(self, path: str | None = None) -> str | None:
+        """Write the device image back, so a restart sees what was stored."""
+        target = path or self.eeprom_path
+        if self.eeprom is None or target is None:
+            return None
+        self.eeprom.save(target)
+        return target
 
     # -- setup -------------------------------------------------------------
     def _read_table(self) -> list[KwpEntry]:
@@ -308,6 +664,14 @@ class Med9Handlers:
         self.emu.write(SEC_LEVEL_FLAGS, bytes([0x03]))
         self.emu.write(SEC_LFSR_ROUNDS, bytes([5]))
         self.emu.write(SEC_RETRY_FLAG, b"\x00")
+        # The application's start-up runs ddli_init through the function-
+        # pointer table at 0x0B1B88; the emulator has no OS to walk that table,
+        # so run the firmware's own routine here.  Without it every dynamic id
+        # points its entry array at address 0 and the second id defined
+        # overwrites the first one's entries (kwp.md 4.1, 2026-09-17).
+        res = self.emu.call(H_DDLI_INIT, reset=False)
+        if not res.ok:                                       # pragma: no cover
+            self.log.append(f"ddli_init did not return: {res.stop_reason}")
         self.ram.power_on(self.emu)
         self.t0 = self.clock()
 
@@ -321,7 +685,25 @@ class Med9Handlers:
         return self.emu.read(SECURITY_STATE, 1)[0]
 
     def sim_time(self) -> float:
-        return self.clock() - self.t0
+        """Simulated seconds since power-on.
+
+        Without a :class:`PatchRunner` this is wall-clock time times
+        ``time_scale``.  With one it is the runner's own clock, which only
+        moves in 10 ms activations and can fall behind the wall clock on a
+        slow host -- so every animated cell and every hook always see the same
+        instant (`logging/README.md`, "bench rehearsal").
+        """
+        if self.runner is not None:
+            return self.runner.sim_t
+        return (self.clock() - self.t0) * self.time_scale
+
+    def wall_target(self) -> float:
+        return (self.clock() - self.t0) * self.time_scale
+
+    def step(self) -> None:
+        """Let the patch's hooks catch up with the wall clock."""
+        if self.runner is not None:
+            self.runner.advance(self.wall_target())
 
     def read_ram(self, addr: int, size: int) -> bytes:
         return self.emu.read(addr, size)
@@ -370,6 +752,7 @@ class Med9Handlers:
         """One KWP request in, the list of KWP responses out (usually one)."""
         if not request:
             return []
+        self.step()
         if self.animate:
             self.ram.apply(self.emu, self.sim_time())
         now = self.clock()
@@ -429,15 +812,19 @@ class EcuSimulator:
                  address: int = 0x01, delay_ms: float = 0.0,
                  drop_ack: int = 0, seed: int | None = None,
                  session_timeout_s: float | None = None, animate: bool = True,
-                 dump: str = DUMP,
+                 dump: str = DUMP, patch_dir: str | None = None,
+                 eeprom: str | None = None,
                  trace: list[str] | None = None, verbose: bool = False):
-        self.link = link
         #: `dump` is how a PATCHED image is driven end to end: the handlers are
         #: the firmware's own, so `21 <group>` on patches/ff_fuel's image runs
-        #: the patch's measuring handlers (brief D2, issue #39).
+        #: the patch's measuring handlers (brief D2, issue #39).  `patch_dir`
+        #: goes one further and runs the patch's own hooks (brief E4).
         self.handlers = handlers or Med9Handlers(
-            dump, seed=seed, animate=animate,
-            session_timeout_s=session_timeout_s)
+            dump, seed=seed, animate=animate, patch_dir=patch_dir,
+            eeprom=eeprom, session_timeout_s=session_timeout_s)
+        runner = self.handlers.runner
+        self.link = FrameTap(link, runner.on_frame) if runner else link
+        link = self.link
         self.server = Tp20Server(link, address=address,
                                  params=Tp20Params(),
                                  delay_s=delay_ms / 1000.0, trace=trace)
@@ -455,10 +842,16 @@ class EcuSimulator:
         link.set_accept(None)
         return cls(link, **kw)
 
+    @property
+    def runner(self) -> "PatchRunner | None":
+        return self.handlers.runner
+
     # -- loop --------------------------------------------------------------
     def poll(self, timeout: float = 0.05) -> bool:
         """Service the bus once.  True if a request was answered."""
         request = self.server.poll(timeout)
+        # the patch keeps ticking whether or not a tester is talking to us
+        self.handlers.step()
         if request is None:
             return False
         self.requests += 1
@@ -503,6 +896,7 @@ class EcuSimulator:
 
     def close(self) -> None:
         self.stop()
+        self.handlers.save_eeprom()
         self.link.close()
 
 
@@ -575,10 +969,31 @@ def main(argv=None) -> int:
                     help="delay every frame this long")
     ap.add_argument("--no-animate", action="store_true",
                     help="freeze the animated RAM cells")
-    ap.add_argument("--task-set", choices=("A", "B"), default="B",
-                    help="which OS task set is live (scheduler.md 11-12). "
-                         "With A, the set-B counters and C1's Flash-1 block "
-                         "stay at zero -- rehearse that case before the bench")
+    ap.add_argument("--sim-patch", metavar="DIR", default=None,
+                    help="apply a patch directory (patches/ff_fuel) to a "
+                         "temporary image AND run its hooks on a simulated "
+                         "10 ms raster -- the bench rehearsal of brief E4")
+    ap.add_argument("--sim-stock-tasks", action="store_true",
+                    help="without --sim-patch: still run the stock code the "
+                         "patch's hooks replace (rksplit per segment, the NVM "
+                         "pump per 10 ms), so a STOCK baseline log is "
+                         "comparable with a --sim-patch run")
+    ap.add_argument("--eeprom", metavar="FILE", default=None,
+                    help="back the QSPI EEPROM with this 2 KB image "
+                         "(emu/qspi_eeprom.py); created from the firmware's "
+                         "own block defaults if it does not exist, and "
+                         "written back when the simulator stops")
+    ap.add_argument("--wip-polls", type=int, default=0, metavar="N",
+                    help="make an EEPROM page write report WIP for N status "
+                         "polls (0 = instant, which is what a time base that "
+                         "never advances gives us anyway)")
+    ap.add_argument("--time-scale", type=float, default=1.0, metavar="X",
+                    help="simulated seconds per wall-clock second (default 1)")
+    ap.add_argument("--task-set", choices=("A", "B"), default="A",
+                    help="which OS task set is live (scheduler.md 11-12, "
+                         "11.8: set A is live by necessity, so it is the "
+                         "default here). With A, the set-B counters and C1's "
+                         "Flash-1 block stay at zero")
     ap.add_argument("--session-timeout", type=float, default=0.0, metavar="S",
                     help="drop back to session 0 after S seconds without a KWP "
                          "request (0 = never; the real ECU is about 5 s)")
@@ -593,6 +1008,9 @@ def main(argv=None) -> int:
     handlers = Med9Handlers(
         args.dump, seed=args.seed or None, animate=not args.no_animate,
         session_timeout_s=args.session_timeout or None,
+        patch_dir=args.sim_patch, eeprom=args.eeprom,
+        stock_tasks=args.sim_stock_tasks,
+        time_scale=args.time_scale, wip_polls=args.wip_polls,
         ram=AnimatedRam(live_task_set=args.task_set,
                         statics=dict(DEFAULT_STATICS)))
     link = open_link(parse_bus_spec(args.bus))
@@ -602,13 +1020,27 @@ def main(argv=None) -> int:
                        verbose=args.verbose)
     print(f"MED9 simulator on {link.description}, logical address "
           f"{args.address:#04x}, seed {args.seed:#010x}")
+    if handlers.runner is not None:
+        r = handlers.runner
+        print(f"running {args.sim_patch} on task set {r.task_set}: 10 ms hook "
+              f"{r.hook:#08x}, segment hook {r.rk_hook:#08x}, "
+              f"CAN id {r.can_id:#05x}, {args.time_scale:g} simulated s / "
+              f"wall s")
+    if handlers.eeprom is not None:
+        print(f"EEPROM: {args.eeprom} (2 KB M95160, written back on exit)")
     print("ctrl-C to stop")
     try:
         sim.serve_forever()
     except KeyboardInterrupt:
         print(f"\n{sim.requests} requests served")
+        if handlers.runner is not None:
+            print(handlers.runner.status())
+            for line in handlers.runner.errors[:5]:
+                print("  !", line)
     finally:
         sim.close()
+    for line in handlers.log[-5:]:
+        print(" ", line)
     return 0
 
 

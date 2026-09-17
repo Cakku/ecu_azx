@@ -60,5 +60,67 @@
  * 8 data bytes of tbl_can_rx slot 15 (id 0x7FF, TouCAN module 2 = C, message buffer 6, DLC 8) */
 #define MED9_CAN_RX_BUF_SPARE0 0x00803F9C
 
+/* nmot_w  [VERIFIED-STATIC, ghidra]  sram_int, size 0x2
+ * for the use, COMMUNITY for the name */
+#define MED9_NMOT_W            0x007FEE74
+
+/* rl_w  [VERIFIED-STATIC, ghidra]  sram_int, size 0x2
+ * Relative load, u16, 100%/4096 per LSB - the KFZW column-axis input (lhz -0x103e(r13) at 0x41D358 */
+#define MED9_RL_W              0x007FEFB2
+
+/* cand_mw_percyl_block  [VERIFIED-STATIC, dump]  sram_int, size 6
+ * CORRECTED 2026-09-17 (E1, issue #34): the confidence was `hypothesis`, which described the NAME, */
+#define MED9_DWKRZ             0x007FCE57
+
+/* zwgru_low_octane_latch  [VERIFIED-STATIC, dump]  sram_int, size 0x1
+ * The two latch bits of the stock low-octane-fuel detector zwgru_low_octane_detect 0x0F436C */
+#define MED9_ZW_LOW_OCT_LATCH  0x007FD31B
+
+/* tmst  [VERIFIED-STATIC, ghidra]  sram_ext, size 0x1
+ * Engine temperature latched at start, u8, 0.75 degC per LSB with offset -48 degC */
+#define MED9_TMST              0x008021F6
+
+/* ksta_adapted  [VERIFIED-DYNAMIC, ghidra]  sram_ext, size 0x2
+ * ksta * kstaa, u16, 1024 = 1.0; forced to 0x400 outside the start */
+#define MED9_KSTA_ADAPTED      0x0080302C
+
+/* zwstt  [VERIFIED-DYNAMIC, ghidra]  sram_ext, size 0x1
+ * Start ignition angle, s8, 0.75 deg CA per LSB */
+#define MED9_ZWSTT             0x00802096
+
+/* B_stend  [VERIFIED-STATIC, ghidra]  sram_int, size 0x1
+ * Start finished, four cycles after 0x7FE920 */
+#define MED9_B_STEND           0x007FE921
+
+/* prsoll_raw  [VERIFIED-STATIC, ghidra]  sram_ext, size 0x2
+ * u16 KFPRSOL* map output before KLPRMAX, the floor and the rate limiter */
+#define MED9_PRSOLL_RAW        0x008031F0
+
+/* prist_w  [VERIFIED-STATIC, ghidra]  sram_ext, size 0x2
+ * for the use, COMMUNITY for the name */
+#define MED9_PRIST_W           0x008031DA
+
+/* vmsv_limited  [VERIFIED-STATIC, ghidra]  sram_ext, size 0x2
+ * u16 MSV volume request after the pump volume limit VMSVMX (0x5D4BC6 = 5000) */
+#define MED9_VMSV_LIMITED      0x0080316E
+
+/* wbho1s_w  [VERIFIED-STATIC, ghidra]  sram_ext, size 0x2
+ * s16 start-of-injection angle actually used, 1 LSB = 3/128 degCA */
+#define MED9_WBHO1S_W          0x0080307E
+
+/* dwi_inj_angle  [VERIFIED-STATIC, ghidra]  sram_ext, size 0x2
+ * u16 injection duration expressed as a crank angle, (ti * 0x803072) >> 13, written by awea_ti_to_ */
+#define MED9_DWI               0x00803088
+
+/* dwbho1smn_w  [VERIFIED-STATIC, ghidra]  sram_int, size 0x4
+ * u8 required end-of-injection margin from KLWBHO1SMX (0x5D3BF6); 67 = 50.25 degCA in this dataset */
+#define MED9_WIN_MARGIN_W      0x007FD290
+
+
+/* ---- Stock calibration constants --------------------------------- */
+/* VMSVMX  [VERIFIED-STATIC, ghidra]  cal, size 0x2
+ * u16 = 5000, the MSV volume clamp in %AMSV: 0x80316E = min(0x80316C, 5000) */
+#define MED9_VMSVMX 0x005D4BC6
+
 
 #endif /* MED9_STOCK_H */

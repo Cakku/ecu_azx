@@ -349,7 +349,11 @@ python3 logging/med9log.py groups --sim 231     # prints "reading group 104"
 Id 2 emits `(0x21, A=0x85, B = the raw byte of 0x7FEF74)`, so `100 x B / A`
 reads 100 % when the byte is 0x85 = 133 — consistent with "0x21 is the
 percentage formula", but there is no second chain for 0x7FEF74's own scaling,
-so 0x21 stays **COMMUNITY**. The other 41 formula ids this dataset emits stay
+so 0x21 stays **COMMUNITY**.
+**SETTLED 2026-09-17 (E3, #41) — see §7.5: the handler passes the raw byte
+through unchanged, so `A = 133` is a tester-side normalisation and says
+nothing about the ECU's own LSB, which is `100/128 %`. The two readings never
+were in conflict.** The other 41 formula ids this dataset emits stay
 COMMUNITY or unknown; `logging/med9kwp/vag_formulas.py` carries the table with
 a per-entry tag and prints the raw `(formula, A, B)` triple for everything it
 does not claim to know. The ids actually used by this dataset, by frequency:
@@ -364,6 +368,71 @@ does not claim to know. The ids actually used by this dataset, by frequency:
 Reproduce with
 `python3 -c "import csv,re,collections; ..."` over `re/measuring_vars.csv`, or
 `python3 logging/med9log.py groups --formula-table`.
+
+### 7.5 The u8 `rl` scaling, settled (E3, 2026-09-17, #41)
+
+D3 read the u8 `rl` (0x7FEF74) as **100/128 %/LSB** (`calibration_names.md`
+§2.1) from the breakpoint identity `SRL11OPUW = SRL12ZUUW / 32`; §7.4 above
+read display formula 0x21 with `A = 133` as "133 counts = 100 %", i.e.
+100/133 %/LSB. Brief E3 was asked to decide it with the ECU's own measuring
+handler. Two chains, both run on this dump:
+
+**1. The conversion instruction (VERIFIED-STATIC, decisive).** The u8 is
+written at three sites, each one right after the `sth` of `rl_w` (0x7FEFB2):
+
+```
+00419268  rlwinm r12,r5,0x0,0x10,0x1f   ; r12 = rl_w & 0xFFFF
+0041926c  cmplwi r12,0x1fe0             ; 0x1FE0 = 8160 = 255 * 32
+00419270  sth    r5,-0x103e(r13)        ; rl_w   = r5
+00419274  ble    0x00419280
+00419278  li     r6,0xff                ; clamp
+00419280  rlwinm r6,r5,0x1b,0x15,0x1f   ; r6 = (rl_w >> 5) & 0x7FF
+00419284  stb    r6,-0x107c(r13)        ; u8 rl = rl_w >> 5
+```
+
+and the two initialisation sites 0x11BC38 / 0x12D8B4 write the pair as
+`rl_w = 0x10AB = 4267` and `u8 rl = 0x85 = 133` in the same breath
+(4267 >> 5 = 133). So **the u8 `rl` is `rl_w >> 5`** and 1 LSB is
+`32 x 100/4096 = 100/128 % = 0.78125 %`. D3 is right, and this is now an
+instruction, not an inference from a breakpoint grid.
+
+**2. The measuring handler in the emulator (VERIFIED-DYNAMIC).** Running the
+real handler for id 2 over a sweep of 0x7FEF74 (`logging/ecu_sim.py`'s
+`Med9Handlers`, exactly as §7.1 did for formula 0x05) shows the handler
+emits **B = the raw byte, unchanged**, with a constant `A = 0x85`:
+
+| 0x7FEF74 | emitted `(fmt, A, B)` | tester reads `100 B / A` | internal `100/128 x raw` |
+|---|---|---|---|
+| 13 | (0x21, 0x85, 13) | 9.77 % | 10.16 % |
+| 67 | (0x21, 0x85, 67) | 50.38 % | 52.34 % |
+| 128 | (0x21, 0x85, 128) | 96.24 % | 100.00 % |
+| 133 | (0x21, 0x85, 133) | 100.00 % | 103.91 % |
+| 255 | (0x21, 0x85, 255) | 191.73 % | 199.22 % |
+
+**So there is no contradiction.** The handler does no arithmetic at all; `A`
+is a normalisation the ECU hands the tester, and VCDS therefore shows 100 %
+where the ECU's own maps see 103.9 %. Formula 0x21 stays COMMUNITY as a
+*formula*, but "133 counts = 100 %" was never a statement about the firmware.
+**Use 100/128 %/LSB for every map axis; expect a VCDS log of group 002 field
+2 to read about 3.8 % low against it.**
+
+Reproduce (the script is four lines; `Med9Handlers` is the same class §7.1
+used):
+
+```python
+import sys; sys.path.insert(0, "logging")
+from ecu_sim import Med9Handlers
+h = Med9Handlers("data/passat_azx_ori.bin", seed=1, animate=False)
+h.handle(b"\x10\x89")
+for raw in (13, 67, 128, 133, 255):
+    h.emu.write(0x7FEF74, bytes([raw]))
+    body = h.handle(b"\x21\x02")[0][2:]
+    print(raw, tuple(body[3:6]))        # group 002 field 2 = id 2
+```
+
+and, for the static half,
+`./.venv/bin/python tools/sda_xref.py data/passat_azx_ori.bin --var 0x7FEF74`
+plus `ghidra_scripts/decompile.py --asm 0x00419258 --count 14`.
 
 ---
 
@@ -412,7 +481,7 @@ whole 25-byte response belongs to the patch: four flex-fuel fields followed by
 four `(0x25, 0, 0)` "not implemented" triples.
 
 108 and 109 are left free on purpose, for the ignition and rail blends of
-docs/05 §3.4 / §3.6.
+docs/05 §3.4 / §3.6. **108 is TAKEN as of 2026-09-17 — see §8.4.**
 
 The four words, all currently `00 00`:
 
@@ -459,3 +528,269 @@ Only formulas the logger can decode were used
 
 Every one of them is checked on the applied image in
 `tests/test_ff_diag_patch.py`.
+
+## 8.4 The ignition blend: ids 2192-2195 and group 108 (E1, 2026-09-17, #34)
+
+Brief **E1** took the second of the three slots §8.2 reserved. Re-checked
+before taking it, as the 2026-09-17 rules require:
+
+```bash
+./.venv/bin/python3 tools/measuring_vars.py data/passat_azx_ori.bin --free
+#   spare variable ids (stub handler AND named by no group): 1507 of 2200
+#   free groups ...: [17, 19, 25, 29, 40, 45, 48, 49, 58, 59, 65, 67, 69,
+#                     108, 109, 111]
+#   group 108 (0x6C) words: 0x5c55f0, 0x5c57ee, 0x5c59ec, 0x5c5bea
+```
+
+### The ids: 2192-2195, the four entries below D2's
+
+Table words **0x0A7898-0x0A78A7**, stock content `00 03 8E C4` four times, so
+the edit is again one contiguous 16-byte range and it sits immediately below
+D2's. Taking them downwards from the end of the table keeps every future
+brief's edit contiguous with the last one.
+
+| id | handler | field | emits | reads |
+|---|---|---|---|---|
+| 2192 | `ff_diag_fzw_pct` | 1 | `(0x21, A=0x64, B = f_zw %)` | `ff_state.fzw_q8` |
+| 2193 | `ff_diag_dzw` | 2 | `(0x22, A=0x4B, B = dzw_e + 0x80)` | `ff_state.dzw_e` |
+| 2194 | `ff_diag_dwkrz` | 3 | `(0x22, A=0x4B, B = max + 0x80)` | **stock** 0x7FCE57-0x7FCE5C |
+| 2195 | `ff_diag_zwlatch` | 4 | `(0x36, A=0, B = latch & 3)` | **stock** 0x7FD31B |
+
+The three negative searches, all reproduced in
+`tests/test_ff_ign_patch.py::TestStockFacts`:
+
+* `find_abs_refs.resolve()` over the whole image finds **no** `lis` + D-form
+  pair resolving into 0x0A7898-0x0A78A7;
+* `find_branch_refs.scan()` finds no branch and no stored pointer to any of
+  the four words, nor to any of the four group words;
+* the group table names no id above 1746, so nothing can reach 2192-2195
+  except through our own edit.
+
+### The group: 108 (0x6C)
+
+Its `+0x7F` echo, **235**, is empty too (all eight words `00 00`), so the whole
+25-byte answer to `21 6C` belongs to the patch: four fields followed by four
+`(0x25, 0, 0)` triples. Words, all inside the guarded stock calibration
+(file 0x1C0000-0x1DFFFF), hence `"calibration_edit": true`:
+
+| field | CPU | file |
+|---|---|---|
+| 1 | 0x5C55F0 | 0x1C55F0 |
+| 2 | 0x5C57EE | 0x1C57EE |
+| 3 | 0x5C59EC | 0x1C59EC |
+| 4 | 0x5C5BEA | 0x1C5BEA |
+
+**109 is still free, for brief E5's rail-pressure adder, and 69 for E2.**
+
+### Formula 0x22 with A = 0x4B is copied, not chosen
+
+§8.3 used only formulas `logging/med9kwp/vag_formulas.py` can decode. Fields 2
+and 3 carry an ignition angle, and the honest encoding for that is not a
+count: the **six stock per-cylinder knock-retard handlers** at
+0x039CD0-0x039D48 already emit exactly
+
+```
+00039CD0  38 60 00 22  li    r3,0x22          ; the formula
+00039CD4  88 AD CE 67  lbz   r5,-0x3199(r13)  ; dwkrz[0] = 0x7FCE57
+00039CD8  38 80 00 4B  li    r4,0x4b          ; A = 75
+00039CDC  38 A5 00 80  addi  r5,r5,0x80       ; B = byte + 128
+```
+
+for the very array field 3 reports, so `0.01 × 75 × (B − 128)` = **0.75 °CA
+per count** — §6's fixed point, and the same scaling VCDS groups 020-024 show.
+Brief E1's text offered formula 0x36 (a raw signed count) as a fallback if the
+angle formula of measuring id 9 (0x1B, A = 0x4B) could not be decoded, which
+it cannot; 0x22 was used instead because it *is* decodable, it is what the
+stock handlers for this exact quantity use, and it saves the tester converting
+by hand. **Caveat:** `vag_formulas.py`'s community table labels 0x22 "kW". The
+arithmetic is right and the unit string is the published table's, not the
+patch's; nothing in `logging/` was changed for this (brief E4 owns it).
+
+Field 4 uses **0x36** with A = 0, so the reading is the latch bits 0..3 as a
+plain count: 0 is the only acceptable value on E85.
+
+Fields 1 and 2 check the state-block header and answer `(0x25, 0, 0)` when it
+does not hold, as D2's do. Fields 3 and 4 **do not**: they report stock cells
+that are valid whether or not our block is, and a tester chasing knock has to
+be able to see them.
+
+## 8.5 The start enrichment: ids 2188-2191 and group 69 (E2, 2026-09-17, #35)
+
+Brief **E2** took the third of the three slots §8.2 reserved, and the group the
+wave-E budget in `docs/agent_briefs/README.md` assigned it. Re-checked before
+taking it, as the 2026-09-17 rules require:
+
+```bash
+./.venv/bin/python3 tools/measuring_vars.py data/passat_azx_ori.bin --free
+#   spare variable ids (stub handler AND named by no group): 1507 of 2200
+#   free groups ...: [17, 19, 25, 29, 40, 45, 48, 49, 58, 59, 65, 67, 69,
+#                     108, 109, 111]
+#   group  69 (0x45) words: 0x5c55a2, 0x5c57a0, 0x5c599e, 0x5c5b9c
+```
+
+### The ids: 2188-2191, the four entries below E1's
+
+Table words **0x0A7888-0x0A7897**, stock content `00 03 8E C4` four times, so
+the edit is one contiguous 16-byte range immediately below E1's — the third
+step of the downward walk from the end of the 2200-entry table (D2 took
+2196-2199, E1 2192-2195). E5 continues with 2184-2187.
+
+| id | handler | field | emits | reads |
+|---|---|---|---|---|
+| 2188 | `ff_diag_fst_pct` | 1 | `(0x21, A=0x64, B = f_st %)` | `ff_state.fst_q10` |
+| 2189 | `ff_diag_zwst` | 2 | `(0x22, A=0x4B, B = zwst_add + 0x80)` | `ff_state.zwst_add` |
+| 2190 | `ff_diag_tmst` | 3 | `(0x05, A=0x0A, B = °C + 100)` | **stock** 0x8021F6 |
+| 2191 | `ff_diag_ksta` | 4 | `(0x36, A = v >> 8, B = v & 0xFF)` | **stock** 0x80302C |
+
+The three negative searches, all reproduced in
+`tests/test_ff_start_patch.py::TestStockFacts`:
+
+* `find_abs_refs.resolve()` over the whole image finds **no** `lis` + D-form
+  pair resolving into 0x0A7888-0x0A7897;
+* `find_branch_refs.scan()` finds no branch and no stored pointer to any of
+  the four words, nor to any of the four group words;
+* `free_slots()` still lists all four ids as spare and group 69 as free.
+
+### The group: 69 (0x45)
+
+Words **0x5C55A2 / 0x5C57A0 / 0x5C599E / 0x5C5B9C**, i.e.
+`0x5C5518 + field * 0x1FE + 69 * 2`, all four `00 00` in the stock image. Its
+`+0x7F` echo, group **196**, is empty too, so the whole 25-byte answer to
+`21 45` belongs to the patch. All four words are inside the guarded stock
+calibration 0x1C0000-0x1DFFFF and carry `"calibration_edit": true`.
+
+### Formula choices, and the one that is a fallback
+
+Field 1 is **0x21 with A = 100**, so `B` is the percent directly — the same
+shape as D2's fields 1 and 2 and E1's field 1. Field 2 is **0x22 with
+A = 0x4B**, the angle formula §8.4 established: `0.01 × 75 × (B − 128)` =
+0.75 °CA per count. Field 3 is **0x05 with A = 10**, §7.1's cross-checked
+temperature formula, so the reading is `B − 100` whole degrees; the handler
+does the count → °C conversion itself (`(count × 3 + 2) / 4 − 48`, rounded to
+nearest, half **up**), because `tmst`'s 0.75 °C/LSB with a −48 °C offset has no
+representation in the VAG formula table.
+
+**Field 4 is the fallback the brief allowed, and it was needed.** The brief
+asked for `ksta_adapted` as a percent, `(v × 100) >> 10`, and said to use a
+count formula if the percent does not fit. It does not: the *stock* cranking
+factor reaches 22.8× = 2280 % at −30 °C (`start.md` §6) and formula 0x21's `B`
+is one byte. Field 4 therefore uses **0x36**, `(A << 8) | B`, and reports the
+whole 16-bit cell exactly as the ECU holds it — 1024 = 1.00×, no saturation
+anywhere in the range, and the same fixed point `emu/start_model.py` and the
+tick-by-tick comparison work in.
+
+**Field 1 cannot saturate either**, and that is what fixes the patch's code
+ceiling `FF_FST_HARD_MAX` at 2560: `(2560 × 100) >> 10 = 250`, the largest
+value formula 0x21's `B` can carry with A = 100. The clamp in the code, the
+range the calibration may ask for and the range the measuring block can show
+are deliberately the same number.
+
+Fields 1 and 2 check the state-block header and answer `(0x25, 0, 0)` when it
+does not hold, as D2's and E1's do. Fields 3 and 4 **do not**: they report
+stock cells that are valid whether or not our block is, and somebody watching
+a cold start has to see `tmst` and the cranking factor either way.
+
+### The budget after E2
+
+| Brief | ids | group | taken |
+|---|---|---|---|
+| D2 (#39) | 2196-2199 | 111 | yes |
+| E1 (#34) | 2192-2195 | 108 | yes |
+| **E2 (#35)** | **2188-2191** | **69** | **yes** |
+| E5 (#36) | 2184-2187 | 109 | **taken — see §8.6** |
+
+Twelve of the 1507 spare ids and three of the sixteen free groups are now
+spent. The remaining free groups are 17, 19, 25, 29, 40, 45, 48, 49, 58, 59,
+65, 67 and 109.
+
+## 8.6 The rail adder: ids 2184-2187 and group 109 (E5, 2026-09-17, #36)
+
+Brief **E5** took the last of the four slots the wave-E budget in
+`docs/agent_briefs/README.md` assigned. Re-checked before taking it, as the
+2026-09-17 rules require:
+
+```bash
+./.venv/bin/python3 tools/measuring_vars.py data/passat_azx_ori.bin --free
+#   spare variable ids (stub handler AND named by no group): 1507 of 2200
+#   free groups ...: [17, 19, 25, 29, 40, 45, 48, 49, 58, 59, 65, 67, 69,
+#                     108, 109, 111]
+#   group 109 (0x6D) words: 0x5c55f2, 0x5c57f0, 0x5c59ee, 0x5c5bec
+```
+
+### The ids: 2184-2187, the four entries below E2's
+
+Table words **0x0A7878-0x0A7887**, stock content `00 03 8E C4` four times, so
+the edit is one contiguous 16-byte range immediately below E2's — the fourth
+and last step of the downward walk from the end of the 2200-entry table
+(D2 took 2196-2199, E1 2192-2195, E2 2188-2191).
+
+| id | handler | field | emits | reads |
+|---|---|---|---|---|
+| 2184 | `ff_diag_prail` | 1 | `(0x53, A = v>>9, B = (v>>1) & 0xFF)` | `ff_state.prail_add` |
+| 2185 | `ff_diag_prist_min` | 2 | the same shape | `ff_state.prist_min` |
+| 2186 | `ff_diag_win_margin` | 3 | `(0x22, A = 225, B = margin/96 + 128)` | `ff_state.win_margin_min` |
+| 2187 | `ff_diag_msv_sat` | 4 | `(0x36, 0, count)` | `ff_state.msv_sat_ticks` |
+
+The three negative searches, all reproduced in
+`tests/test_ff_rail_patch.py::TestStockFacts`:
+
+* `find_abs_refs.resolve()` over the whole image finds **no** `lis` + D-form
+  pair resolving into 0x0A7878-0x0A7887;
+* `find_branch_refs.scan()` finds no branch and no stored pointer to any of
+  the four words, nor to any of the four group words;
+* `free_slots()` still lists all four ids as spare and group 109 as free.
+
+### The group: 109 (0x6D)
+
+Words **0x5C55F2 / 0x5C57F0 / 0x5C59EE / 0x5C5BEC**, i.e.
+`0x5C5518 + field * 0x1FE + 109 * 2`, all four `00 00` in the stock image. Its
+`+0x7F` echo, group **236**, is empty too, so the whole 25-byte answer to
+`21 6D` belongs to the patch. All four words are inside the guarded stock
+calibration 0x1C0000-0x1DFFFF and carry `"calibration_edit": true`.
+
+### Formula choices, and the one that is new
+
+Fields 1 and 2 are **0x53 over the raw word shifted right by one** — not a
+choice but a copy, exactly as E1's 0x22/0x4B was. The stock `prist` and
+`prsoll` handlers at 0x3DB94 and 0x3DBAC are literally
+`lhz r6,0x31EA(r13) ; li r3,0x53 ; rlwinm r5,r6,31,17,31 ; sth r5,... ;
+rlwinm r4,r5,24,24,31`, i.e. they halve the 0.005 bar word and hand the tester
+`((A<<8)|B) × 0.01` bar. §7.3 cross-checked that arithmetic against the
+controller code, so these two fields read in the same unit, on the same scale
+and through the same code path as VCDS ids 500 and 501 already do.
+
+**Field 3 is the one formula/A pair in this patch that has no stock
+precedent**, and the reason is a range problem. Formula 0x22 is
+`0.01 × A × (B − 128)`; groups 108 and 69 use A = 0x4B (75) = 0.75 °CA per
+count, which spans only −96.00 … +95.25 °CA, and the window margin reaches
+about **+280 °CA** at a light-load 2000 rpm point (`rail.md` §15) — the field
+would sit pinned at its maximum nearly all the time. **A = 225** gives
+2.25 °CA per count and a span of −288.00 … +285.75 °CA, which covers the whole
+range `KFWBHO1SW` (210…330 °CA) can produce. 225 is not a round number by
+accident either: 2.25 °CA is exactly **96 angle LSB** of 3/128 °CA, so the
+handler converts with one exact integer division and no accumulated rounding.
+The division **floors** (towards −∞, not C's truncate-towards-zero), so the
+margin a tester reads never overstates the room there is.
+
+Field 4 is a plain count, formula 0x36 with A = 0.
+
+**All four fields check the state-block header** and answer `(0x25, 0, 0)`
+when it does not hold — unlike groups 108 and 69, whose fields 3 and 4 report
+stock cells directly. Here even the two fields derived from stock RAM report a
+**minimum**, which is the patch's own value and would be a lie if it were
+stale. A tester who sees "not available" reads the stock rail groups instead
+(106 field 1 = `prist`, 231 fields 2/3 = `prsoll`/`prist`, §7.3).
+
+### The budget after E5
+
+| Brief | ids | group | taken |
+|---|---|---|---|
+| D2 (#39) | 2196-2199 | 111 | yes |
+| E1 (#34) | 2192-2195 | 108 | yes |
+| E2 (#35) | 2188-2191 | 69 | yes |
+| **E5 (#36)** | **2184-2187** | **109** | **yes** |
+
+Sixteen of the 1507 spare ids and four of the sixteen free groups are spent.
+The remaining free groups are 17, 19, 25, 29, 40, 45, 48, 49, 58, 59, 65
+and 67 — the whole wave-E budget of `docs/agent_briefs/README.md` is now
+allocated, and the next brief that wants a block picks from those twelve.

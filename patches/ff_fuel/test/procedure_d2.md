@@ -155,12 +155,37 @@ mirror is filled from the device at every start-up, so it is a faithful copy:
 
 and read the five `eep_blk8_*` variables.
 
-* `eep_blk8_mirror_b0` — **must be 0xFF (255) or 0**. Anything else means a
-  stock function we have not found uses payload +0; stop, and move the patch
-  to `ff_persist_offset` = 1 (one calibration byte, no rebuild).
+> **Corrected 2026-09-17 (E4, #38) — what B1 predicts has changed, and so has
+> where the patch stores.** Payload **+0 and +1 are a `{block id, version}`
+> stamp**: `nvm_read_all_blocks` (0x06227C) compares the first halfword of the
+> block against the flash default table at 0x060458-0x060470 and, on a
+> mismatch, **discards the block and reloads the defaults**
+> (`re/findings/eeprom.md` §10.5). `ff_persist_offset` shipped as 0, i.e. on
+> top of the block id, so the stored estimate never survived a key cycle and
+> read back as **0x08 — a perfectly plausible 8 %**, not the 0xFF that means
+> "nothing known". The failure was silent. **`ff_persist_offset` is now 2**,
+> the first free payload byte, and §5's "free payload offsets +0..+13" for
+> block 8 must be read as **+2..+13**.
+
+* `eep_blk8_mirror_b0` and the byte after it — **expect the stamp**, i.e.
+  `08 01`. If the block has never been written, `nvm_read_all_blocks` will
+  have reloaded the flash defaults, and for block 8 the default record is
+  `08 01 00 80 80 80 80 00 00 80 00 80 80 FF` at +0..+13. **Read the real
+  EEPROM before believing either prediction**: the default-table reading is
+  static plus emulated (E4), and the only thing that settles what a *used*
+  car's block 8 actually holds is the non-destructive read above.
+* `eep_blk8_mirror_b2` — where the patch now stores. On a virgin block it is
+  whatever the default record's third byte is (`00` by the table above), and
+  after the first commit it is `ff_diag_e_pct`. Anything else before flashing
+  means a stock function we have not found uses payload +2: stop, and move the
+  patch with `--set ff_persist_offset=3` (one calibration byte, no rebuild).
 * `eep_blk8_mirror_b14` — whatever it is, note it. It is the one byte stock
   code writes (cpu 0x134380) and it must be unchanged by everything below.
-* `eep_blk8_mirror_b29` — the manager's own byte; note it, never write it.
+* `eep_blk8_mirror_b29` — the manager's own **ReplV** byte. **Never write
+  it** — but do not expect it to hold still either: it moves on the first
+  commit (0xFF → 0x00 → 0x01), which E4 reproduced end to end through the
+  device model (`eeprom.md` §10.6). The earlier wording here and check 7 of
+  `logging/sessions/ff_fuel.json` said it never changes; that was wrong.
 * `eep_blk8_mirror_csum` — `sum(payload +0..+29) + csum == 0xFFFF`. If that
   does not hold on the stock image, the mirror was never filled and B3 will
   fail for reasons that have nothing to do with the patch.
@@ -177,14 +202,20 @@ Expected, in order:
 | 0 | `ff_persist_wait` = 60.00 s, counting down at 100/s; `ff_persist_state` = 0 |
 | 0 | `ff_e_persist` = 65535 on a virgin store (or the stored percent, if B1 found one) |
 | ~60 s | `ff_persist_state` goes 2 for a few samples, then **3**; `ff_persist_writes` = 1; `ff_persist_err` = 2 |
-| ~60 s | `eep_blk8_mirror_b0` becomes `ff_diag_e_pct` |
+| ~60 s | `eep_blk8_mirror_b2` becomes `ff_diag_e_pct` (**+2**, not +0 — see the box in B1) |
 | ~60 s | `ff_persist_wait` is back at 60.00 s |
 | 60-180 s | nothing more happens unless E moves by ≥ 5 % |
 
 Hard requirements for the whole log:
 
 * `ff_persist_fails` stays **0**;
-* `eep_blk8_mirror_b14` and `eep_blk8_mirror_b29` never change;
+* `eep_blk8_mirror_b0` and `eep_blk8_mirror_b1`, the `{block id, version}`
+  stamp, **never change** — if they do the block is discarded on the next key
+  cycle and #38 silently does not work;
+* `eep_blk8_mirror_b14`, the one byte stock code writes, never changes;
+* `eep_blk8_mirror_b29` is expected to move once (0xFF → 0x00 → 0x01) on the
+  first commit: it is the manager's ReplV byte, not ours. What matters is that
+  **the patch** never writes it;
 * `sum(payload) + csum == 0xFFFF` in **every** sample — the stage maintains the
   checksum itself, so there is no window in which the block is inconsistent;
 * `nvm_queue_state` is 0x20 or 0x21 in almost every sample. If it sits at
@@ -250,7 +281,8 @@ asserts that the mirror is byte-identical after 400 activations. The measuring
 block keeps working; only fields 4's `persist_state` stays 0 for ever.
 
 The same lever moves the store somewhere safer without a rebuild:
-`--set ff_persist_offset=1` (or any of +0..+13, +15..+28) and
+`--set ff_persist_offset=3` (or any of **+2..+13**, +15..+28 — **not** +0 or
++1, which are the block-id/version stamp) and
 `--set ff_persist_block=24` with `--set ff_persist_offset=3` for the 255-byte
 single-copy block (eeprom.md §5), at the cost of an eight-page write.
 

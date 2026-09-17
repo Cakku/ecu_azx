@@ -46,6 +46,14 @@ import med9lib as m  # noqa: E402
 # never opens the on-chip flash and `onchip_edit` never opens the calibration.
 FORBIDDEN = (
     (0x000000, 0x010000, "boot block and immobiliser pairing", None),
+    # The firmware's own OBD programming service refuses these two ranges
+    # outright (re/findings/flash_programming.md section 3, brief E6): a
+    # change there could only ever be written by BDM, which is a different
+    # risk class, so the apply tool refuses it too (integration, 2026-09-17).
+    (0x010000, 0x020000, "exception tables and boot module, which the OBD "
+                         "programming route refuses", None),
+    (0x080000, 0x0A0000, "resident flash-programming module, which the OBD "
+                         "route aliases to the calibration and never programs", None),
     (0x1C0000, 0x1E0000, "stock calibration", "calibration_edit"),
     # The first 16 KB of the on-chip flash is genuinely absent from the dump
     # (docs/02_memory_map.md section 2), so nothing can be written there.
@@ -61,9 +69,11 @@ FORBIDDEN = (
 # correctly: `flag -> text`.
 UNLOCK_WARNINGS = {
     "onchip_edit": "writes the MPC561 on-chip flash (0x404000-0x47FFFF). The "
-                   "block checksums are handled, but a KESSv2 write of this "
-                   "region has not been demonstrated: read the image back and "
-                   "compare before trusting it.",
+                   "block checksums are handled and the firmware's own OBD "
+                   "programming route whitelists the range (re/findings/"
+                   "flash_programming.md), but a KESSv2 write of it has not "
+                   "been demonstrated: read the image back and compare "
+                   "before trusting it.",
 }
 # Never changes, whatever the flags say.
 IDENT_START, IDENT_END = 0x1CEE20, 0x1CEE70      # CPU, end exclusive

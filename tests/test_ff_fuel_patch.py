@@ -49,8 +49,9 @@ NOP_LEAF = 0x0BD9E4
 CLR_LEAF = 0x11F02C
 PATCH_FLASH = 0x152000
 PATCH_RAM = 0x7FFB00
-STATE_LEN = 0x40
-CORE_END = 0x2C                      # header + core, what the model pins
+STATE_LEN = 0x4C                     # E2 0x40->0x44, E5 (#36) 0x44->0x4C
+CORE_END = 0x2C                      # header + FIRST core, what the model pins
+CORE2_OFF, CORE2_LEN = 0x40, 0x0C    # E2's second core, grown by E5
 RK = 0x803038
 CAN_SHADOW_ID = 0x803F98             # slot 15 id echo
 CAN_SHADOW_DATA = 0x803F9C           # slot 15 payload
@@ -93,10 +94,29 @@ def cal_from_block(blk: bytes) -> ff.Cal:
     """A model `Cal` describing an FFCAL001 image, so the two cannot drift."""
     can_id, timeout, hold, tau, slew, tick = struct.unpack_from(">6H", blk, 0x0C)
     mode, e_ovr, stall = struct.unpack_from(">3B", blk, 0x18)
+    zw_enable, dzw_max = struct.unpack_from(">2B", blk, 0xE6)       # E1 (#34)
     return ff.Cal(can_id=can_id, timeout_ms=timeout, hold_s=hold,
                   filter_tau_ms=tau, slew_pct_s=slew, tick_ms=tick,
                   mode=mode, e_override=e_ovr, stall_max=stall,
-                  f_curve=list(struct.unpack_from(">17H", blk, 0x20)))
+                  f_curve=list(struct.unpack_from(">17H", blk, 0x20)),
+                  zw_enable=zw_enable, dzw_max=dzw_max,
+                  fzw_curve=list(blk[0x42:0x42 + 17]),
+                  dzw_map=list(blk[0x54:0x54 + 64]),
+                  dzw_nmot_axis=list(struct.unpack_from(">8H", blk, 0xE8)),
+                  dzw_rl_axis=list(struct.unpack_from(">8H", blk, 0xF8)),
+                  # --- E2 (#35) ---------------------------------------------
+                  st_enable=blk[0x108], zwst_enable=blk[0x109],
+                  fst_max=struct.unpack_from(">H", blk, 0x10A)[0],
+                  zwst_max=blk[0x10C], zwst_tmax=blk[0x10D],
+                  fst_map=list(struct.unpack_from(">36H", blk, 0x94)),
+                  fst_e_axis=list(blk[0x10E:0x114]),
+                  fst_tmst_axis=list(blk[0x114:0x11A]),
+                  fzwst_curve=list(struct.unpack_from(">6b", blk, 0x11A)),
+                  # --- E5 (#36) ---------------------------------------------
+                  prail_enable=blk[0x122], prail_rsv=blk[0x123],
+                  prail_max=struct.unpack_from(">H", blk, 0x124)[0],
+                  diag_window_ms=struct.unpack_from(">H", blk, 0x126)[0],
+                  prail_curve=list(struct.unpack_from(">17H", blk, 0x128)))
 
 
 @requires_dump
@@ -205,8 +225,12 @@ class TestApply(DumpUnchanged):
 
     def test_the_on_chip_and_ram_warnings_are_both_raised(self):
         self.assertTrue(any('"static"' in w for w in self.warnings), self.warnings)
-        self.assertEqual(sum("on-chip flash" in w for w in self.warnings), 2,
-                         "both on-chip hook sites must warn")
+        self.assertEqual(sum("on-chip flash" in w for w in self.warnings), 7,
+                         "all seven on-chip hook sites must warn: D1's fuel "
+                         "hook 0x42247C and set-A raster hook 0x432940, E1's "
+                         "ignition hook 0x41D40C, E2's 0x41A680, 0x41A808 and "
+                         "0x431384, and E5's rail hook 0x45845C. Only D1's "
+                         "set-B raster hook 0x12067C is in external flash")
 
 
 @requires_dump
@@ -633,8 +657,8 @@ class TestColdStartAndModes(EmuBase):
         first = emu.call(self.syms["ff_fuel_hook_b"], reset=False)
         self.arm_frame(emu, ff.frame(e_pct=85, counter=1))
         warm = emu.call(self.syms["ff_fuel_hook_b"], reset=False)
-        self.assertLess(first.insns, 2000, "the cold-start activation got heavy")
-        self.assertLess(warm.insns, 800, "the warm activation got heavy")
+        self.assertLess(first.insns, 2600, "the cold-start activation got heavy")
+        self.assertLess(warm.insns, 1000, "the warm activation got heavy")
         rk = emu.call(self.syms["ff_fuel_rk_hook"], reset=False)
         self.assertLess(rk.insns, 200, "the segment stub got heavy")
 

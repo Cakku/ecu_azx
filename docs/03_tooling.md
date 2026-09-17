@@ -319,6 +319,31 @@ Limitations found in practice, all **VERIFIED-DYNAMIC** by that harness:
 For exact PowerPC semantics (FP rounding, agreement with the decompiler) use
 the Ghidra `EmulatorHelper` path instead, once A1 has produced the project.
 
+### 5.1.1 Device models — the harness can answer a write now (E4, 2026-09-17)
+
+The row "No peripheral model at all" above is one step less true. `emu/core.py`
+gained `stub_write(addr, fn)` and `add_device(start, end, model)`, both
+additive, and two models use them:
+
+* **`emu/qspi_eeprom.py`** — the QSMCM QSPI queue engine plus an M95160 on
+  PCS0, backed by a 2 KB file. It is proved by the firmware's own code: the
+  boot loopback self-test (0x017CF0) and the EEPROM WEL self-test (0x017A84)
+  both pass, and `eeprom_read_bytes`/`eeprom_write_bytes` round-trip
+  (`python3 -m emu.qspi_eeprom --self-test`). With it plus the two device
+  function pointers bound, the EEP_CONF block manager runs its start-up read
+  and a queued commit reaches status 2 — which closes the limit brief D2
+  recorded. Derivation: `re/findings/eeprom.md` section 10.
+* **`emu/toucan.py`** — the receive message buffer of a TouCAN slot, which is
+  all `can_rx_poll` looks at.
+
+Two harness caveats that cost time before they were understood, both
+**VERIFIED-DYNAMIC**:
+
+| Caveat | Consequence |
+|---|---|
+| Unicorn calls a `UC_HOOK_MEM_WRITE` callback **before** it performs the store | a device model cannot change the register the instruction is writing; it arms itself and acts on the next access |
+| `Med9Emu.call()` parks r1 at the boot stack top **0x7FEFFC** | a C frame there runs over application variables — `zwist_display_b1` (0x7FEF87) is 0x75 bytes below it. Call task code with `regs={"r1": 0x7FF768}`, the top of the OS task-stack region |
+
 ### 5.2 Regression tooling (`tools/bindiff.py`, `tools/logcmp.py`, issue #24)
 
 `bindiff.py` classifies every changed byte between two dumps as *patch*
@@ -402,6 +427,25 @@ Exact commands, the sensor pull-up/level-shift network and the host test
   counter). Read-protected ECUs answer `7F 27 35`; ours read fine.
 - Procedure and checklist: `04_re_guidelines.md` section 6.
 - EEPROM tools for backup analysis only: E2PA (Windows), EliasTuning/MED9-EEPROM-Tool (Python).
+
+> **Added 2026-09-17 (brief E7, issue #42).** The operating procedure that uses
+> all of the above — what to run before a write, what the read-back must show,
+> what a failed flash looks like and what never to flash — is
+> **[`07_workflow.md`](07_workflow.md) chapters 3 and 6**. It is the only place
+> the KESSv2 steps are written as a checklist, and every step whose behaviour
+> is still a prediction is marked `[unverified]` there, because no ECU has been
+> written by this project yet.
+>
+> Two facts from brief **E6** (`re/findings/flash_programming.md`, 2026-09-17,
+> VERIFIED-STATIC from the dump) belong next to the KESSv2 row above:
+> the ECU's **own** OBD programming route (session `10 85`, SID 0x34) can erase
+> and program **0x404000-0x47FFFF**, the on-chip flash, so the patch's seven
+> on-chip hook words are reachable over OBD in principle; and there is **no
+> boot-time integrity gate on flash content** — the 65 block sums are never
+> recomputed at boot and the published CRC-32 is compared with nothing. Whether
+> KESSv2 protocol 179 *drives* that route for that range is a property of the
+> tool, not the firmware, and it is still open: the read-back after Flash 0 is
+> the proof (`07_workflow.md` §3.3, docs/06 §6).
 
 ## 8. Reference documents to obtain
 

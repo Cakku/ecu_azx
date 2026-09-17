@@ -26,7 +26,7 @@ export GHIDRA_INSTALL_DIR=/usr/local/Cellar/ghidra/12.1.3/libexec
 | `KFZW` rl axis (`SRL12ZUUW`) | 0x5C7758 block / 0x5C775A data | 12 u16, 100 %/4096 per LSB, 10.2-103.9 % |
 | **`KFZW2` / `KFZWLB*` / `…OUT`** | — | **do not exist in this dataset** (§2.1) |
 | **`KFZWOP`** torque-model optimum | **0x5CA3F1** | 16 nmot x 11 rl, s8; axes 0x5CA3D6 / 0x5CA3E6 (§9). Never shift it |
-| `zwgru` base-angle sum | `FUN_0041d38c` 0x41D38C | **insertion point: the word at 0x41D40C** (§11) |
+| `zwgru` base-angle sum | `FUN_0041d38c` 0x41D38C | **insertion point: the word at 0x41D40C** (§11) — **TAKEN by `patches/ff_fuel` 2026-09-17, §11.4** |
 | per-bank angle + knock retard | `FUN_0041d10c` 0x41D10C | writes 0x7FD30B / 0x7FD30C (§4, §7) |
 | ZWMIN / ZWSEL / ZWOUT | 0x41D440 / 0x41D464 | clamp -54 ° .. +58.5 ° (§8) |
 | output driver | `FUN_0041cd9c` 0x41CD9C | `zw * 15/2` → 0.1 ° for the TPU stage |
@@ -403,6 +403,13 @@ by one dynamic run.
 
 ## 11. Insertion point for an additive ethanol ignition offset
 
+> **TAKEN 2026-09-17 (brief E1, issue #34).** `patches/ff_fuel` now occupies
+> the word at **0x41D40C**; `patch.json` carries it as a hook with
+> `"onchip_edit": true` and `old` = `7c635214`. Anything that wants an
+> additive ignition term from here on has to go through `ff_state.dzw_e`
+> (0x7FFB29) or find another site. §11.4 below records what was built and the
+> two corrections §11.1/§11.2 needed.
+
 **Use `zwgru_build` at 0x41D38C** (`FUN_0041d38c`). It is after the base map
 and every base delta, and before
 
@@ -446,6 +453,32 @@ ff_zw_offset:
         blr
 ```
 
+> **Corrected 2026-09-17 (E1, issue #34): the `r13` form above is forbidden.**
+> r13 is the application's SDA base and patch code may never touch it
+> (`docs/04_re_guidelines.md` §7, C2's rule, `tools/blobdis.py --check-sda`
+> fails the build on it). The stub as built addresses the state block
+> **absolutely**, and pays two instructions for it:
+>
+> ```asm
+> ff_zw_hook:
+>         add   r3,r3,r10                              ; the displaced insn
+>         lis   r11,PATCH_RAM@ha                       ; = lis r11,0x80
+>         lwz   r12,(PATCH_RAM+0x00)@l(r11)            ; ff_state.magic
+>         xoris r12,r12,0x4646
+>         cmplwi r12,0x3031                            ; "FF01"?
+>         bnelr                                        ; no state -> stock
+>         lbz   r12,(PATCH_RAM+0x29)@l(r11)            ; ff_state.dzw_e
+>         extsb r12,r12
+>         add   r3,r3,r12
+>         blr                                          ; -> 0x41D410
+> ```
+>
+> Ten instructions, six on the path an uninitialised block takes; it writes
+> only r11 and r12. The magic check is not decoration: the block is external
+> SRAM and is **not** cleared at cold start (`ram.md` §3.2), so without it the
+> first milliseconds after power-up would add a random byte to the ignition
+> angle.
+
 in free space. Why this site is safe:
 
 * **Live registers.** At 0x41D40C only `r3` (the accumulator), `r10` (the last
@@ -473,6 +506,17 @@ in free space. Why this site is safe:
   `interp_2d_s8(&KFDZWE, 12, DAT_007fd5ec, DAT_007fd5f0)` — but only if it
   runs in task 41, after `FUN_0041d334` has refreshed those indices.
 
+> **Not what E1 did, and why (2026-09-17).** The producer runs in the 10 ms
+> raster, not in task 41, so `DAT_007fd5ec` / `DAT_007fd5f0` are stale or
+> meaningless there and must not be read. `ff_ign.c` searches **its own**
+> 8-point axes (`ff_dzw_nmot_axis` / `ff_dzw_rl_axis` in FFCAL001) from
+> `nmot_w` 0x7FEE74 and `rl_w` 0x7FEFB2 — the same two cells `FUN_0041d334`
+> reads — and the breakpoints are taken **from** 0x5C7736 / 0x5C7758, so a
+> cell still lines up with a `KFZW` row and column and §12's budget table can
+> be read against it. The two stock helpers are not called either: their
+> arithmetic is re-implemented with a fixed trip count, because patch code may
+> not contain a loop whose trip count is data.
+
 ### 11.3 The alternative, and why it is second choice
 
 `DAT_005c753a` (§4) is an existing s8 calibration constant added to **every**
@@ -488,6 +532,39 @@ redirect of that one byte. But:
 
 Use it only as a bench experiment to prove the chain end to end
 (bump it by +2 counts, watch group 003 field 4 move by 1.5 °).
+
+### 11.4 Added 2026-09-17 (brief E1, issue #34) — what was actually built
+
+`patches/ff_fuel` (`src/ff_ign.c` + `ff_zw_hook` in `src/hooks.S`), specified
+by `emu/models/flexfuel.py`, proven in `tests/test_ff_ign_patch.py`, bench
+procedure in `patches/ff_fuel/test/procedure_e1.md`.
+
+| | |
+|---|---|
+| **Site** | 0x41D40C, `7C 63 52 14` → `4B D3 4C 55` (`bl 0x152060`) |
+| **Technique** | docs/06 §4 **technique 3** — the displaced word is an instruction, not a branch, so the stub re-does it and `blr`s to 0x41D410 |
+| **Cost** | **10 instructions** (6 with no valid state block); `zwgru_build` end to end goes 276 → 286 |
+| **Producer** | the 10 ms raster, `dzw_e = clamp(round(f_zw(E) × ff_dzw_map(nmot_w, rl_w) / 256), ±min(ff_dzw_max, 16))` |
+| **Carrier** | `ff_state.dzw_e`, RAM **0x7FFB29**, s8, 0.75 °CA, inside the block's checksummed core |
+| **Ships** | disabled: `ff_zw_enable` = 0, `ff_dzw_map` all zero, `f_zw(E0)` = 0 |
+| **Diagnostics** | VCDS measuring block **108**, ids 2192-2195 (§13.2's two acceptance signals are fields 3 and 4) |
+
+Three facts this section asserted were confirmed on the applied image rather
+than assumed:
+
+1. **`zwgru` is bit-identical with the offset at 0** over the whole 9 × 9
+   nmot/rl grid `tests/test_zw_model.py` uses, comparing the patched image
+   with the untouched dump;
+2. **the offset is a plain add before the clamp**: with `dzw_e` forced to
+   ±k for k in {−128, −16, −8, −1, 0, 1, 2, 8, 16, 127} the result is exactly
+   `clamp_s8(stock + k)`, so an over-large offset saturates and cannot wrap;
+3. **r10 and r1 survive and the return lands at 0x41D410**, with LR free as
+   §11.1 predicted.
+
+What this section got wrong, both corrected in place above: the `r13` load in
+§11.1's sketch (forbidden — the stub addresses RAM absolutely) and the
+suggestion in §11.2 to reuse the task-41 axis keys (impossible from a raster
+task — the producer searches its own axes).
 
 ## 12. Python model and emulator check (VERIFIED-DYNAMIC, emulated)
 
@@ -593,6 +670,18 @@ flex-fuel offset needs. **With E85 this detector must never latch**; watching
 0x7FD31B bits 0/1 is a cheap acceptance signal alongside `dwkrz` staying at
 zero.
 
+> **Added 2026-09-17 (E1, issue #34).** The latch byte now has a
+> `re/symbols.csv` row (`zwgru_low_octane_latch`, 0x7FD31B, VERIFIED-STATIC):
+> bit 0 is set at 0x0F43D0 (`ori r3,r12,1`) and cleared at 0x0F43E4
+> (`rlwinm r3,r11,0,24,30`), bit 1 set at 0x0F4450 (`ori r3,r12,2`) and cleared
+> at 0x0F4464, all four stored with `stb r3,-0x2CD5(r13)`. Do not confuse it
+> with **0x7FD31C**, a different cell with its own writers (0x0C645C) and
+> readers (0x458F38, 0x4590A0). `patches/ff_fuel` publishes `0x7FD31B & 3` as
+> **measuring block 108 field 4** and `max(dwkrz[0..5])` as field 3, so both
+> acceptance signals are one VCDS group away — and E1's shape is this
+> section's shape on purpose: produce an s8 delta in a slow task, consume it
+> segment-synchronously.
+
 ### 13.3 Where else the knock retard is read (monitoring targets)
 
 `0x7FCE76` (mean retard, exported) is read at 0x039AA4 (measuring handler),
@@ -603,6 +692,50 @@ knock retard raises the modelled exhaust temperature, which is what pulls
 component-protection enrichment in. That is the **knock-related enrichment
 path** the brief asks for: it is indirect, through the exhaust-temperature
 model, not through a dedicated knock-enrichment map.
+
+> **Correction 2026-09-17 (brief E2, VERIFIED-STATIC): the paragraph above is
+> wrong about 0x4594E8.** It is not the exhaust-gas temperature model and it
+> is not an addition to `tabgm`; it is a **comparison inside the knock-control
+> load window**. Brief E3 found this while tracing the lambda path and
+> recorded it in `re/findings/calibration_names.md` §9.5, which reads: the
+> word "sits in `FUN_0045943C`, a *comparison* — `cand_WKRMKR` 0x5D6123 <
+> `wkrm` — inside the knock-control load window that produces 0x7FEA80, whose
+> only reader is 0x103044". E3 could not make the correction here because
+> brief E1 owned `ignition.md` at the time; E2 makes it now.
+>
+> Re-disassembled independently for this correction
+> (`tools/blobdis.py data/passat_azx_ori.bin --file-off 0x594C0 --addr
+> 0x4594C0 --len 0x50`; r13 = 0x7FFFF0, docs/02 §4):
+>
+> ```
+> 004594E4  3D 60 00 5D  lis    r11, 0x5d
+> 004594E8  89 8D CE 86  lbz    r12, -0x317a(r13)   ; wkrm 0x7FCE76
+> 004594EC  89 6B 61 23  lbz    r11, 0x6123(r11)    ; cand_WKRMKR 0x5D6123
+> 004594F0  7D 8C 07 74  extsb  r12, r12
+> 004594F4  7D 6B 07 74  extsb  r11, r11
+> 004594F8  7C 0C 58 00  cmpw   r12, r11
+> 004594FC  41 81 00 28  bgt    0x459524
+> ```
+>
+> There is no `add` and no store to a temperature cell on the path: both
+> operands are sign-extended bytes fed straight into `cmpw`/`bgt`, and the
+> next pair (0x459500-0x45950C) compares a second r13 cell against 0x5D611C
+> in the same shape. So **0x7FCE76 has no route into the exhaust-temperature
+> model**, and the claim that knock retard pulls component-protection
+> enrichment in through `tabgm` is withdrawn. The knock-related enrichment
+> path asked for in brief B7 is therefore still **not located**; see
+> `calibration_names.md` §9.5 for what else that pass excluded.
+>
+> Two evidence strings still repeat the withdrawn claim and are **for the
+> integrator, not for an agent branch**: `re/symbols.csv` row `0x7FCE76`
+> (`wkrm`) and `ghidra_scripts/b7_ignition_symbols.csv` row `0x7FCE76` both
+> end "…and by the exhaust-temperature model at 0x4594E8". `re/symbols.csv`
+> merges with `merge=union`, so editing that row on a branch that runs beside
+> another one produces a duplicated symbol row at merge time (it already did
+> once, commit 31b2b31); E2 therefore left both files untouched. The correct
+> text is "…and by `bbkr_load_window` 0x45943C, which compares it with
+> `cand_WKRMKR` 0x5D6123". E3's own row for `0x45943C` in `re/symbols.csv`
+> already points here.
 
 `0x7FCE74` (mean of the six per-cylinder calibration offsets 0x5C83F8) and
 `0x7FCE77` (mean of the controller's internal retards) are local to `%KRREG`

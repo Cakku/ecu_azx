@@ -95,6 +95,13 @@ runs the same computation on a second map set — the FR's `…HDR`
 high-pressure-start variant (`KFKSTTHDR` / `KFWKSTTHDR`). Decompiled body,
 relevant tail:
 
+> **Correction 2026-09-17 (brief E2, issue #35):** the `return` on the first
+> line below is a decompiler artefact. The early-out does not return — it sets
+> `r31 = 0x400` and **branches to 0x41A680**, the same `sth` the normal path
+> uses, so that store executes on every activation whether the start is over or
+> not. §9.3 has the five instructions and what it means for the S1 hook. The
+> high-pressure twin `FUN_0041a690` really does branch past its store.
+
 ```c
 if (DAT_007fe921 != 0) { DAT_0080302c = 0x400; return; }        /* not starting -> 1.0 */
 ...
@@ -426,9 +433,17 @@ start ignition zwstt (deg CA, + = before TDC)
 
 ## 7. What the flex-fuel patch needs from this
 
+> **Added 2026-09-17 (brief E2, issue #35): S1 and Z1 are taken.**
+> `patches/ff_fuel` now owns all three words — 0x41A680, 0x41A808 and
+> 0x431384, all three in the **on-chip** flash 0x404000-0x47FFFF. §9 below has
+> the task each one runs in, the proof that the 10 ms producer precedes the Z1
+> store inside one activation, the dead-register set at each word and the two
+> axes E2 chose for `ff_fst_map`. S2 (0x41A250) and the warm-running ignition
+> word (0x41D40C, taken by E1) are unchanged by this brief.
+
 | | where | format | when it acts |
 |---|---|---|---|
-| **S1 — cranking fuel** | `sth` at **0x41A680** (and 0x41A808 for the HDR twin), publishing 0x80302C | u16, **1024 = 1.0**, saturate 0xFFFF | only while `B_stend` (0x7FE921) is clear; the ECU forces 1.0 afterwards, so the hook is inert outside the start |
+| **S1 — cranking fuel** | `sth` at **0x41A680** (and 0x41A808 for the HDR twin), publishing 0x80302C | u16, **1024 = 1.0**, saturate 0xFFFF | ~~only while `B_stend` (0x7FE921) is clear; the ECU forces 1.0 afterwards, so the hook is inert outside the start~~ **corrected 2026-09-17 (E2, §9.3): 0x41A680 also executes with 0x400 in r31 once `B_stend` is set, so the hook must test `B_stend` itself** |
 | **Z1 — start ignition** | `stb` at **0x431384**, publishing `zwstt` 0x802096 | **s8, 0.75 °CA per LSB** | same window; **no knock protection acts here** |
 | S2 — running mixture (not recommended) | `sth` at 0x41A250, publishing 0x803020 | u16, Q12 (4096 = 1.0) | every running operating point; duplicates B6's hook at 0x42247C |
 | warm-running ignition | B7's word at 0x41D40C | s8, 0.75 °CA per LSB | after start end |
@@ -459,4 +474,190 @@ Two calibration notes that fall out of the numbers:
 | Whether 0x7FD3E5 and 0x7FD3F7 are `tans` and a modelled `tmot`. They have no r13-relative writer (only reads), i.e. they are written through a pointer or an indexed store; `decompile.py --refs` shows the tester pointer table at 0x0A3AE0 for their neighbours. They feed the (all-zero) 1D `zwstt` term and the `0x5D3610` map. | open; time-boxed after 30 min |
 | The FR names of the 0x419DA4 / 0x4302DC / 0x430448 / 0x10C874 sub-factor cascade (§4.2). Structure and scaling are VERIFIED-STATIC; the module names are not. | open |
 | `KFWKSTT`'s x axis is "injections since start" (`anztist` = 0x7FD298 - 0x7FD26B) — VERIFIED-DYNAMIC as an index, COMMUNITY that the FR calls it `anztib`/`anztist`. | naming only |
+| **Added 2026-09-17 (E2, #35):** the tick PERIOD of the after-start timer `tnst_w` 0x8011D8. `afterstart_timer` (0x0D0DFC) increments it while 0x7FE91F is set, but its task is not established, so §4's "time since the engine started turning" has no unit. | open; `procedure_e2.md` §5 asks for its slope against `raster_setB_1ms_count` in the first bench log |
+| **Added 2026-09-17 (E2, #35):** which of the two `%ESSTT` twins actually runs in a given start. Both are called unconditionally from their tasks (§9.1) and both publish 0x80302C, and the FR calls the second the high-pressure-start variant, but nothing in the dump says when the ECU picks it. E2 hooks both, so the patch does not care; a calibrator does. | open; bench — log `ksta_adapted` and compare it against both `emu.start_model` tables |
 | `re/med9_draft.xdf` was **not** regenerated, to avoid a conflict with the agents editing other rows of `re/calibration_draft.csv` in parallel. Rebuild it once with `python3 tools/draft_to_xdf.py re/calibration_draft.csv -o re/med9_draft.xdf --min-confidence hypothesis` after the wave is merged. | for the integrator |
+
+## 9. Added 2026-09-17 (brief E2, issue #35) — the three hook sites: task, order and register liveness (VERIFIED-STATIC)
+
+§3.3 and §5 named the insertion points; before writing a stub the patch needs
+to know *which task each store runs in*, *whether the 10 ms producer has
+already run when the store executes*, and *which registers and which of
+LR / CR / CTR / XER are dead at the word being replaced*. All three answers
+come from the dump alone. Reproduce every line below with
+
+```bash
+# CPU -> file offset: 0x41A680 -> 0x216680, 0x41A808 -> 0x216808,
+#                     0x431384 -> 0x22D384   (tools/med9lib.py cpu_to_file)
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin \
+    --file-off 0x216640 --addr 0x41A640 --len 0x50      # S1 site 1 + epilogue
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin \
+    --file-off 0x2167C0 --addr 0x41A7C0 --len 0x70      # S1 site 2 + epilogue
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin \
+    --file-off 0x22D290 --addr 0x431290 --len 0x118     # Z1, whole function
+./.venv/bin/python3 tools/find_branch_refs.py data/passat_azx_ori.bin \
+    0x41A264 0x41A68C 0x431294
+```
+
+### 9.1 Which task each site runs in
+
+**Correction to a fact quoted in the E2 brief.** The brief states that
+`find_branch_refs.py` finds no `bl` and no pointer to the two `%ESSTT`
+functions and that they are reached through a table. That is an artefact of
+asking for the wrong address: Ghidra labels the *body* (0x41A268 / 0x41A690),
+while the `bl` targets the *entry* one word earlier (`addi r11,r1,0`, the
+EABI millicode prologue). Asked for the entries, both have exactly one
+ordinary `bl` caller:
+
+| Store | In function | Entry | Its only caller | Task |
+|---|---|---|---|---|
+| **0x41A680** `sth r31,0x303C(r13)` | `esstt_ksta` | 0x41A264 | 0x422464 | **`task_segment_a` 0x4223B0** — engine-synchronous, TCB 5, id 40, prio 0x0A |
+| **0x41A808** `sth r3,0x303C(r13)` | `esstt_ksta_hdr` | 0x41A68C | 0x422530 | **`task_segment_b` 0x4224BC** — engine-synchronous, TCB 6, id 41, prio 0x0A |
+| **0x431384** `stb r31,0x20A6(r13)` | `zwstt_build` | 0x431294 | 0x432B04 | **`task_100ms_int` 0x4328E4** — task set A's **10 ms** raster, id 19 |
+
+The two segment tasks are in the *common* (event/ISR) group of §11.8 of
+`re/findings/scheduler.md`, i.e. they run whichever task set is live; the
+10 ms raster is set A's, and §11.8 settles that **set A is the live set**
+(`zwstt` has no other producer at all, which is one half of that proof).
+
+So the two S1 sites are **asynchronous to our 10 ms producer** — exactly like
+D1's `rk` hook at 0x42247C, which sits in the same `task_segment_a` — and
+their stubs must check the state-block magic. The Z1 site is not:
+
+> **The Z1 producer provably runs first, in the same activation.** `ff_fuel`'s
+> task-set-A periodic hook is the word at **0x432940**, and `zwstt_build` is
+> called from **0x432B04**, both at the top level of 0x4328E4. Everything in
+> between is straight-line:
+>
+> ```bash
+> ./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin \
+>     --file-off 0x22E940 --addr 0x432940 --len 0x1C8 | grep -vc ' bl '
+> # 0   -- all 114 words from 0x432940 to 0x432B04 inclusive are `bl`
+> ```
+>
+> No conditional branch, no early return, no loop: 114 consecutive
+> argument-less `bl`. `ff_start_update()` therefore writes `zwst_add`
+> 0x1C4 bytes of instruction stream before `zwstt_build` consumes it, every
+> activation, with no staleness at all. The magic check in the Z1 stub is kept
+> anyway (one `lwz` + `xoris` + `cmplwi`), because it costs three instructions
+> and is what makes the stub inert when `ff_fuel` is not running — e.g. if the
+> live set were ever B after all, in which case our tick would fire at
+> 0x12067C and `zwstt_build` would never be called either.
+
+### 9.2 Register and LR liveness at each word
+
+All three functions use the EABI save/restore millicode, which is what settles
+LR. `_savegpr_*` at 0x0B8234/0x0B8238 stores the caller's LR (captured with
+`mflr r0` before the `bl`) into **4(old_sp)**, the caller's own LR slot;
+`_restgpr_*_x` at 0x0B81D8/0x0B81DC reloads it, does `mtlr r0`, pops the frame
+with `ori r1,r11,0` and returns with `blr` — i.e. the `bl` to the restore
+helper never comes back to the caller. `zwstt_build` open-codes the same thing
+(`stw r0,0x14(r1)` / `lwz r0,0x14(r1)` + `mtlr r0`).
+
+**Consequence: at all three sites LR holds a value nobody will read again**
+(the return address of the immediately preceding `bl`), and the real LR is
+already in memory. A `bl` into a trampoline is free at every site, and none of
+them needs a frame.
+
+| | 0x41A680 | 0x41A808 | 0x431384 |
+|---|---|---|---|
+| value stored | r31 | **r3** | r31 |
+| r0 | dead — reloaded by `_restgpr_28_x` from 4(r11) | dead — `_restgpr_29_x` | dead — `lwz r0,0x14(r1)` at 0x431388 |
+| r11 | dead — written at 0x41A684 `addi r11,r1,0x18` | dead — written at 0x41A824 | dead — never written in the function, volatile, and three `bl`s precede the site |
+| r12 | dead — last read 0x41A674, never read after | dead — written at 0x41A80C | dead — last read 0x4312B8, never read after |
+| LR | dead (above) | dead (above) | dead — `mtlr r0` at 0x43138C |
+| CR0 | dead — no CR read between the store and the return | dead — `cmpwi r12,0` at 0x41A810 writes it first | dead — no CR read after the store |
+| CTR, XER | untouched by the whole tail | untouched | untouched |
+| r1 | not touched by any stub | | |
+
+The value register itself is *also* dead after the store at all three sites
+(r31 and r3 are both reloaded or volatile), but the stubs do not rely on that
+and never write r31 or r3: it costs nothing to keep the displaced instruction
+a pure read of its operand, and it keeps the stub correct if a later dataset
+moves the store.
+
+That leaves **r0, r11, r12** as the scratch set at every site, which is enough
+for the arithmetic S1 needs (base, value, product) with nothing spilled. None
+of the three is r2 or r13, so `tools/blobdis.py --check-sda` passes.
+
+### 9.3 Two properties of the sites that make them safe
+
+* **S1 is NOT inert outside the start, and §3's `return` is a decompiler
+  artefact.** This is the one thing in this section that had to be found by
+  reading the words rather than the decompilation, and it is the reason the
+  S1 stub carries a gate. §3 renders the top of `esstt_ksta` as
+  `if (B_stend) { 0x80302C = 0x400; return; }` and §7 concludes "the hook is
+  inert outside the start". The compiler shared the epilogue instead:
+
+  ```
+  0041A2D0  lbz   r12,-0x16cf(r13)   ; B_stend 0x7FE921
+  0041A2D4  cmpwi r12,0
+  0041A2D8  beq   0x41a2e4           ; not finished -> the real computation
+  0041A2DC  li    r31,0x400          ; finished -> the neutral 1.0 ...
+  0041A2E0  b     0x41a680           ; ... published THROUGH the hooked store
+  ```
+
+  `tools/find_branch_refs.py data/passat_azx_ori.bin 0x41A680 0x41A808
+  0x431384 --no-ptr` lists exactly one branch into each word — 0x41A2E0 for
+  the first, and the ordinary computation paths 0x41A7E0 and 0x431374 for the
+  other two. So **0x41A680 runs on every activation of the segment task for as
+  long as the engine runs**, with r31 = 0x400, and a stub that scaled it
+  unconditionally would multiply the ECU's explicit "no start enrichment" by
+  `f_st` at every operating point. Both S1 stubs therefore read `B_stend`
+  0x7FE921 themselves and take the untouched path when it is set — the same
+  condition the stock code tests, in the same cell, which makes the property
+  true of the *store* instead of of one path to it.
+
+  The **high-pressure twin is built differently**: its `bne 0x41A824` at
+  0x41A6A4 jumps past the store to the epilogue, so 0x41A808 genuinely is
+  unreachable once `B_stend` is set. The gate is in both stubs anyway, because
+  they share the code and because the asymmetry is a compiler decision, not a
+  fact anyone should depend on.
+
+  **Z1 needs no such gate.** `zwstt_build` tests 0x7FECCA at 0x4312A8 and
+  `bne 0x431388` goes to its epilogue — past the store at 0x431384. The Z1
+  word is genuinely unreachable once the start has finished, and there is no
+  shared-epilogue branch into it (`find_branch_refs` above).
+* **Z1's offset is not clipped away by `zwmin`.** `%ZWMIN` (`zwmin_build`
+  0x458E74, called from 0x45CB0C in set A's **20 ms** task 0x45CAC4) chooses
+  between a map and `zwstt` on bit 3 of `cand_CWZWMN` 0x5C7972. That byte is
+  **0x01** in this dataset, so bit 3 is clear and the branch at 0x458F10 is
+  taken: 0x458F70 `lbz r27,0x20A6(r13)` reads `zwstt` itself and 0x458F7C
+  publishes it to 0x7FD328, which `zwmin_select` 0x41D440 turns into `zwmin`
+  0x7FD32A. The floor therefore moves with the value, and the advance survives
+  to `zwout`. (`zwstt` has five references in all — `sda_xref.py --var
+  0x802096`: the store at 0x431384, this read, the consumer at 0x41D22C in
+  `zwbas_per_bank`, one read at 0x41B0CC in `%STADAP`, and the store at
+  0x1137E0 which writes 0x8020**97**, the byte after it.)
+
+### 9.4 What E2 took, and the axes it chose
+
+Sites taken by `patches/ff_fuel` (see §7's table for the format):
+
+| Hook | Word | Region | Replaces | Note |
+|---|---|---|---|---|
+| S1 site 1 | **0x41A680** | on-chip flash | `sth r31,0x303C(r13)` | `ff_st_hook_a` |
+| S1 site 2 | **0x41A808** | on-chip flash | `sth r3,0x303C(r13)` | `ff_st_hook_b`, r3 not r31 |
+| Z1 | **0x431384** | on-chip flash | `stb r31,0x20A6(r13)` | `ff_zwst_hook` |
+
+`ff_fst_map` is 6 (E) x 6 (`tmst`), Q10, and its `tmst` axis is six of the
+twelve `KFWKSTT` breakpoints (0x5C6C62, §3.1) so every cell lines up with a
+stock row:
+
+| count | 24 | 44 | 64 | 91 | 117 | 184 |
+|---|---|---|---|---|---|---|
+| °C | -30 | -15 | 0 | +20.25 | +39.75 | +90 |
+
+Why these six of the twelve. The stock cranking factor is strongly convex in
+`tmst` (22.8x at -30 °C, 2.1x at 90 °C, §6), so the breakpoints have to be
+dense where it moves fastest and may be sparse where it is flat; -30 / -15 / 0
+covers the steep part at one breakpoint every 15 °C, +20.25 and +39.75 bracket
+the warm-start region where the calibration starts at 1.2x, and +90 pins the
+fully warm end. **+39.75 °C is also the default `ff_zwst_tmax`**, so the
+temperature at which the start *advance* is switched off is exactly a
+breakpoint of the *fuel* map rather than a number between two of them.
+
+The E axis is `ff_fst_e_axis[6]` = 0, 20, 40, 60, 85, 100 % — the one §7
+recommends, with 85 as a breakpoint because E85 is the calibration target.
+Both axes are calibration, not compiled constants, and both are checked
+strictly increasing by `ffcal001.py`.

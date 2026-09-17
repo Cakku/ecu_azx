@@ -303,6 +303,52 @@ an entry array; each stored entry is 8 B = size at +1, 24-bit source addr at
 +4). `kwp_sid_2C_h2` (0x35034) wipes all 10 slots (session change / reset), so
 **redefine your dynamic ids after every session (re)start.**
 
+> **2026-09-17 (E4, #20/#39) — where the entry arrays actually are, and the
+> emulator trap that hid it. VERIFIED-STATIC.**
+>
+> The "ptr to an entry array" at slot+4 is **not** filled by `kwp_sid_2C_h1`,
+> and `kwp_sid_2C_h2` clears only the count byte at slot+1 (0x035044-0x03505C
+> writes `stb r3,1(r12)` for ten slots and nothing else). It is filled once by
+> **`ddli_init` at 0x12E39C**:
+>
+> ```
+> 0012E3B0  stw  r11,4(r4)        ; r4 = 0x804038, r11 = 0x80366C   -> id 0xF0
+> 0012E3BC  mulli r11,r5,0x18     ; r3 = 0x80370C, r5 = 1..9
+> 0012E3D0  stw  r11,4(r12)       ; slot n -> 0x80370C + (n-1)*0x18 -> 0xF1..0xF9
+> ```
+>
+> so **id 0xF0's entry array is 0x80366C-0x80370B (0xA0 B = 20 entries)** and
+> **ids 0xF1-0xF9 get 0x18 B = 3 entries each**, starting at 0x80370C — which
+> is exactly `tbl_ddli_max_entries` (0xA2268) and confirms those limits from a
+> second, independent direction. `ddli_init` is a leaf ending at 0x12E3E4 and
+> is reached only through the function-pointer table at **0x0B1B88**, the same
+> init-table family as the NVM mode setters of `eeprom.md` §9.
+>
+> **Consequence for `emu/` and `logging/ecu_sim.py`.** The emulator has no OS
+> to walk that table, so before this note every pointer was 0 and every
+> dynamic id wrote its entries to **address 0 + i·8** — into
+> `tbl_etr_branch_table` at 0x000000 (one define turned `48 01 10 F2` into
+> `48 02 10 F2 00 7F FB 00`). Two visible symptoms, one cause:
+> * defining a **second** dynamic id silently overwrote the **first** one's
+>   entries, so the first id's record read the wrong cells and, when the sizes
+>   differed, came back short and shifted;
+> * the exception branch table was corrupted, which is a plausible source of
+>   the runs that died mid-session under load.
+>
+> `logging/ecu_sim.py::Med9Handlers.power_on` now calls the real routine, and
+> all five ids of `logging/sessions/ff_fuel.json` then read back byte for byte
+> against a direct RAM read of the same emulator
+> (`tests/test_ecu_sim_patch.py::TestDdliAcrossSeveralIds`).
+>
+> **Nothing here says the bench will misbehave.** On the car the application's
+> start-up runs the init table, so the pointers are right and five dynamic ids
+> are fine — the 20/3/3/… entry budget and the response length are the real
+> limits, and `logging/med9log.py::plan_chunks` already respects both. What was
+> broken was only the simulator's fidelity, in exactly the way
+> `eeprom.md` §10.3 describes for the NVM device pointers: an uninitialised
+> pointer that no statically resolvable instruction in the *application* path
+> writes, because the writer lives in an init table.
+
 ### 4.2 ReadDataByLocalId routing — `kwp_sid_21_h1` (0x35F6C)
 
 ```
@@ -454,10 +500,48 @@ so no single range crosses that window (read up to 0x7F9E3B, skip to 0x7FA480).
   command/response state machine at 0x4149CC, likely the on-chip
   crypto/immobiliser helper). Not needed for logging; not reversed further.
 * Exact P3/keep-alive timeout value (used the conventional figure).
-* `kwp_transfer_mode4` (0x480000 window) internal segment semantics — mapped
-  enough to know it is not the RAM route; not fully decoded.
+* `kwp_transfer_mode4` (0x480000 window) internal segment semantics —
+  **SETTLED (2026-09-17, E6, `re/findings/flash_programming.md` §6.2).** The
+  32-entry table at 0x0B2FF2 is **EEP_CONF**, the SPI-EEPROM block table at
+  0x0B2FF0 that `tools/eeprom_map.py` decodes: `off = addr - 0x480000`, then
+  `+0x02` u16 EEPROM offset, `+0x08` u16 flags whose bit 0 means "two copies"
+  (length doubled), `+0x0A` u8 length. **The window is the EEPROM image, not a
+  flash view**; unmapped sub-ranges read back 0xFF and `kwp_sid_35_h1` rejects
+  an end that reaches 0x480400 (NRC 0x53), so only EEPROM 0x000-0x3FF —
+  blocks 0..21, which includes the programming record in block 10 — is
+  reachable. `./.venv/bin/python3 tools/flash_segments.py
+  data/passat_azx_ori.bin --segments`.
 * The transport-layer framing (who adds `SID+0x40` / `7F`) lives below these
   handlers and was taken as standard KWP2000; not disassembled here.
+
+> **Addition 2026-09-17 (E6, blocker of #26 #27 #28 #32) — `10 85` does not
+> start a session, and there is a second dispatch table. VERIFIED-STATIC.**
+> §2's table row for `10 85` reads "flash-reprogramming session; sets up
+> UC3F". The first half is the intent, the second is not what the code does,
+> and the row should be read with this note:
+>
+> * `kwp_start_session_core`'s 0x85 arm (0x036C60) **never calls
+>   `kwp_session_set`**. After its preconditions (security state 2 = level 1,
+>   plus six flags, §2) it stages a record into EEP_CONF block 10, answers
+>   *response pending* (`kwp_io_struct+0xA = 8`), then writes the magic
+>   **0xAABFFB11 to RAM 0x7F8020**, shuts the IMB peripherals down
+>   (`bl 0x071814`) and **hangs on purpose** (`bl 0x0BA444`, index 0x14B) so
+>   the watchdog resets the ECU. After the reset `app_init` sees the magic and
+>   sets bit 2 of `boot_mode_flags` (0x7FD401).
+> * The programming services then come from a **second, 13-entry dispatch
+>   table at 0x088174** (config struct 0x088280, registered by `prog_kwp_init`
+>   0x08C244), whose entries carry **no session gate at all** (mask
+>   0xFFFFFFFF) and which **does** contain SID **0x34 RequestDownload**
+>   (handler 0x086A28) — the service §1's table does not have. Its security
+>   gate is a separate byte, `prog_security_level` at RAM 0x805A10, read by
+>   `prog_security_check` (0x08C778) and required to be 2 by all twelve
+>   programming services; the seed/key pair is the same level-1 LFSR with mask
+>   0x5FBD5DBD (stored at 0x088170).
+>
+> So no diagnostic session number ever unlocks programming on the application
+> stack, which is why no `session_mask` value in §2.1 covers it. Whole flow,
+> address whitelist and driver: `re/findings/flash_programming.md` §1-§4;
+> `./.venv/bin/python3 tools/flash_segments.py data/passat_azx_ori.bin --kwp`.
 
 ## 10. Reproduction
 

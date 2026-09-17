@@ -144,10 +144,18 @@ all: $(BIN) $(LSS) $(SYM)
 $(BUILD):
 	@mkdir -p $(BUILD)
 
-$(BUILD)/%.o: src/%.c | $(BUILD)
+# Every object depends on every header, the shared trampoline macros and this
+# file: a stale object compiled against an older ff_state.h is exactly the bug
+# the integration of wave E pair 2 hit (six `cmplwi r4,0x40` in handlers whose
+# .c had not changed while FF_LENGTH had become 0x44).  Coarse, but a patch is
+# a dozen files and the rebuild is a second (2026-09-17).
+HDRS := $(wildcard src/*.h) $(wildcard $(COMMON_DIR)*.h) $(COMMON_DIR)hooks.S \
+        $(COMMON_DIR)patch.mk $(PATCH_JSON)
+
+$(BUILD)/%.o: src/%.c $(HDRS) | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD)/%.o: src/%.S | $(BUILD)
+$(BUILD)/%.o: src/%.S $(HDRS) | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(ELF): $(OBJS) $(COMMON_DIR)patch.ld

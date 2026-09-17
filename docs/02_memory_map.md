@@ -65,6 +65,40 @@ before the first write** (see the plan).
 > most likely inside those 16 KB too — see the note in section 3.
 > Details: `re/findings/mpc5xx_registers.md` §8 and §5.
 
+> **2026-09-17 (E6, blocker of #26 #27 #28 #32) — the firmware's own view of
+> both flashes, and the on-chip writability question answered from the dump.
+> VERIFIED-STATIC.** The A2 note above is confirmed from the *software* side,
+> and the "protected sector the tool skips" guess is replaced by a fact:
+>
+> * The firmware carries a **three-entry flash-device table** (0x082980 in the
+>   application's programming module, 0x01E71C in the RAM bootstrap loader):
+>   device 0 = `0x000000-0x3FFFFF` (CS0), device 1 = **`0x404000-0x47FFFF`**
+>   (on-chip UC3F), device 2 = `0xC00000-0xC7FFFF` (a second UC3F, absent on
+>   this hardware). Device 1 is live whenever RAM 0x7F8014 == 0x20, which the
+>   boot code sets on **every** MPC563 start (`mtspr 638, 0x0802`, i.e.
+>   FLEN=1/ISB=1, at file 0x123F0; the MPC561 arm at 0x12380 writes 0x0002 and
+>   0x10 instead — this is the part-number fork §1 mentions).
+> * The on-chip array is erased in **ten** blocks from array base 0x400000:
+>   16 KB at 0x400000 (small block 0), 48 KB at 0x404000, 48 KB at 0x410000,
+>   16 KB at 0x41C000 (small block 1), then six 64 KB blocks to 0x47FFFF —
+>   exactly Fig. 21-8. The geometry table is at 0x0825E4 and the matching
+>   UC3FCTL block-select bits at 0x082684.
+> * **The OBD programming service accepts `0x404000-0x47FFFF` as a download
+>   and erase range** (`kwp_download_range_allowed`, 0x0889C8), and the driver
+>   relocated to RAM 0x804800 implements the full UC3F interlock sequence
+>   (SES → interlock write → EHV → poll HVS/PEGOOD). **Small block 0 is never
+>   reachable that way**: no whitelist row starts at 0x400000 and the erase
+>   loop only starts at the range start. So the missing 16 KB is not "skipped
+>   by KESSv2" — it is outside what the ECU's own route can address at all.
+> * Two boot routines take the protection off and put it back:
+>   `uc3f_unprotect` (0x011CE0, `UC3FMCR[PROTECT] = 0` + `UC3FMCRE[SBPROTECT]
+>   = 0` + CS0 write-protect off) and `uc3f_protect` (0x011D58). A normal boot
+>   ends **protected**; the programming boot path unprotects.
+>
+> The K-TAG/BDM read before the first write is still required — for the 16 KB
+> itself, which nothing in the firmware can produce. Full evidence:
+> `re/findings/flash_programming.md`; `tools/flash_segments.py`.
+
 `med9_re/passat_azx_flash.bin` is simply the first 2 MB of the dump.
 
 ## 3. Address space seen by the CPU
@@ -308,6 +342,40 @@ checksum tool, on the bench ECU.
 
 EEPROM (ST M95160-class, 2 KB, on the SPI bus) has its own block checksums
 (COMMUNITY; tools: E2PA, EliasTuning/MED9-EEPROM-Tool). Not read yet.
+
+> **2026-09-17 (E6, blocker of #26 #27 #28 #32) — two of the three "runtime
+> checker" lists are misidentified, and the real one is a CRC-32.
+> VERIFIED-STATIC.**
+>
+> * **file 0x1E73C and 0x829A0 are not checksum descriptors.** They are
+>   **entry 1 of the flash *device* table** — `{start, end, five driver entry
+>   points}`, stride 0x1C — in the RAM bootstrap loader (table base 0x01E71C)
+>   and in the application's programming module (base 0x082980). All three
+>   entries of each are `0x000000-0x3FFFFF` (CS0), **`0x404000-0x47FFFF`**
+>   (on-chip UC3F) and `0xC00000-0xC7FFFF` (a second UC3F, not populated). The
+>   "RAM pointers" are the driver's five ops inside its relocated image.
+>   `./.venv/bin/python3 tools/flash_segments.py data/passat_azx_ori.bin --devices`.
+> * **0xA3A18 is real, but its base is 0xA3A10** and it drives a **CRC-32**,
+>   not the 16-bit block sums: `{0x020000,0x1BFFFF}, {0x404000,0x47FFFF},
+>   {0x5C2E00,0x5FFFFF}, {0,0}`, hashed 0x64 bytes at a time by
+>   `flash_crc_task` (0x011CB10) with the reflected polynomial 0xEDB88320 and
+>   a table built at RAM 0x800288. **The result is published to RAM 0x7F9178
+>   and never compared against anything** — it is a reported value, not a gate.
+> * **The 65 sum/~sum descriptors are never recomputed at run time.** Every
+>   reference to the 54-entry table at 0xA0000 (0x020764, 0x02081C, 0x089E68,
+>   0x09DD94, 0x09DE28, 0x09DEBC) is inside the programming module, i.e. the
+>   tool-facing side.
+> * **The one check that does stop the ECU** is the calibration marker:
+>   `app_check_cal_marker` (0x06DD3C, called from 0x04CF6C in `app_init`'s
+>   chain) requires the halfword at **0x5E2500 = file 0x1E2500** to be
+>   `0x5A5A`; otherwise it writes 0xBB44E169 to RAM 0x7F8000 and hangs, so the
+>   watchdog resets the ECU straight back into the flash loader.
+>
+> So the "additional signature" risk item above is **closed for the boot
+> path**: there is no signature and no boot-time verdict on the flash content;
+> the first flash still has to be an unmodified, checksum-fixed file, but a
+> mismatch would not be caught by the ECU. Full detail and evidence:
+> `re/findings/flash_programming.md` §3.2 and §5.3.
 
 ## 7. Tables located so far
 

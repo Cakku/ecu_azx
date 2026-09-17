@@ -34,10 +34,18 @@
 
 struct ff_state ff_state __attribute__((section(".bss.patch_state")));
 
-_Static_assert(sizeof(struct ff_state) == 0x40,
-               "the state block layout in ff_state.h and README.md is 64 bytes");
+_Static_assert(sizeof(struct ff_state) == 0x4C,
+               "the state block layout in ff_state.h and README.md is 76 bytes"
+               " since brief E5 (#36) grew E2's second core");
+_Static_assert(FF_LENGTH % 4u == 0u,
+               "ff_state_init() clears the block a WORD at a time, so the"
+               " length has to be a multiple of four");
+_Static_assert(sizeof(struct ff_state) == FF_LENGTH,
+               "FF_LENGTH is the block length the header carries");
 _Static_assert(FF_CORE_OFF + FF_CORE_LEN == 0x2Cu,
-               "the checksummed core must end where the annex begins");
+               "the first checksummed core must end where the annex begins");
+_Static_assert(FF_CORE2_OFF + FF_CORE2_LEN == FF_LENGTH,
+               "the second checksummed core must end where the block does");
 
 void ff_fuel_tick_a(void);
 void ff_fuel_tick_b(void);
@@ -57,14 +65,24 @@ struct ff_cal {
 };
 
 /* ------------------------------------------------------------- the block -- */
+/*
+ * The checksum covers TWO ranges since E2 (#35) grew the struct: D1's core
+ * +08..+2B and E2's appended core +40..+43.  The annex in between has other
+ * writers and carries no control value, which is the whole reason for the
+ * split (see the header).  Summing them in this order is part of the contract
+ * with `emu/models/flexfuel.py`, which concatenates the same two slices.
+ */
 static u16 ff_core_csum(void)
 {
     const volatile u8 *p = (const volatile u8 *)((u32)&ff_state + FF_CORE_OFF);
+    const volatile u8 *q = (const volatile u8 *)((u32)&ff_state + FF_CORE2_OFF);
     u32 s = 0u;
     u32 i;
 
     for (i = 0u; i < FF_CORE_LEN; i++)
         s += p[i];
+    for (i = 0u; i < FF_CORE2_LEN; i++)
+        s += q[i];
     return (u16)~s;
 }
 
@@ -107,6 +125,7 @@ static void ff_state_init(void)
     ff_state.length = (u16)FF_LENGTH;
     ff_state.mode = (u8)FF_MODE_FAULT;    /* FAULT until the first good frame */
     ff_state.f_q10 = (u16)FF_F_MIN;       /* E0, bit-identical to stock       */
+    ff_state.fst_q10 = (u16)FF_FST_ONE;   /* E2: the same, for the start      */
     ff_state.status = 0xFFu;              /* "no frame seen"                  */
     ff_state.cal_ok = ff_cal_ok();
     ff_state.cal_mode = ff_state.cal_ok
@@ -128,11 +147,36 @@ static void ff_state_init(void)
 }
 
 /*
- * The tail of every activation: refresh what the measuring-block handlers read
- * (annex, so it may happen here) and re-checksum the core.
+ * The tail of every activation, on every path out of ff_tick(): recompute the
+ * ignition offset, refresh what the measuring-block handlers read (annex, so
+ * it may happen here) and re-checksum the core.
+ *
+ * E1 (#34): `ff_zw_update()` belongs here and not in the mode-1 branch,
+ * because it has to run on the activation that leaves OK/HOLD as well - that
+ * is what makes the #37 ignition rule ("straight to gasoline, no hold, no
+ * ramp") true by construction rather than by a branch somebody has to
+ * remember.  It writes only `dzw_e` and `fzw_q8`, both core, both above, so
+ * the checksum below still covers them.
+ *
+ * E5 (#36): `ff_rail_update()` is here for the third time and for the third
+ * reason of the same shape: `prail_add` follows the #37 rule for anything that
+ * ADDS (pressure, this time), so it has to be 0 on the activation the mode
+ * leaves OK/HOLD/OVERRIDE.  Its three diagnostics run on every path too, which
+ * is what makes them usable while the adder is disabled -- which is how the
+ * file ships.  It writes only the five core-2 fields, so the checksum below
+ * covers them.
+ *
+ * E2 (#35): `ff_start_update()` is here for the same reason and carries BOTH
+ * #37 rules at once - its fuel half follows `e_filt` (so it inherits the hold
+ * and the decay) and its ignition half drops to 0 on the activation the mode
+ * leaves OK/HOLD/OVERRIDE.  It writes only `fst_q10` and `zwst_add`, which are
+ * the second checksummed range, so the checksum below covers them too.
  */
 static void ff_finish(void)
 {
+    ff_zw_update();
+    ff_start_update();
+    ff_rail_update();
     ff_diag_publish();
     ff_state.csum = ff_core_csum();
 }

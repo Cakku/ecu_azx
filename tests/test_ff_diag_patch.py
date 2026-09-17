@@ -58,6 +58,21 @@ NVM_QUEUE_STATE = 0x7FADAB
 PATCH_RAM = tff.PATCH_RAM
 
 
+#: EEP_CONF block 8's payload starts with a {block id, version} stamp that
+#: `nvm_read_all_blocks` (0x06227C) validates against the flash default table
+#: at 0x060458-0x060470; a mismatch discards the block and reloads the
+#: defaults (re/findings/eeprom.md section 10.5, brief E4).  That is why
+#: `ff_persist_offset` is **2** and not 0, and why the two bytes below must
+#: never be written by this patch.
+BLK8_STAMP = bytes((8, 1))
+PERSIST_OFF = 2
+
+
+def blk8_stored(pct: int) -> bytes:
+    """A block-8 image whose stamp is intact and whose E% sits at +2."""
+    return blk8(BLK8_STAMP + bytes([pct]) + b"\xFF" * (BLK8_LEN - 2 - 3))
+
+
 def blk8(payload: bytes) -> bytes:
     """A block-8 image with the manager's own checksum (eeprom.md 3.4)."""
     b = bytearray(payload[:BLK8_LEN - 2].ljust(BLK8_LEN - 2, b"\xFF")) + b"\0\0"
@@ -164,7 +179,7 @@ class DiagEmuBase(tff.EmuBase):
         """An emulator and a model driven to the same state, side by side."""
         emu = self.fresh()
         mdl = ff.FlexFuelModel(tff.cal_from_block(self.cal_blk))
-        emu.write(BLK8_MIRROR, blk8(b"\xFF" * (BLK8_LEN - 2)))
+        emu.write(BLK8_MIRROR, blk8(BLK8_STAMP + b"\xFF" * (BLK8_LEN - 4)))
         for i in range(ticks):
             rx = (ff.frame(e_pct=e_pct, t_fuel_c=t_fuel_c,
                            counter=(i // 10) & 0xFF) if i % 10 == 0 else None)
@@ -183,7 +198,8 @@ class DiagEmuBase(tff.EmuBase):
         Without it the next activation finds the header wrong and runs
         `ff_state_init()`, which is correct behaviour and a confusing test.
         """
-        core = emu.read(PATCH_RAM + 0x08, 0x24)
+        core = (emu.read(PATCH_RAM + ff.CORE_OFF, ff.CORE_LEN)
+                + emu.read(PATCH_RAM + ff.CORE2_OFF, ff.CORE2_LEN))
         emu.write(PATCH_RAM + 0x06, (~sum(core)) & 0xFFFF, 2)
 
     @staticmethod
@@ -200,7 +216,7 @@ class DiagEmuBase(tff.EmuBase):
 class TestDispatcher(DiagEmuBase):
     def test_the_four_ids_answer_with_the_model_triples(self):
         emu, mdl = self.warm()
-        got, want = emu.read(PATCH_RAM, 0x40), mdl.full_bytes()
+        got, want = emu.read(PATCH_RAM, tff.STATE_LEN), mdl.full_bytes()
         self.assertEqual(got[:0x28], want[:0x28],
                          "header and core must agree tick for tick")
         self.assertEqual(got[0x34:0x3A], want[0x34:0x3A],
@@ -344,9 +360,9 @@ class TestPersistence(DiagEmuBase):
         for stored, want_pct in ((0, 0), (5, 5), (85, 85), (100, 100)):
             with self.subTest(stored=stored):
                 emu = self.fresh()
-                emu.write(BLK8_MIRROR, blk8(bytes([stored]) + b"\xFF" * 29))
+                emu.write(BLK8_MIRROR, blk8_stored(stored))
                 emu.call(self.syms["ff_fuel_hook_b"], reset=False)
-                st = emu.read(PATCH_RAM, 0x40)
+                st = emu.read(PATCH_RAM, tff.STATE_LEN)
                 self.assertEqual(struct.unpack_from(">H", st, 0x24)[0],
                                  want_pct * 16, "e_key")
                 self.assertEqual(struct.unpack_from(">H", st, 0x30)[0],
@@ -361,9 +377,9 @@ class TestPersistence(DiagEmuBase):
         for stored in (0xFF, 101, 200):
             with self.subTest(stored=stored):
                 emu = self.fresh()
-                emu.write(BLK8_MIRROR, blk8(bytes([stored]) + b"\xFF" * 29))
+                emu.write(BLK8_MIRROR, blk8_stored(stored))
                 emu.call(self.syms["ff_fuel_hook_b"], reset=False)
-                st = emu.read(PATCH_RAM, 0x40)
+                st = emu.read(PATCH_RAM, tff.STATE_LEN)
                 self.assertEqual(struct.unpack_from(">H", st, 0x08)[0], 0)
                 self.assertEqual(struct.unpack_from(">H", st, 0x24)[0], 0)
                 self.assertEqual(struct.unpack_from(">H", st, 0x30)[0], 0xFFFF,
@@ -375,13 +391,13 @@ class TestPersistence(DiagEmuBase):
         params = ffcal001.load_params(tff.FF_FUEL / "ffcal001.json")
         blk = ffcal001.build(dict(params, ff_persist_enable=0))
         emu = self.fresh(cal=blk)
-        emu.write(BLK8_MIRROR, blk8(bytes([42]) + b"\xFF" * 29))
+        emu.write(BLK8_MIRROR, blk8_stored(42))
         before = emu.read(BLK8_MIRROR, BLK8_LEN)
         for i in range(400):
             rx = ff.frame(e_pct=85, counter=(i // 10) & 0xFF) if i % 10 == 0 else None
             self.arm_frame(emu, rx) if rx else self.no_frame(emu)
             emu.call(self.syms["ff_fuel_hook_b"], reset=False)
-        st = emu.read(PATCH_RAM, 0x40)
+        st = emu.read(PATCH_RAM, tff.STATE_LEN)
         self.assertEqual(emu.read(BLK8_MIRROR, BLK8_LEN), before)
         self.assertEqual(struct.unpack_from(">H", st, 0x24)[0], 0, "e_key")
         self.assertEqual(st[0x32], 0, "persist_state stays idle")
@@ -389,10 +405,10 @@ class TestPersistence(DiagEmuBase):
 
     def test_the_rate_limit_holds_off_the_first_commit(self):
         emu, _ = self.warm(ticks=400)
-        st = emu.read(PATCH_RAM, 0x40)
+        st = emu.read(PATCH_RAM, tff.STATE_LEN)
         self.assertEqual(st[0x32], 0, "still idle: the 60 s window is open")
         self.assertEqual(struct.unpack_from(">H", st, 0x3A)[0], 6000 - 400)
-        self.assertEqual(emu.read(BLK8_MIRROR, 1), b"\xFF")
+        self.assertEqual(emu.read(BLK8_MIRROR + PERSIST_OFF, 1), b"\xFF")
 
     def test_a_commit_stages_and_queues_through_stock_code_only(self):
         emu, mdl = self.warm(ticks=400)
@@ -400,7 +416,7 @@ class TestPersistence(DiagEmuBase):
         emu.write(PATCH_RAM + 0x3A, 0, 2)              # open the rate limit
         emu.call(self.syms["ff_fuel_hook_b"], reset=False)
 
-        st = emu.read(PATCH_RAM, 0x40)
+        st = emu.read(PATCH_RAM, tff.STATE_LEN)
         self.assertEqual(st[0x32], 2, "persist_state = committing")
         self.assertEqual(st[0x33], 1, "persist_err = the commit's rc")
         e_pct = struct.unpack_from(">H", st, 0x30)[0]
@@ -408,8 +424,10 @@ class TestPersistence(DiagEmuBase):
         self.assertGreater(e_pct, 0)
 
         raw = emu.read(BLK8_MIRROR, BLK8_LEN)
-        self.assertEqual(raw[0], e_pct, "the mirror carries the new E%")
-        self.assertEqual(raw[1:30], b"\xFF" * 29, "+1..+29 untouched")
+        self.assertEqual(raw[PERSIST_OFF], e_pct, "the mirror carries the new E%")
+        self.assertEqual(raw[:2], BLK8_STAMP,
+                         "the {block id, version} stamp must survive (E4, #38)")
+        self.assertEqual(raw[3:30], b"\xFF" * 27, "+3..+29 untouched")
         self.assertTrue(blk8_csum_ok(raw))
 
         req = int(tff.load_patch()["build"]["symbols"]["ff_nvm_req"], 0)
@@ -451,7 +469,7 @@ class TestPersistence(DiagEmuBase):
                 self.assertEqual(emu.read(req + 8, 1), b"\x01")
                 emu.write(req + 8, bytes([status]))
                 emu.call(self.syms["ff_fuel_hook_b"], reset=False)
-                st = emu.read(PATCH_RAM, 0x40)
+                st = emu.read(PATCH_RAM, tff.STATE_LEN)
                 self.assertEqual(st[0x32], want_state)
                 self.assertEqual(st[0x33], status)
                 self.assertEqual(struct.unpack_from(">H", st, 0x3C)[0], writes)
@@ -465,7 +483,7 @@ class TestPersistence(DiagEmuBase):
         req = int(tff.load_patch()["build"]["symbols"]["ff_nvm_req"], 0)
         emu.write(req + 8, b"\x02")                     # the commit finished
         emu.call(self.syms["ff_fuel_hook_b"], reset=False)
-        stored = struct.unpack_from(">H", emu.read(PATCH_RAM, 0x40), 0x30)[0]
+        stored = struct.unpack_from(">H", emu.read(PATCH_RAM, tff.STATE_LEN), 0x30)[0]
 
         # 4 % more is inside the 5 % hysteresis: nothing is queued again
         emu.write(PATCH_RAM + 0x08, (stored + 4) * 16, 2)
@@ -475,7 +493,7 @@ class TestPersistence(DiagEmuBase):
         emu.write(req + 8, b"\x00")
         emu.call(self.syms["ff_fuel_hook_b"], reset=False)
         self.assertEqual(emu.read(req + 8, 1), b"\x00", "no new request")
-        self.assertEqual(emu.read(PATCH_RAM, 0x40)[0x32], 3, "still DONE")
+        self.assertEqual(emu.read(PATCH_RAM, tff.STATE_LEN)[0x32], 3, "still DONE")
 
     def test_the_hysteresis_lets_a_big_move_through(self):
         emu, _ = self.warm(e_pct=85, ticks=400)
@@ -485,16 +503,17 @@ class TestPersistence(DiagEmuBase):
         req = int(tff.load_patch()["build"]["symbols"]["ff_nvm_req"], 0)
         emu.write(req + 8, b"\x02")
         emu.call(self.syms["ff_fuel_hook_b"], reset=False)
-        stored = struct.unpack_from(">H", emu.read(PATCH_RAM, 0x40), 0x30)[0]
+        stored = struct.unpack_from(">H", emu.read(PATCH_RAM, tff.STATE_LEN), 0x30)[0]
 
         emu.write(PATCH_RAM + 0x08, max(stored - 20, 0) * 16, 2)
         emu.write(PATCH_RAM + 0x34, max(stored - 20, 0), 2)
         emu.write(PATCH_RAM + 0x3A, 0, 2)
         self.reseal(emu)
         emu.call(self.syms["ff_fuel_hook_b"], reset=False)
-        st = emu.read(PATCH_RAM, 0x40)
+        st = emu.read(PATCH_RAM, tff.STATE_LEN)
         self.assertEqual(st[0x32], 2, "a new commit is in flight")
-        self.assertEqual(emu.read(BLK8_MIRROR, 1)[0], max(stored - 20, 0))
+        self.assertEqual(emu.read(BLK8_MIRROR + PERSIST_OFF, 1)[0],
+                         max(stored - 20, 0))
 
     def test_a_fault_never_overwrites_the_stored_value(self):
         emu, _ = self.warm(e_pct=85, ticks=400)
@@ -502,15 +521,66 @@ class TestPersistence(DiagEmuBase):
         self.no_frame(emu)
         for _ in range(200):                   # ff_timeout_ms = 1000 -> FAULT
             emu.call(self.syms["ff_fuel_hook_b"], reset=False)
-        self.assertEqual(emu.read(PATCH_RAM, 0x40)[0x0C], ff.MODE_FAULT)
+        self.assertEqual(emu.read(PATCH_RAM, tff.STATE_LEN)[0x0C], ff.MODE_FAULT)
         before = emu.read(BLK8_MIRROR, BLK8_LEN)
         for _ in range(400):                   # E decays towards e_key
             emu.write(PATCH_RAM + 0x3A, 0, 2)  # with the rate limit wide open
             emu.call(self.syms["ff_fuel_hook_b"], reset=False)
-        st = emu.read(PATCH_RAM, 0x40)
+        st = emu.read(PATCH_RAM, tff.STATE_LEN)
         self.assertEqual(st[0x0C], ff.MODE_FAULT)
         self.assertEqual(emu.read(BLK8_MIRROR, BLK8_LEN), before)
         self.assertEqual(st[0x32], 0, "persist_state never left idle")
+
+    def test_the_block_id_and_version_stamp_are_never_written(self):
+        """E4 (#38), re/findings/eeprom.md 10.5 — the bug D2 shipped.
+
+        Payload +0/+1 of EEP_CONF block 8 is a `{block id, version}` stamp
+        that `nvm_read_all_blocks` (0x06227C) compares against the flash
+        default table at 0x060458-0x060470.  A mismatch makes the manager
+        DISCARD the block and reload the defaults, so an E% stored at +0
+        never survives a key cycle and reads back as 0x08 - a plausible 8 %,
+        not the 0xFF that means "nothing known".  `ff_persist_offset` = 2
+        fixes it, and this asserts the two bytes stay put through a whole
+        commit cycle, from the cold-start read to the completed write.
+        """
+        import ffcal001
+        cal = ffcal001.load_params(tff.FF_FUEL / "ffcal001.json")
+        self.assertEqual(cal["ff_persist_offset"], PERSIST_OFF,
+                         "the shipped calibration must not store on the stamp")
+
+        emu, _ = self.warm(e_pct=85, ticks=400)
+        emu.write(NVM_QUEUE_STATE, b"\x20")
+        emu.write(PATCH_RAM + 0x3A, 0, 2)
+        emu.call(self.syms["ff_fuel_hook_b"], reset=False)
+        req = int(tff.load_patch()["build"]["symbols"]["ff_nvm_req"], 0)
+        emu.write(req + 8, b"\x02")                    # the commit finished
+        emu.call(self.syms["ff_fuel_hook_b"], reset=False)
+
+        raw = emu.read(BLK8_MIRROR, BLK8_LEN)
+        self.assertEqual(raw[:2], BLK8_STAMP,
+                         "the stamp moved - the block would be discarded")
+        self.assertNotEqual(raw[PERSIST_OFF], 0xFF, "the E% really was stored")
+        self.assertTrue(blk8_csum_ok(raw))
+        st = emu.read(PATCH_RAM, tff.STATE_LEN)
+        self.assertEqual(st[0x32], 3, "persist_state = done")
+        self.assertEqual(struct.unpack_from(">H", st, 0x3C)[0], 1, "one write")
+
+    def test_the_stage_shape_writes_exactly_one_payload_byte(self):
+        """Whatever the offset, the patch stages ONE byte and no other."""
+        for off in (0, PERSIST_OFF, 13):
+            with self.subTest(offset=off):
+                emu = self.fresh()
+                emu.write(BLK8_MIRROR, blk8(bytes(range(BLK8_LEN - 2))))
+                before = bytearray(emu.read(BLK8_MIRROR, BLK8_LEN))
+                scratch = 0x807700
+                emu.write(scratch, b"\x5A")
+                self.assertEqual(self.nvm(emu, 8, off, 1, 0, scratch, 0), 2)
+                raw = bytearray(emu.read(BLK8_MIRROR, BLK8_LEN))
+                self.assertEqual(raw[off], 0x5A)
+                raw[off] = before[off]
+                raw[BLK8_LEN - 2:] = before[BLK8_LEN - 2:]   # the checksum moved
+                self.assertEqual(bytes(raw), bytes(before),
+                                 "a stage touched a byte it was not given")
 
 
 if __name__ == "__main__":                                    # pragma: no cover

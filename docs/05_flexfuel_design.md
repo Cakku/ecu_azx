@@ -345,6 +345,82 @@ Full derivation and evidence: `re/findings/ignition.md`.
   applies `KFDZK` (0x5D597E); with E85 it must never latch, so its latch bits
   0x7FD31B bits 0/1 are a second acceptance signal.
 
+#### Added 2026-09-17 (brief E1, issue #34) — implemented in `patches/ff_fuel`
+
+This section is now code: `patches/ff_fuel/src/ff_ign.c` (the producer) and
+the hand-written `ff_zw_hook` in `patches/ff_fuel/src/hooks.S` (the consumer),
+specified by `emu/models/flexfuel.py` and compared with it tick by tick in
+`tests/test_ff_ign_patch.py` (51 tests). The bench and road procedure is
+`patches/ff_fuel/test/procedure_e1.md`.
+
+**Formats, all decided by the chain this sits in.**
+
+| Quantity | Format | Where |
+|---|---|---|
+| `f_zw(E)` | u8, **1/256**, 17 points over E 0..100 step 6.25 % | `ff_fzw_curve`, FFCAL001 +0x42 |
+| `dzw_E(nmot, rl)` | **8 × 8 s8, 0.75 °CA per count** | `ff_dzw_map`, FFCAL001 +0x54 |
+| its axes | 8 × u16 in `nmot_w` / `rl_w` units | FFCAL001 +0xE8 / +0xF8 |
+| `dzw_e` (the result) | **s8, 0.75 °CA**, positive = advance | `ff_state` +0x29 |
+| the ceiling | `ff_dzw_max` = 8 counts = 6.00 °CA, code-clamped to 16 | FFCAL001 +0xE7 |
+
+`dzw_e = clamp(round(f_zw × dzw_E / 256), ±min(ff_dzw_max, 16))`, computed in
+the 10 ms tick and consumed by ten instructions at 0x41D40C.
+
+**The axes are the stock ones.** `ff_dzw_nmot_axis` is every other breakpoint
+of `KFZW`'s nmot axis 0x5C7736 and `ff_dzw_rl_axis` is eight of the twelve of
+its rl axis 0x5C7758, so a cell lines up with a `KFZW` row and column and the
+`KFZWOP - KFZW` budget can be read against it directly. This section proposed
+"+0..+2 °, up to +6 at knock-limited high-load cells"; evaluated on that grid
+the ECU's own budget is **0 or negative in 26 of the 64 cells** (at low load
+`KFZW` is already at or past the modelled optimum, so there is nothing to win
+there) and 8-14 counts at 72-104 % load above 2900 rpm. The table is in
+`procedure_e1.md` §B4.
+
+**Deviation 1 — `f_zw` saturates at 255/256, not at 1.** The declared format
+is u8 × 1/256, and 256 is not a u8. The shipped curve is a ramp from 0 at E0
+to **255 at E50**, flat above; 255/256 = 0.996, i.e. 0.4 % low, which at whole
+0.75 ° counts is 0.003 counts and disappears in the rounding.
+
+**Deviation 2 — the map is read with `rl_w` (0x7FEFB2), not 0x7FED38.** Brief
+E1's text named 0x7FED38, which `re/symbols.csv` calls `rl_for_fuel`: the
+relative charge `gk_rk` uses, *selected from* `rl_w` at 0x418A3C
+(`start.md` §3.3). `rl_w` **is** the KFZW column-axis input (`lhz -0x103E(r13)`
+at 0x41D358, `ignition.md` §2), and aligning `ff_dzw_map`'s columns with
+`KFZW`'s is the whole reason for reusing its breakpoints. Both cells are in
+`logging/sessions/ff_fuel.json` so a log can tell them apart.
+
+**Deviation 3 — no new RAM, and the offset lives in the checksummed core.**
+`dzw_e` and `fzw_q8` took the two fields D1 reserved at `ff_state` +0x29 and
++0x2A. They are *control* values written only by the periodic tick, so the
+core is where they belong: a corrupted `dzw_e` makes the next activation
+re-initialise the block rather than leaving a stale advance in the ignition
+path. The consumer checks only the block's magic, exactly as `ff_rk_scale`
+does; what bounds it is the producing clamp, the stock s8 clamp at 0x41D410
+and the -54..+58.5 ° output clamp.
+
+**The #37 rule is structural, not a branch.** `ff_zw_update()` is called from
+`ff_finish()`, which runs on *every* path out of `ff_tick()`, so the activation
+on which the mode leaves OK/HOLD/OVERRIDE is already the activation on which
+`dzw_e` is 0 — no hold, no ramp, while the fuel factor keeps its 60 s hold in
+the same activation. HOLD keeps computing from the frozen `e_filt`, so the
+offset freezes rather than dropping; that distinction is step 6 of the fault
+matrix in `procedure_e1.md` §B2.
+
+**It ships disabled, three times over:** `ff_zw_enable` = 0, `ff_dzw_map` all
+zero, and `f_zw(E0)` = 0 (`ffcal001.py` refuses a curve that does not start at
+0). `tests/test_ff_ign_patch.py` runs task 41's `bl 0x41D38C` to completion on
+the stock and the patched image, with the feature off and with it on at the
+neutral map, and finds `zwgru` bit-identical and no SRAM byte moved outside
+the patch's own block.
+
+**Diagnostics: VCDS measuring block 108** (TKMWL ids 2192-2195) — `f_zw` in %,
+`dzw_e` in °CA, the worst of the six `dwkrz` bytes, and `0x7FD31B & 3`. The
+last two are the two acceptance signals this section names, so the whole
+calibration criterion is readable in one group.
+
+**Still open (the road half of #34):** every cell of `ff_dzw_map` is 0 and only
+a car with real fuel can fill them in. `procedure_e1.md` §B3 is the recipe.
+
 ### 3.5 Start and warm-up
 Ethanol needs roughly twice the cranking fuel around 10 C and barely ignites
 below ~10 C without heating. Scale the start quantity and the afterstart /
@@ -395,6 +471,58 @@ emulator check: `emu/start_model.py`, `tests/test_start_model.py` (14 tests).
   0x7FE920, **`B_stend` 0x7FE921** (and its segment-task copy 0x7FECCA),
   "engine not running" 0x7FEAD0, after-start timer 0x8011D8 (u16),
   injections-since-start 0x7FD269, ignitions-since-start 0x7FCE14.
+
+#### Added 2026-09-17 (brief E2, issue #35) — implemented in `patches/ff_fuel`
+
+Full derivation of the sites, their tasks and their register liveness:
+`re/findings/start.md` §9. Implementation, limits and costs:
+`patches/ff_fuel/README.md`. Bench and calibration recipe:
+`patches/ff_fuel/test/procedure_e2.md`. Tests:
+`tests/test_ff_start_patch.py` (61).
+
+* **Both levers of this section are taken.** `f_st(E, tmst)` scales
+  `ksta_adapted` 0x80302C at **0x41A680** *and* **0x41A808** (the low- and
+  high-pressure `%ESSTT` twins publish it from **different registers**, r31 and
+  r3), and an ethanol advance is added to `zwstt` 0x802096 at **0x431384**.
+  All three words are in the **on-chip** flash, which takes the patch to six
+  on-chip words out of seven.
+* **The producer is the same 10 ms tick**, called from `ff_finish()` so it runs
+  on every path out of `ff_tick()`. It writes two new fields in the state
+  block, `fst_q10` (u16 Q10) and `zwst_add` (s8 counts of 0.75 °CA).
+* **Correction to this section's "afterstart / warm-up enrichment".** The 2015
+  B8 note already said there is no `fnsk`/`fwlk` factor; E2 adds that there is
+  no need for one either. `f_st` multiplies the *cranking* quantity, and the
+  stock `KFWKSTT` decay over injections-since-start is what carries it into the
+  after-start — so the ethanol correction decays with the stock map instead of
+  needing a second one.
+* **`ff_fst_map` is now live.** 6 ethanol rows × 6 `tmst` columns, Q10, shipped
+  all 1024. Its `tmst` axis is six of the twelve `KFWKSTT` breakpoints
+  (−30, −15, 0, +20.25, +39.75, +90 °C) so every cell lines up with a stock
+  row, and its E axis is 0, 20, 40, 60, **85**, 100 %. **Row 0 is the E0 row
+  and `ffcal001.py` refuses to build a block whose row 0 is not exactly 1024** —
+  the start counterpart of `F(0) = 1024`.
+* **The #37 asymmetry, both halves in one function.** `fst_q10` is computed
+  wherever `ff_tick()` computes `f_q10` from `e_filt` (OK, HOLD, **FAULT**,
+  OVERRIDE), so it inherits the 60 s hold and the decay with no rule of its
+  own; `zwst_add` is **0 on the activation the mode leaves OK/HOLD/OVERRIDE**,
+  and additionally 0 at and above `ff_zwst_tmax`. The start is where that
+  asymmetry matters most, because `zwbas_per_bank` **bypasses the knock
+  retard** while `B_stend` is clear — nothing downstream takes a stale advance
+  back.
+* **A correction to `start.md` §3/§7 that changed the code.** The low-pressure
+  `%ESSTT` does **not** return on its `B_stend` early-out: it sets r31 = 0x400
+  and branches to 0x41A680, the hooked store. So that word runs on every
+  activation of the segment task for as long as the engine runs. **Both S1
+  stubs therefore test `B_stend` 0x7FE921 themselves** and take the untouched
+  path when it is set; without that gate the patch would have multiplied the
+  ECU's explicit "no start enrichment" by `f_st` at every operating point.
+  `start.md` §9.3 has the five instructions.
+* **Four new values in VCDS measuring block 69** (ids 2188-2191): `f_st` as a
+  percent, the applied advance in °CA, `tmst` in whole °C, and `ksta_adapted`
+  as a **raw count** — a percent byte would saturate at the stock 22.8× alone
+  (`measuring_vars.md` §8.5).
+* Both features ship **disabled** with neutral tables, so the flashable file
+  still behaves exactly like the E1 file.
 
 ### 3.6 Rail pressure and injection window
 E85 lengthens `ti` by 35-50 % at equal rail pressure. Raise the rail
@@ -484,6 +612,75 @@ past intake-valve opening.
 via the DDLI logger, since neither has a measuring id — **`dwi` 0x803088** and
 **`wbho1s` 0x80307E**, whose margin is `0x80307E - 0x803088 - 2144`.
 
+#### Added 2026-09-17 (brief E5, issue #36) — implemented in `patches/ff_fuel`
+
+The **trimmed** half of #36: an E-dependent setpoint adder *inside* the stock
+ceiling, plus the diagnostics that say whether the pump follows. The torque
+limiter this section used to assume and any `KLPRMAX` raise are **out of
+scope** until bench data exist (`re/findings/rail.md` §12.3, §14.4); the
+design note for the limiter is `patches/ff_fuel/test/procedure_e5.md` §6.
+
+```
+10 ms tick            ff_rail_update()  in src/ff_rail.c, from ff_finish()
+                        prail_add = clamp(interp17(ff_prail_curve, e_filt),
+                                          0, min(ff_prail_max, 6000))
+                      plus, unconditionally, the three window statistics
+
+per 20 ms activation  ff_prail_hook  in src/hooks.S, 12 instructions
+                        prsoll_raw = min(map_output + prail_add, 0xFFFF)
+```
+
+**Where it lands, and why that is the whole safety argument.** The hook is the
+`sth r30,0x3200(r13)` at **0x45845C**, the single store of `prsoll_raw`
+0x8031F0 inside `hdrpsol_main` — after the six-map bank of `rail.md` §3.2 and
+**before** the `PRSOLMN` floor (7000 = 35.0 bar), the **`KLPRMAX` ceiling
+(22000 = 110.0 bar)** and the pump-volume rate limiter of §3.3-§3.4. All three
+still bind, because the clamp *re-reads the cell from RAM* four instructions
+later (`lhz r30,0x3200(r13)` at 0x458480) instead of re-using the register the
+store came from. **No calibration of this patch can put more pressure in the
+rail than the stock ECU already allows itself** — which is what makes a code
+hook acceptable here at all.
+
+All six map-selection paths reach that word; the one path that must not be
+touched — `0x7FD04D & 1`, "hold the previous setpoint" — branches *past* it
+(`bne 0x458460`), so unlike E2's 0x41A680 the stub needs no gate.
+`rail.md` §12.1 has the disassembly, the dead-register set and the proof that
+r30 is a clean halfword on every path in.
+
+**What it is for.** `KFPRSOLHOM` tops out at 19000 = 95 bar, so the headroom
+inside the ceiling is **+15 bar** = +15.8 % pressure = **7.6 % more flow** at
+the same `ti`. That is a mixture-preparation and injector-duty measure and
+nothing more: E85's +40 % fuel **mass** comes from `rk` and the F curve of
+§3.3 (`rail.md` §12.1). `ff_prail_max` therefore ships at exactly 3000 = the
+whole headroom, and the code ceiling `FF_PRAIL_HARD_MAX` is 6000 = 30.0 bar.
+
+**The #37 rule, rail flavour.** `prail_add` is **0 on the activation the mode
+leaves OK/HOLD/OVERRIDE** — no hold, no ramp, the same side of the line as the
+ignition blend and the start advance. §3.4's sentence now covers three
+features: a stale-rich mixture is safe, a stale *advance* or a stale
+*pressure demand* is not.
+
+**The diagnostics are the other half of the brief, and they run even with the
+adder disabled**, because they observe stock cells:
+
+| Field | What | Why |
+|---|---|---|
+| `win_margin_min` | `wbho1s − dwi − 0x7FD290 × 32`, the worst of the window | **`dwi` and `wbho1s` have no stock measuring id at all** (`rail.md` §11), so before E5 the injection window could not be watched on a car |
+| `prist_min` | the worst `prist` of the window | below `PRWBHMX` = 2600 = **13.0 bar** the driver cut-off, the injection-angle clamp and the fault charge limit arm **together** (`rail.md` §14.3) |
+| `msv_sat_ticks` | activations with `0x80316E` at `VMSVMX` | "the pump is out of volume", the early warning of §12.2 |
+
+They are a **tumbling** window of `ff_diag_window_ms` (1000 ms) with continuous
+publication, not a sliding minimum: a sliding one needs a ring buffer of up to
+6553 samples and patch code does not get to allocate that. `diag_ticks` is in
+the state block so a logger can see where in the window a sample sits. All
+three, plus the adder, are **VCDS measuring block 109** (`21 6D`), ids
+2184-2187, with the cross-checked pressure formula 0x53 for the two bar fields
+(`re/findings/measuring_vars.md` §7.3, §8.6).
+
+The required margin is read from the RAM cell `awea_angles` writes
+(**0x7FD290**), not from the literal 2144 above: 2144 is 67 × 32 and 67 is
+what `KLWBHO1SMX` happens to hold in *this* dataset.
+
 ### 3.7 Diagnostics
 Expose `E_filt`, `T_fuel`, `status/mode`, `F`, `f_zw` in a spare measuring
 block (VCDS-readable) or via the DDLI logger, and later as OBD PID 0x52 if the
@@ -526,7 +723,7 @@ fuel.
 > Evidence and full derivation: `re/findings/eeprom.md`. Reproduce the layout
 > with `python3 tools/eeprom_map.py data/passat_azx_ori.bin --clients`.
 >
-> **Primary route — EEP_CONF block 8, payload offset +0, one byte.
+> **Primary route — EEP_CONF block 8, payload offset +2, one byte.
 > VERIFIED-STATIC for everything except the factory contents of that byte.**
 >
 > * The SPI EEPROM is a 2 KB **M95160-class** part on **PCS0** of the QSMCM
@@ -631,6 +828,36 @@ fuel.
 > and `ff_persist_block` are calibration bytes precisely so that a bench read
 > can move the store without a rebuild.
 
+#### Correction 2026-09-17 (brief E4, issue #38) — the offset was wrong, and silently so
+
+`ff_persist_offset` shipped as **0** and has been changed to **2**.
+
+Payload **+0 and +1 of every EEP_CONF block are a `{block id, version}`
+stamp**. `nvm_read_all_blocks` (**0x06227C** — the entry is four bytes below
+the 0x062280 this document and `eeprom.md` §3.5 quoted) compares the first
+halfword of each block against that block's record in the flash default table
+at 0x060458-0x060470, and on a mismatch it **discards the block and reloads
+the defaults**. Block 8's default record is
+`08 01 00 80 80 80 80 00 00 80 00 80 80 FF`.
+
+So the ethanol percent was being written on top of the block id. Every cold
+start threw the block away, the mirror byte the patch read back was `0x08`,
+and `ff_persist_init()` accepted it as a perfectly plausible **8 %** — not the
+`0xFF` that would have meant "nothing known". **#38 did not work, and nothing
+said so.** It took a QSPI device model and a run of the real
+`nvm_read_all_blocks` to see it (`re/findings/eeprom.md` §10.5, §10.6).
+
+Three things follow:
+
+* the free payload offsets for block 8 are **+2..+13**, not +0..+13, and the
+  same correction applies to blocks 1, 3, 7, 11 and 12 in `eeprom.md` §5;
+* payload **+29 moves** on the first commit (0xFF → 0x00 → 0x01): it is the
+  manager's ReplV byte. The rule is "the patch never writes it", not "it never
+  changes";
+* the fix needed no code — one calibration byte — which is the argument for
+  having put the block, the offset and the rate limit in FFCAL001 in the first
+  place.
+
 ## 4. New calibration data
 
 All new parameters live in one block inside 0x5E2510-0x5EFFFF (all 0xFF
@@ -678,6 +905,116 @@ Differences from the table above:
 Descriptor rows for `re/calibration_draft.csv` are in
 `patches/ff_fuel/ffcal001_rows.csv` (D1 must not write that file while brief D3
 owns it); the integrator appends them and re-runs `tools/draft_to_xdf.py`.
+
+#### Added 2026-09-17 (brief E1, issue #34) — FFCAL001 **v2**, 266 bytes
+
+E1 **appended and moved nothing**. Everything up to +0xE5 is exactly where v1
+put it; the four new parameters start at +0xE6, which is where v1's checksum
+used to be, and the checksum followed the length to +0x108.
+
+| Off | Name | Type | Shipped | Unit |
+|---|---|---|---|---|
+| +E6 | `ff_zw_enable` | u8 | **0** | 1 applies the ignition blend |
+| +E7 | `ff_dzw_max` | u8 | 8 | 0.75 °CA counts; code clamps to 16 |
+| +E8 | `ff_dzw_nmot_axis[8]` | u16 | KFZW rows | `nmot_w`, 520…6520 rpm |
+| +F8 | `ff_dzw_rl_axis[8]` | u16 | KFZW cols | `rl_w`, 10.2…103.9 % |
+
+and two tables this section listed as reserved are now live: `ff_fzw_curve`
+(+0x42) carries the §3.4 ramp instead of zeros, and `ff_dzw_map` (+0x54) is
+read by `ff_ign.c` — it stays **all zero**, which is what keeps the shipped
+file inert even if `ff_zw_enable` is set to 1. `ff_fst_map` and `ff_prail_add`
+are still reservations, for briefs E2 and E5.
+
+**The version is now checked strictly.** `ff_cal_ok()` accepted **version 2
+only** at the time of writing (E2 made it 3), so a v1 block flashed under a v2 blob reads as corrupt and forces
+mode 0: `F = 1024`, no CAN, `dzw_e = 0`. That is the safe direction and it is
+the rule every later version bump follows — E2 will make it 3, E5 4.
+
+`ffcal001.py` refuses to *build* a block that would be unsafe, rather than
+leaving it to the ECU: `ff_F_curve[0] != 1024`, `ff_fzw_curve[0] != 0`, either
+curve non-monotonic, an axis that is not strictly increasing (the breakpoint
+search assumes it), or an `ff_dzw_max` above the code ceiling.
+
+`ff_dzw_map` also gains real **axes** in the descriptor rows, so it goes into
+the XDF as a `map_2d` with its own breakpoints rather than as a bare
+`map_2d_data` block.
+
+#### Added 2026-09-17 (brief E2, issue #35) — FFCAL001 **v3**, 290 bytes
+
+E2 **appended and moved nothing**, the same way E1 did. Everything up to
++0x107 is exactly where v1 and v2 put it; the eight new parameters start at
++0x108, which is where v2's checksum used to be, and the checksum followed the
+length to +0x120.
+
+| Off | Name | Type | Shipped | Unit |
+|---|---|---|---|---|
+| +108 | `ff_st_enable` | u8 | **0** | 1 applies `f_st(E, tmst)` |
+| +109 | `ff_zwst_enable` | u8 | **0** | 1 applies the start advance |
+| +10A | `ff_fst_max` | u16 | 2048 | Q10 ceiling; code clamps to 2560 |
+| +10C | `ff_zwst_max` | u8 | 4 | 0.75 °CA counts; code clamps to 8 |
+| +10D | `ff_zwst_tmax` | u8 | 117 | `tmst` count = 39.75 °C |
+| +10E | `ff_fst_e_axis[6]` | u8 | 0, 20, 40, 60, 85, 100 | % — the map's rows |
+| +114 | `ff_fst_tmst_axis[6]` | u8 | 24, 44, 64, 91, 117, 184 | `tmst` counts — the columns |
+| +11A | `ff_fzwst_curve[6]` | s8 | **0** | 0.75 °CA, on the E axis above |
+
+and the table this section listed as reserved since v1, **`ff_fst_map`
+(+0x94)**, is now read by `src/ff_start.c`. It stays **all 1024**, which is
+what keeps the shipped file inert even with `ff_st_enable` = 1.
+`ff_prail_add` is the only reservation left, for brief E5.
+
+**The version stays strict.** `ff_cal_ok()` accepts **version 3 only**, so a v1
+or v2 block flashed under a v3 blob reads as corrupt and forces mode 0:
+`F = 1024`, no CAN, `dzw_e = 0`, `fst_q10 = 1024` and `zwst_add = 0`. E5 makes
+it 4.
+
+`ffcal001.py` gained five more refusals: an `ff_fst_map` whose **row 0 is not
+exactly 1024** (E0 would stop being bit-identical at both S1 sites), any cell
+below 1024 (`f_st` may only enrich) or above the code ceiling 2560, an
+`ff_fst_max` outside 1024..2560, an `ff_zwst_max` or `ff_fzwst_curve` above 8
+counts, and an `ff_fzwst_curve[0]` that is not 0.
+
+`ff_fst_map` also gains real **axes** in the descriptor rows, so like
+`ff_dzw_map` it goes into the XDF as a `map_2d` with its own breakpoints;
+`ff_fzwst_curve` borrows the same ethanol axis.
+
+**The two code ceilings are chosen, not arbitrary.** `FF_FST_HARD_MAX` = 2560
+because `(2560 × 100) >> 10 = 250` is the largest value measuring block 69
+field 1 can carry (formula 0x21, A = 100), so there is no `f_st` the patch can
+produce that a tester cannot see. `FF_ZWST_HARD_MAX` = 8 counts = 6.00 °CA,
+twice the shipped ceiling — and it is the clamp that matters most in the whole
+patch, because the knock retard is bypassed during the start.
+
+#### Added 2026-09-17 (brief E5, issue #36) — FFCAL001 **v4**, 332 bytes
+
+The fourth version, and the fourth time nothing moved: everything up to
++0x121 is exactly where v3 left it, and E5's parameters start at **+0x122**,
+which is where v3's checksum used to be.
+
+| Off | Type | Name | Shipped | Unit |
+|---|---|---|---|---|
+| +122 | u8 | `ff_prail_enable` | **0** | 1 applies the adder; 0 pins `prail_add` at 0 for ever |
+| +123 | u8 | `ff_prail_rsv` | 0 | reserved; it is here only so the two words below stay 2-byte aligned |
+| +124 | u16 | `ff_prail_max` | 3000 | 0.005 bar = **15.0 bar**, exactly the headroom `KLPRMAX` 22000 leaves above `KFPRSOLHOM`'s 19000 |
+| +126 | u16 | `ff_diag_window_ms` | 1000 | ms of the diagnostic window |
+| +128 | 17×u16 | `ff_prail_curve` | **0** | 0.005 bar over E 0..100 step 6.25 %, the same grid as `ff_F_curve` |
+| +14A | u16 | crc | | |
+
+`ffcal001.py` refuses to build a block with `ff_prail_curve[0] != 0` (E0 would
+stop being bit-identical at 0x45845C), a non-monotonic curve (more ethanol may
+not mean less pressure), any point or an `ff_prail_max` above
+`FF_PRAIL_HARD_MAX` = 6000, an `ff_diag_window_ms` of 0, or a non-zero
+`ff_prail_rsv`.
+
+**The v1 reservation is superseded, not re-used.** `ff_prail_add` at +0xDC —
+eight u8 in 0.1 MPa with no axis at all — stays in place, neutral and unread,
+so that nothing in the block moves. It was the wrong shape: E5 needed
+seventeen points on the ethanol grid the rest of the block already uses, in
+the ECU's own 0.005 bar rather than in 0.1 MPa, so it appended a proper table.
+
+**The code ceiling is arithmetic again.** `FF_PRAIL_HARD_MAX` = 6000 = 30.0 bar
+is twice the shipped ceiling and twice the entire headroom the stock
+calibration has, and anything above it is a calibration that lies: the stock
+`KLPRMAX` clamp four instructions after the hooked store eats it.
 
 ## 5. RAM
 

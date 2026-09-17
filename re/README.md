@@ -38,7 +38,8 @@ Current notes:
 | `findings/fr_index.md` | Bosch MED9.1 Funktionsrahmen index: which FR module and which labels cover each area we care about, and what our dump actually confirms. |
 | `findings/ram.md` | RAM survey (issue #23, static half): what references every byte of 0x7F8000-0x807FFF, what the cold start fills, where the stack and the kernel RAM are, where the KWP programming copy lands, and the block a patch may use (`PATCH_RAM = 0x7FFB00`). Data in `ram_map.csv`. |
 | `ram_map.csv` | One row per 32-byte line of the two SRAMs with the reference counts and the `free_candidate` flag. Regenerate with `python3 tools/ram_survey.py data/passat_azx_ori.bin --csv re/ram_map.csv`. |
-| `findings/calibration_names.md` | The naming and scaling pass (brief D3, issue #41): the method, what the shared nmot/rl axis blocks are, the ZWMIN family, the engine speed limiter, and the list of what is still unnamed. |
+| `findings/calibration_names.md` | The naming and scaling pass (briefs D3 and E3, issue #41): the method, what the shared nmot/rl axis blocks are, the ZWMIN family, the engine speed limiter, and — §9, pass 2 — the torque ↔ charge pair (`KFMIRL` / `KFMIOP`), the charge-limit chain, the `%GGHFM` air-mass correction and the list of what is still unnamed. |
+| `findings/tuning_checklist_draft.md` | Which of the named maps matter per hardware change (intake, exhaust, cams, injectors). HYPOTHESIS level, a starting point for issue #43. |
 
 `ghidra_export/functions.csv` is a regenerated dump of **every** function in
 the current Ghidra project, auto-named `FUN_` ones included. It is not
@@ -122,9 +123,10 @@ Until a patched image is loaded every cell of the block reads 255, because
 2. Work on a **copy**. `data/passat_azx_ori.bin` must keep its SHA-256
    `b15590d3…09b3`; the test suite fails if it changes.
 3. After saving from TunerPro the block checksums are wrong. Run
-   `python3 tools/checksum.py fix <copy>` and then
-   `python3 tools/checksum.py verify -q <copy>`, which must print
-   `ALL OK (65 blocks)`.
+   `python3 tools/checksum.py fix <copy> -o <fixed>` — without `-o` it writes
+   `<copy>.fixed.bin` and leaves `<copy>` alone (it never edits in place) —
+   and then `python3 tools/checksum.py verify -q <fixed>`, which must print
+   `ALL OK (65 blocks)`. *(Corrected 2026-09-17, found by brief E7.)*
 4. Before anything is flashed: `python3 tools/bindiff.py data/passat_azx_ori.bin
    <copy>` and check that **every** changed byte is inside the map you meant to
    change plus the checksum descriptors. `docs/04_re_guidelines.md` section 6 is

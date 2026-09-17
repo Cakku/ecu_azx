@@ -341,6 +341,17 @@ class TestApply(DumpUnchanged):
         self.assertIn("not in our read", msg)
         self.assertIn("not unlockable", msg)
 
+    def test_the_regions_the_obd_route_refuses_are_guarded(self):
+        """0x010000-0x01FFFF and 0x080000-0x09FFFF: the firmware's own
+        programming service refuses them (flash_programming.md section 3),
+        so no flag opens them here either (integration, 2026-09-17)."""
+        for addr in ("0x015000", "0x085000"):
+            msg = self._refuse([{"addr": addr, "new": "60000000",
+                                 "onchip_edit": True, "calibration_edit": True,
+                                 "why": "should be impossible"}])
+            self.assertIn("not unlockable", msg, addr)
+            self.assertIn("OBD", msg, addr)
+
     def test_onchip_edit_does_not_open_the_stock_calibration(self):
         self.assertIn("stock calibration", self._refuse(
             [{"addr": "0x5D2600", "new": "0102", "onchip_edit": True,
