@@ -462,6 +462,13 @@ roughly another half).
 * The ethanol node's clock is scaled with the ECU's, so 10 Hz stays 10 Hz *in
   ECU time*, and `--node-stop-after` / `--node-fault-after` / `--node-e-ramp`
   are all in ECU seconds.
+* The simulator answers TP2.0 from the same thread that runs the hooks, so a
+  catch-up is bounded by a **wall-clock budget** (5 ms, `MAX_CATCHUP_WALL_S`)
+  as well as by simulated time. Without it a 0.5 s catch-up at
+  `--time-scale 5` is fifty activations — 40 ms of host CPU idle, more than
+  twice that with a test suite running beside it — and the tester loses its
+  channel after T1 = 100 ms × 4 tries. `PatchRunner.lagged` counts how often
+  the budget cut a catch-up short; `ecu_sim.py` prints it on exit.
 * Every animated cell and every hook read the same simulated instant: with a
   patch running, "now" is the runner's own clock, which advances in whole
   10 ms activations and can fall **behind** the wall clock on a slow host.

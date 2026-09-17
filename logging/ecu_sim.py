@@ -410,6 +410,17 @@ class PatchRunner:
     #: slow host cannot stall the CAN bus while it catches up
     MAX_CATCHUP_S = 0.5
 
+    #: and how much WALL time it may spend doing so.  This is the one that
+    #: matters: the simulator answers TP2.0 from the same thread, and the
+    #: tester gives up on an ACK after T1 = 100 ms x 4 tries.  A 0.5 s
+    #: catch-up at `--time-scale 5` is fifty activations, which is 40 ms of
+    #: host CPU on an idle M2 and more than twice that when the test suite is
+    #: running beside it -- enough to lose a channel.  With a wall budget the
+    #: bus is serviced every few milliseconds whatever the scale, and
+    #: simulated time simply falls behind, which is already how a slow host
+    #: behaves (logging/README.md section 9).
+    MAX_CATCHUP_WALL_S = 0.005
+
     def __init__(self, emu, patch_dir: str | None, *, task_set: str = "A",
                  ram: "AnimatedRam | None" = None, segments: bool = True,
                  nvm_pump: bool = True, tick_ms: float = 10.0):
@@ -445,6 +456,9 @@ class PatchRunner:
         self.ticks = 0
         self.segments = 0
         self.frames_in = 0
+        #: how often a catch-up ran out of its wall budget, i.e. how often the
+        #: simulated clock fell behind the wall clock
+        self.lagged = 0
         self.errors: list[str] = []
         self._seg_accum = 0.0
         #: Frames wait in a short queue rather than overwriting one slot.  A
@@ -475,9 +489,13 @@ class PatchRunner:
         if target_s <= self.sim_t:
             return
         target_s = min(target_s, self.sim_t + self.MAX_CATCHUP_S)
+        wall_deadline = time.monotonic() + self.MAX_CATCHUP_WALL_S
         while self.sim_t + self.tick_s <= target_s:
             self.sim_t += self.tick_s
             self._one_tick()
+            if time.monotonic() >= wall_deadline:
+                self.lagged += 1
+                return
 
     def _one_tick(self) -> None:
         if self.ram is not None:
@@ -518,6 +536,7 @@ class PatchRunner:
     def status(self) -> str:
         return (f"sim {self.sim_t:.2f} s, {self.ticks} activations, "
                 f"{self.segments} segments, {self.frames_in} frames in"
+                + (f", {self.lagged} catch-ups cut short" if self.lagged else "")
                 + (f", {len(self.errors)} hook errors" if self.errors else ""))
 
 
