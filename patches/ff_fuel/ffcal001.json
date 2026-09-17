@@ -19,13 +19,23 @@
     "shape and ff_dzw_map is still all zero, so the shipped file adds no",
     "advance even if ff_zw_enable is set to 1.",
     "",
+    "E2 (issue #35) bumped the block to VERSION 3 and APPENDED the start",
+    "enrichment: ff_st_enable and ff_zwst_enable (both 0 - the feature ships",
+    "disabled), ff_fst_max, ff_zwst_max, ff_zwst_tmax, the two 6-point axes of",
+    "ff_fst_map and the ff_fzwst_curve start-advance curve.  Nothing moved;",
+    "the checksum followed the length from +0x108 to +0x120.  ff_fst_map is",
+    "still all 1024 and ff_fzwst_curve all zero, so the shipped file changes",
+    "neither the cranking quantity nor the start angle even with both enables",
+    "set to 1.  ff_zwst_tmax is 117, the tmst COUNT for 39.75 degC, which is",
+    "also the fifth breakpoint of ff_fst_tmst_axis.",
+    "",
     "null means 'use the built-in default': the F curve from the docs/05",
     "section 3.3 formula, the f_zw ramp, the two axes taken from the stock",
     "KFZW axis blocks, and the neutral values for the tables that are still",
     "reserved."
   ],
 
-  "version": 2,
+  "version": 3,
 
   "ff_can_id": 236,
   "ff_timeout_ms": 1000,
@@ -47,11 +57,20 @@
   "ff_zw_enable": 0,
   "ff_dzw_max": 8,
 
+  "ff_st_enable": 0,
+  "ff_zwst_enable": 0,
+  "ff_fst_max": 2048,
+  "ff_zwst_max": 4,
+  "ff_zwst_tmax": 117,
+
   "ff_F_curve": null,
   "ff_fzw_curve": null,
   "ff_dzw_map": null,
   "ff_fst_map": null,
   "ff_prail_add": null,
   "ff_dzw_nmot_axis": null,
-  "ff_dzw_rl_axis": null
+  "ff_dzw_rl_axis": null,
+  "ff_fst_e_axis": null,
+  "ff_fst_tmst_axis": null,
+  "ff_fzwst_curve": null
 }

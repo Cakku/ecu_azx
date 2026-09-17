@@ -693,6 +693,50 @@ component-protection enrichment in. That is the **knock-related enrichment
 path** the brief asks for: it is indirect, through the exhaust-temperature
 model, not through a dedicated knock-enrichment map.
 
+> **Correction 2026-09-17 (brief E2, VERIFIED-STATIC): the paragraph above is
+> wrong about 0x4594E8.** It is not the exhaust-gas temperature model and it
+> is not an addition to `tabgm`; it is a **comparison inside the knock-control
+> load window**. Brief E3 found this while tracing the lambda path and
+> recorded it in `re/findings/calibration_names.md` §9.5, which reads: the
+> word "sits in `FUN_0045943C`, a *comparison* — `cand_WKRMKR` 0x5D6123 <
+> `wkrm` — inside the knock-control load window that produces 0x7FEA80, whose
+> only reader is 0x103044". E3 could not make the correction here because
+> brief E1 owned `ignition.md` at the time; E2 makes it now.
+>
+> Re-disassembled independently for this correction
+> (`tools/blobdis.py data/passat_azx_ori.bin --file-off 0x594C0 --addr
+> 0x4594C0 --len 0x50`; r13 = 0x7FFFF0, docs/02 §4):
+>
+> ```
+> 004594E4  3D 60 00 5D  lis    r11, 0x5d
+> 004594E8  89 8D CE 86  lbz    r12, -0x317a(r13)   ; wkrm 0x7FCE76
+> 004594EC  89 6B 61 23  lbz    r11, 0x6123(r11)    ; cand_WKRMKR 0x5D6123
+> 004594F0  7D 8C 07 74  extsb  r12, r12
+> 004594F4  7D 6B 07 74  extsb  r11, r11
+> 004594F8  7C 0C 58 00  cmpw   r12, r11
+> 004594FC  41 81 00 28  bgt    0x459524
+> ```
+>
+> There is no `add` and no store to a temperature cell on the path: both
+> operands are sign-extended bytes fed straight into `cmpw`/`bgt`, and the
+> next pair (0x459500-0x45950C) compares a second r13 cell against 0x5D611C
+> in the same shape. So **0x7FCE76 has no route into the exhaust-temperature
+> model**, and the claim that knock retard pulls component-protection
+> enrichment in through `tabgm` is withdrawn. The knock-related enrichment
+> path asked for in brief B7 is therefore still **not located**; see
+> `calibration_names.md` §9.5 for what else that pass excluded.
+>
+> Two evidence strings still repeat the withdrawn claim and are **for the
+> integrator, not for an agent branch**: `re/symbols.csv` row `0x7FCE76`
+> (`wkrm`) and `ghidra_scripts/b7_ignition_symbols.csv` row `0x7FCE76` both
+> end "…and by the exhaust-temperature model at 0x4594E8". `re/symbols.csv`
+> merges with `merge=union`, so editing that row on a branch that runs beside
+> another one produces a duplicated symbol row at merge time (it already did
+> once, commit 31b2b31); E2 therefore left both files untouched. The correct
+> text is "…and by `bbkr_load_window` 0x45943C, which compares it with
+> `cand_WKRMKR` 0x5D6123". E3's own row for `0x45943C` in `re/symbols.csv`
+> already points here.
+
 `0x7FCE74` (mean of the six per-cylinder calibration offsets 0x5C83F8) and
 `0x7FCE77` (mean of the controller's internal retards) are local to `%KRREG`
 plus one measuring handler each (0x03B658, 0x40A3B0).

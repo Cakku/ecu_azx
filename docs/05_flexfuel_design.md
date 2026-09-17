@@ -472,6 +472,58 @@ emulator check: `emu/start_model.py`, `tests/test_start_model.py` (14 tests).
   "engine not running" 0x7FEAD0, after-start timer 0x8011D8 (u16),
   injections-since-start 0x7FD269, ignitions-since-start 0x7FCE14.
 
+#### Added 2026-09-17 (brief E2, issue #35) — implemented in `patches/ff_fuel`
+
+Full derivation of the sites, their tasks and their register liveness:
+`re/findings/start.md` §9. Implementation, limits and costs:
+`patches/ff_fuel/README.md`. Bench and calibration recipe:
+`patches/ff_fuel/test/procedure_e2.md`. Tests:
+`tests/test_ff_start_patch.py` (61).
+
+* **Both levers of this section are taken.** `f_st(E, tmst)` scales
+  `ksta_adapted` 0x80302C at **0x41A680** *and* **0x41A808** (the low- and
+  high-pressure `%ESSTT` twins publish it from **different registers**, r31 and
+  r3), and an ethanol advance is added to `zwstt` 0x802096 at **0x431384**.
+  All three words are in the **on-chip** flash, which takes the patch to six
+  on-chip words out of seven.
+* **The producer is the same 10 ms tick**, called from `ff_finish()` so it runs
+  on every path out of `ff_tick()`. It writes two new fields in the state
+  block, `fst_q10` (u16 Q10) and `zwst_add` (s8 counts of 0.75 °CA).
+* **Correction to this section's "afterstart / warm-up enrichment".** The 2015
+  B8 note already said there is no `fnsk`/`fwlk` factor; E2 adds that there is
+  no need for one either. `f_st` multiplies the *cranking* quantity, and the
+  stock `KFWKSTT` decay over injections-since-start is what carries it into the
+  after-start — so the ethanol correction decays with the stock map instead of
+  needing a second one.
+* **`ff_fst_map` is now live.** 6 ethanol rows × 6 `tmst` columns, Q10, shipped
+  all 1024. Its `tmst` axis is six of the twelve `KFWKSTT` breakpoints
+  (−30, −15, 0, +20.25, +39.75, +90 °C) so every cell lines up with a stock
+  row, and its E axis is 0, 20, 40, 60, **85**, 100 %. **Row 0 is the E0 row
+  and `ffcal001.py` refuses to build a block whose row 0 is not exactly 1024** —
+  the start counterpart of `F(0) = 1024`.
+* **The #37 asymmetry, both halves in one function.** `fst_q10` is computed
+  wherever `ff_tick()` computes `f_q10` from `e_filt` (OK, HOLD, **FAULT**,
+  OVERRIDE), so it inherits the 60 s hold and the decay with no rule of its
+  own; `zwst_add` is **0 on the activation the mode leaves OK/HOLD/OVERRIDE**,
+  and additionally 0 at and above `ff_zwst_tmax`. The start is where that
+  asymmetry matters most, because `zwbas_per_bank` **bypasses the knock
+  retard** while `B_stend` is clear — nothing downstream takes a stale advance
+  back.
+* **A correction to `start.md` §3/§7 that changed the code.** The low-pressure
+  `%ESSTT` does **not** return on its `B_stend` early-out: it sets r31 = 0x400
+  and branches to 0x41A680, the hooked store. So that word runs on every
+  activation of the segment task for as long as the engine runs. **Both S1
+  stubs therefore test `B_stend` 0x7FE921 themselves** and take the untouched
+  path when it is set; without that gate the patch would have multiplied the
+  ECU's explicit "no start enrichment" by `f_st` at every operating point.
+  `start.md` §9.3 has the five instructions.
+* **Four new values in VCDS measuring block 69** (ids 2188-2191): `f_st` as a
+  percent, the applied advance in °CA, `tmst` in whole °C, and `ksta_adapted`
+  as a **raw count** — a percent byte would saturate at the stock 22.8× alone
+  (`measuring_vars.md` §8.5).
+* Both features ship **disabled** with neutral tables, so the flashable file
+  still behaves exactly like the E1 file.
+
 ### 3.6 Rail pressure and injection window
 E85 lengthens `ti` by 35-50 % at equal rail pressure. Raise the rail
 pressure setpoint maps at high load by a blend on E% (within the HPFP's
@@ -774,8 +826,8 @@ read by `ff_ign.c` — it stays **all zero**, which is what keeps the shipped
 file inert even if `ff_zw_enable` is set to 1. `ff_fst_map` and `ff_prail_add`
 are still reservations, for briefs E2 and E5.
 
-**The version is now checked strictly.** `ff_cal_ok()` accepts **version 2
-only**, so a v1 block flashed under a v2 blob reads as corrupt and forces
+**The version is now checked strictly.** `ff_cal_ok()` accepted **version 2
+only** at the time of writing (E2 made it 3), so a v1 block flashed under a v2 blob reads as corrupt and forces
 mode 0: `F = 1024`, no CAN, `dzw_e = 0`. That is the safe direction and it is
 the rule every later version bump follows — E2 will make it 3, E5 4.
 
@@ -787,6 +839,51 @@ search assumes it), or an `ff_dzw_max` above the code ceiling.
 `ff_dzw_map` also gains real **axes** in the descriptor rows, so it goes into
 the XDF as a `map_2d` with its own breakpoints rather than as a bare
 `map_2d_data` block.
+
+#### Added 2026-09-17 (brief E2, issue #35) — FFCAL001 **v3**, 290 bytes
+
+E2 **appended and moved nothing**, the same way E1 did. Everything up to
++0x107 is exactly where v1 and v2 put it; the eight new parameters start at
++0x108, which is where v2's checksum used to be, and the checksum followed the
+length to +0x120.
+
+| Off | Name | Type | Shipped | Unit |
+|---|---|---|---|---|
+| +108 | `ff_st_enable` | u8 | **0** | 1 applies `f_st(E, tmst)` |
+| +109 | `ff_zwst_enable` | u8 | **0** | 1 applies the start advance |
+| +10A | `ff_fst_max` | u16 | 2048 | Q10 ceiling; code clamps to 2560 |
+| +10C | `ff_zwst_max` | u8 | 4 | 0.75 °CA counts; code clamps to 8 |
+| +10D | `ff_zwst_tmax` | u8 | 117 | `tmst` count = 39.75 °C |
+| +10E | `ff_fst_e_axis[6]` | u8 | 0, 20, 40, 60, 85, 100 | % — the map's rows |
+| +114 | `ff_fst_tmst_axis[6]` | u8 | 24, 44, 64, 91, 117, 184 | `tmst` counts — the columns |
+| +11A | `ff_fzwst_curve[6]` | s8 | **0** | 0.75 °CA, on the E axis above |
+
+and the table this section listed as reserved since v1, **`ff_fst_map`
+(+0x94)**, is now read by `src/ff_start.c`. It stays **all 1024**, which is
+what keeps the shipped file inert even with `ff_st_enable` = 1.
+`ff_prail_add` is the only reservation left, for brief E5.
+
+**The version stays strict.** `ff_cal_ok()` accepts **version 3 only**, so a v1
+or v2 block flashed under a v3 blob reads as corrupt and forces mode 0:
+`F = 1024`, no CAN, `dzw_e = 0`, `fst_q10 = 1024` and `zwst_add = 0`. E5 makes
+it 4.
+
+`ffcal001.py` gained five more refusals: an `ff_fst_map` whose **row 0 is not
+exactly 1024** (E0 would stop being bit-identical at both S1 sites), any cell
+below 1024 (`f_st` may only enrich) or above the code ceiling 2560, an
+`ff_fst_max` outside 1024..2560, an `ff_zwst_max` or `ff_fzwst_curve` above 8
+counts, and an `ff_fzwst_curve[0]` that is not 0.
+
+`ff_fst_map` also gains real **axes** in the descriptor rows, so like
+`ff_dzw_map` it goes into the XDF as a `map_2d` with its own breakpoints;
+`ff_fzwst_curve` borrows the same ethanol axis.
+
+**The two code ceilings are chosen, not arbitrary.** `FF_FST_HARD_MAX` = 2560
+because `(2560 × 100) >> 10 = 250` is the largest value measuring block 69
+field 1 can carry (formula 0x21, A = 100), so there is no `f_st` the patch can
+produce that a tester cannot see. `FF_ZWST_HARD_MAX` = 8 counts = 6.00 °CA,
+twice the shipped ceiling — and it is the clamp that matters most in the whole
+patch, because the knock retard is bypassed during the start.
 
 ## 5. RAM
 

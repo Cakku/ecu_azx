@@ -57,7 +57,11 @@
  *   +3A   2    persist_wait     D2        activations left of the commit rate limit
  *   +3C   2    persist_writes   D2        commits that finished OK (saturating)
  *   +3E   2    persist_fails    D2        commits that failed (saturating)
- *   --- 0x40 -----------------------------------------------------------------
+ *   --- core 2: appended by E2, checksummed like the first core -------------
+ *   +40   2    fst_q10          tick      E2: f_st(E, tmst), 1/1024, 1024..2560
+ *   +42   1    zwst_add         tick      E2: start-ignition advance, s8, 0.75 degCA
+ *   +43   1    st_reserved      -         E2: 0, reserved for brief E5
+ *   --- 0x44 -----------------------------------------------------------------
  *
  * D2 (issue #38/#39, 2026-09-16) took the three reserved words at +3A..+3F for
  * the rate-limit counter and two saturating counters.  No offset D1 defined
@@ -80,11 +84,27 @@
  * code, and the stock s8 clamp at 0x41D410 plus `zwmin` and the
  * -54..+58.5 degCA output clamp downstream (re/findings/ignition.md 8, 11).
  *
+ * E2 (issue #35, 2026-09-17) is the first brief that had to GROW the struct:
+ * the core was full at +0x2B and its two new values -- `fst_q10` and
+ * `zwst_add` -- are CONTROL values that three segment-asynchronous stubs
+ * consume, so by E1's argument they belong inside the checksum and not in the
+ * annex.  Growing past the annex instead of inserting keeps every D1, D2 and
+ * E1 offset exactly where it was, at the price of making the checksummed core
+ * TWO ranges: +08..+2B (FF_CORE_OFF/FF_CORE_LEN) and +40..+43
+ * (FF_CORE2_OFF/FF_CORE2_LEN).  `ff_core_csum()` sums both, in that order;
+ * the annex +2C..+3F stays outside, unchanged and still written by other
+ * paths.  The length grew 0x40 -> 0x44 and the magic is still "FF01", so a
+ * block written by the D2/E1 blob is rejected by the length check and
+ * re-initialised on the first activation -- which is the safe direction and
+ * the same rule FFCAL001's strict version check follows.
+ *
  * The EEP_CONF request record is NOT part of this block.  The block manager
  * keeps a pointer to it for milliseconds after the call returns
  * (re/findings/eeprom.md section 8.2), so it has to be stable storage, but it
  * is the manager's layout, not ours; it is a separate .bss object and the
- * linker puts it right after the state block at PATCH_RAM + 0x40.
+ * linker puts it right after the state block -- at PATCH_RAM + 0x44 since E2
+ * grew the struct, which is why `build.ram_symbols` pins it by NAME and
+ * nothing quotes the number.
  *
  * `frame_bad` is a LATCH, not an event.  docs/05 section 3.2 lists "status in
  * {fault, not ready}" and "counter unchanged for 3 received frames" as
@@ -126,15 +146,17 @@
 
 /* ------------------------------------------------------------ RAM state --- */
 #define FF_MAGIC   0x46463031u        /* "FF01" */
-#define FF_LENGTH  0x0040u
+#define FF_LENGTH  0x0044u            /* E2 grew it from 0x40 */
 
 /*
  * Byte offsets inside `struct ff_state` that src/hooks.S addresses directly.
- * src/ff_ign.c asserts each of them against the struct, so a field that moves
- * fails the build rather than the engine.
+ * src/ff_ign.c and src/ff_start.c assert each of them against the struct, so a
+ * field that moves fails the build rather than the engine.
  */
-#define FF_OFF_MAGIC   0x00
-#define FF_OFF_DZW_E   0x29
+#define FF_OFF_MAGIC    0x00
+#define FF_OFF_DZW_E    0x29
+#define FF_OFF_FST_Q10  0x40          /* E2, read by the two S1 stubs */
+#define FF_OFF_ZWST_ADD 0x42          /* E2, read by the Z1 stub      */
 
 #define FF_MODE_INIT      0u
 #define FF_MODE_OK        1u
@@ -152,6 +174,36 @@
 #define FF_F_MIN       1024u          /* 1.000, bit-identical to stock    */
 #define FF_F_MAX       2048u          /* 2.000, the hard ceiling in code  */
 #define FF_FRAC        1024u          /* sub-count resolution of e_frac   */
+
+/*
+ * E2 (#35).  These three are spelled by src/hooks.S as well as by the C, so
+ * they carry NO `u` suffix and they live here, above the __ASSEMBLER__ guard,
+ * rather than with the rest of the start-enrichment constants.  Every C use is
+ * in a u32 or s32 context, where a positive int constant converts silently.
+ */
+#define FF_FST_ONE       1024         /* f_st = ff_fst_map[..] / 1024      */
+/*
+ * The ceiling the CODE applies whatever `ff_fst_max` says, the start-fuel
+ * counterpart of FF_F_MAX and FF_DZW_HARD_MAX.  2560 = 2.50x is above any
+ * sane calibration (E85 needs about 1.5x the mass and the stock map already
+ * supplies the cold-start enrichment this multiplies on top of,
+ * re/findings/start.md section 6), and it is chosen to be exactly the largest
+ * factor the DIAGNOSTIC byte can carry: (2560 * 100) >> 10 = 250, which still
+ * fits the u8 `B` of formula 0x21 with A = 100.  So there is no value this
+ * patch can produce that measuring block 69 field 1 cannot show, and no
+ * saturation to explain in the procedure.
+ */
+#define FF_FST_HARD_MAX  2560
+/*
+ * And the same for the start ADVANCE.  8 counts = 6.00 degCA is twice the
+ * shipped `ff_zwst_max` (4 counts = 3.00 degCA) and twice the +2..+4 degCA
+ * that re/findings/start.md section 5 calls the useful range.  It matters more
+ * here than anywhere else in the patch because the knock retard is BYPASSED
+ * during the start (start.md section 5): nothing downstream will take this
+ * advance back.  src/hooks.S uses it as an unsigned RANGE CHECK on the byte it
+ * reads, which is why the stub needs no lower clamp.
+ */
+#define FF_ZWST_HARD_MAX 8
 
 #ifndef __ASSEMBLER__
 
@@ -195,10 +247,16 @@ struct ff_state {
     volatile u16 persist_wait;        /* +3A  D2 */
     volatile u16 persist_writes;      /* +3C  D2 */
     volatile u16 persist_fails;       /* +3E  D2 */
+    /* --- core 2, checksummed (E2) --------------------------------------- */
+    volatile u16 fst_q10;             /* +40  E2 */
+    volatile s8  zwst_add;            /* +42  E2 */
+    volatile u8  st_reserved;         /* +43  E2, always 0; for brief E5 */
 };
 
-#define FF_CORE_OFF  0x08u            /* first checksummed byte */
-#define FF_CORE_LEN  0x24u            /* +08 .. +2B inclusive   */
+#define FF_CORE_OFF   0x08u           /* first checksummed byte */
+#define FF_CORE_LEN   0x24u           /* +08 .. +2B inclusive   */
+#define FF_CORE2_OFF  0x40u           /* E2: the second checksummed range */
+#define FF_CORE2_LEN  0x04u           /* +40 .. +43 inclusive   */
 
 extern struct ff_state ff_state;
 
@@ -276,8 +334,8 @@ void ff_diag_publish(void);
 
 /* ------------------------------------------------------ FFCAL001 layout --- */
 #define FF_CAL_BASE        0x005E2510u
-#define FF_CAL_VERSION     2u         /* E1 appended the ignition blend     */
-#define FF_CAL_LENGTH      0x010Au    /* what ffcal001.py emits today       */
+#define FF_CAL_VERSION     3u         /* E2 appended the start enrichment   */
+#define FF_CAL_LENGTH      0x0122u    /* what ffcal001.py emits today       */
 
 #define FF_CAL_MAGIC0      (FF_CAL_BASE + 0x00u)   /* "FFCA" */
 #define FF_CAL_MAGIC1      (FF_CAL_BASE + 0x04u)   /* "L001" */
@@ -307,7 +365,17 @@ void ff_diag_publish(void);
 #define FF_CAL_O_DZW_MAX   0xE7u      /* u8, |dzw_e| ceiling in s8 counts    */
 #define FF_CAL_O_DZW_NMOT  0xE8u      /* 8 x u16, nmot_w breakpoints (rows)  */
 #define FF_CAL_O_DZW_RL    0xF8u      /* 8 x u16, rl_w breakpoints (columns) */
-#define FF_CAL_O_CRC       0x108u     /* u16 at length-2 */
+/* --- appended by E2 (issue #35); v2 ended at 0x108 with the checksum ----- */
+#define FF_CAL_O_ST_ENABLE   0x108u   /* u8, 0 = f_st is permanently 1.000   */
+#define FF_CAL_O_ZWST_ENABLE 0x109u   /* u8, 0 = zwst_add is permanently 0   */
+#define FF_CAL_O_FST_MAX     0x10Au   /* u16, Q10 ceiling of fst_q10         */
+#define FF_CAL_O_ZWST_MAX    0x10Cu   /* u8, zwst_add ceiling in s8 counts   */
+#define FF_CAL_O_ZWST_TMAX   0x10Du   /* u8, tmst COUNT at/above which the   */
+                                      /*     start advance is 0              */
+#define FF_CAL_O_FST_E_AXIS  0x10Eu   /* 6 x u8, ethanol % (map rows)        */
+#define FF_CAL_O_FST_T_AXIS  0x114u   /* 6 x u8, tmst counts (map columns)   */
+#define FF_CAL_O_FZWST_CURVE 0x11Au   /* 6 x s8, counts, on the E axis above */
+#define FF_CAL_O_CRC         0x120u   /* u16 at length-2 */
 
 #define FF_CURVE_N     17u
 #define FF_CURVE_STEP  100u           /* 6.25 % in 1/16 % units */
@@ -351,6 +419,33 @@ void ff_zw_update(void);
 #define FF_FMT_A_ZW      0x4Bu        /* 75 -> 0.75 degCA per count          */
 #define FF_ZW_BIAS       128u         /* B of formula 0x22 at 0 degCA        */
 #define FF_ZW_LATCH_MASK 3u           /* bits 0/1 of 0x7FD31B                */
+
+/* -------------------------------- E2: the start enrichment (#35) --------- */
+#define FF_FST_N         6u           /* ff_fst_map is 6 E rows x 6 tmst cols */
+
+/* src/ff_start.c; called from ff_finish() at the end of every activation. */
+void ff_start_update(void);
+
+/* ---------------------------------- E2: the measuring block 69 (#35) ----- */
+/*
+ * Facts about the image, not choices the code makes: the handler pointers go
+ * into tbl_measuring_vars (0xA5658) ids 2188-2191 and the group words into
+ * tbl_measuring_groups (0x5C5518) group 69, both written by patch.json.
+ * Evidence: re/findings/measuring_vars.md section 8.5.
+ */
+#define FF_MW_ID_FST     2188u        /* field 1, formula 0x21, A = 100      */
+#define FF_MW_ID_ZWST    2189u        /* field 2, formula 0x22, A = 0x4B     */
+#define FF_MW_ID_TMST    2190u        /* field 3, formula 0x05, A = 10       */
+#define FF_MW_ID_KSTA    2191u        /* field 4, formula 0x36 (a raw count) */
+#define FF_MW_GROUP_ST   69u          /* 0x45; its 0x7F echo 196 is empty    */
+
+/*
+ * `tmst` is a u8 count of 0.75 degC with a -48 degC offset (start.md 2).
+ * Formula 0x05 is `0.1 * A * (B - 100)`, so with A = 10 the reported number
+ * is `B - 100` whole degrees C and the handler does the conversion, rounding
+ * to nearest: degC = (count * 3 + 2) / 4 - 48.
+ */
+#define FF_TMST_BIAS     48           /* degC at count 0 is -48              */
 
 #endif /* __ASSEMBLER__ */
 #endif /* FF_STATE_H */

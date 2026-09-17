@@ -613,3 +613,92 @@ Fields 1 and 2 check the state-block header and answer `(0x25, 0, 0)` when it
 does not hold, as D2's do. Fields 3 and 4 **do not**: they report stock cells
 that are valid whether or not our block is, and a tester chasing knock has to
 be able to see them.
+
+## 8.5 The start enrichment: ids 2188-2191 and group 69 (E2, 2026-09-17, #35)
+
+Brief **E2** took the third of the three slots §8.2 reserved, and the group the
+wave-E budget in `docs/agent_briefs/README.md` assigned it. Re-checked before
+taking it, as the 2026-09-17 rules require:
+
+```bash
+./.venv/bin/python3 tools/measuring_vars.py data/passat_azx_ori.bin --free
+#   spare variable ids (stub handler AND named by no group): 1507 of 2200
+#   free groups ...: [17, 19, 25, 29, 40, 45, 48, 49, 58, 59, 65, 67, 69,
+#                     108, 109, 111]
+#   group  69 (0x45) words: 0x5c55a2, 0x5c57a0, 0x5c599e, 0x5c5b9c
+```
+
+### The ids: 2188-2191, the four entries below E1's
+
+Table words **0x0A7888-0x0A7897**, stock content `00 03 8E C4` four times, so
+the edit is one contiguous 16-byte range immediately below E1's — the third
+step of the downward walk from the end of the 2200-entry table (D2 took
+2196-2199, E1 2192-2195). E5 continues with 2184-2187.
+
+| id | handler | field | emits | reads |
+|---|---|---|---|---|
+| 2188 | `ff_diag_fst_pct` | 1 | `(0x21, A=0x64, B = f_st %)` | `ff_state.fst_q10` |
+| 2189 | `ff_diag_zwst` | 2 | `(0x22, A=0x4B, B = zwst_add + 0x80)` | `ff_state.zwst_add` |
+| 2190 | `ff_diag_tmst` | 3 | `(0x05, A=0x0A, B = °C + 100)` | **stock** 0x8021F6 |
+| 2191 | `ff_diag_ksta` | 4 | `(0x36, A = v >> 8, B = v & 0xFF)` | **stock** 0x80302C |
+
+The three negative searches, all reproduced in
+`tests/test_ff_start_patch.py::TestStockFacts`:
+
+* `find_abs_refs.resolve()` over the whole image finds **no** `lis` + D-form
+  pair resolving into 0x0A7888-0x0A7897;
+* `find_branch_refs.scan()` finds no branch and no stored pointer to any of
+  the four words, nor to any of the four group words;
+* `free_slots()` still lists all four ids as spare and group 69 as free.
+
+### The group: 69 (0x45)
+
+Words **0x5C55A2 / 0x5C57A0 / 0x5C599E / 0x5C5B9C**, i.e.
+`0x5C5518 + field * 0x1FE + 69 * 2`, all four `00 00` in the stock image. Its
+`+0x7F` echo, group **196**, is empty too, so the whole 25-byte answer to
+`21 45` belongs to the patch. All four words are inside the guarded stock
+calibration 0x1C0000-0x1DFFFF and carry `"calibration_edit": true`.
+
+### Formula choices, and the one that is a fallback
+
+Field 1 is **0x21 with A = 100**, so `B` is the percent directly — the same
+shape as D2's fields 1 and 2 and E1's field 1. Field 2 is **0x22 with
+A = 0x4B**, the angle formula §8.4 established: `0.01 × 75 × (B − 128)` =
+0.75 °CA per count. Field 3 is **0x05 with A = 10**, §7.1's cross-checked
+temperature formula, so the reading is `B − 100` whole degrees; the handler
+does the count → °C conversion itself (`(count × 3 + 2) / 4 − 48`, rounded to
+nearest, half **up**), because `tmst`'s 0.75 °C/LSB with a −48 °C offset has no
+representation in the VAG formula table.
+
+**Field 4 is the fallback the brief allowed, and it was needed.** The brief
+asked for `ksta_adapted` as a percent, `(v × 100) >> 10`, and said to use a
+count formula if the percent does not fit. It does not: the *stock* cranking
+factor reaches 22.8× = 2280 % at −30 °C (`start.md` §6) and formula 0x21's `B`
+is one byte. Field 4 therefore uses **0x36**, `(A << 8) | B`, and reports the
+whole 16-bit cell exactly as the ECU holds it — 1024 = 1.00×, no saturation
+anywhere in the range, and the same fixed point `emu/start_model.py` and the
+tick-by-tick comparison work in.
+
+**Field 1 cannot saturate either**, and that is what fixes the patch's code
+ceiling `FF_FST_HARD_MAX` at 2560: `(2560 × 100) >> 10 = 250`, the largest
+value formula 0x21's `B` can carry with A = 100. The clamp in the code, the
+range the calibration may ask for and the range the measuring block can show
+are deliberately the same number.
+
+Fields 1 and 2 check the state-block header and answer `(0x25, 0, 0)` when it
+does not hold, as D2's and E1's do. Fields 3 and 4 **do not**: they report
+stock cells that are valid whether or not our block is, and somebody watching
+a cold start has to see `tmst` and the cranking factor either way.
+
+### The budget after E2
+
+| Brief | ids | group | taken |
+|---|---|---|---|
+| D2 (#39) | 2196-2199 | 111 | yes |
+| E1 (#34) | 2192-2195 | 108 | yes |
+| **E2 (#35)** | **2188-2191** | **69** | **yes** |
+| E5 (#36) | 2184-2187 | 109 | reserved |
+
+Twelve of the 1507 spare ids and three of the sixteen free groups are now
+spent. The remaining free groups are 17, 19, 25, 29, 40, 45, 48, 49, 58, 59,
+65, 67 and 109.

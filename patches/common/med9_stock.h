@@ -76,5 +76,21 @@
  * The two latch bits of the stock low-octane-fuel detector zwgru_low_octane_detect 0x0F436C */
 #define MED9_ZW_LOW_OCT_LATCH  0x007FD31B
 
+/* tmst  [VERIFIED-STATIC, ghidra]  sram_ext, size 0x1
+ * Engine temperature latched at start, u8, 0.75 degC per LSB with offset -48 degC */
+#define MED9_TMST              0x008021F6
+
+/* ksta_adapted  [VERIFIED-DYNAMIC, ghidra]  sram_ext, size 0x2
+ * ksta * kstaa, u16, 1024 = 1.0; forced to 0x400 outside the start */
+#define MED9_KSTA_ADAPTED      0x0080302C
+
+/* zwstt  [VERIFIED-DYNAMIC, ghidra]  sram_ext, size 0x1
+ * Start ignition angle, s8, 0.75 deg CA per LSB */
+#define MED9_ZWSTT             0x00802096
+
+/* B_stend  [VERIFIED-STATIC, ghidra]  sram_int, size 0x1
+ * Start finished, four cycles after 0x7FE920 */
+#define MED9_B_STEND           0x007FE921
+
 
 #endif /* MED9_STOCK_H */

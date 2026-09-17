@@ -1,8 +1,18 @@
 /*
- * ff_fuel: the three trampolines.
+ * ff_fuel: seven hook words, in three groups.
  *
- * All three sites are `bl` whose whole EABI volatile set is provably dead, so
- * all three use HOOK_TAIL (16-byte frame, saves LR only) and tail-branch with
+ *   D1, below      three HOOK_TAIL trampolines that replace a `bl`
+ *   E1, middle     ff_zw_hook, one instruction patch (0x41D40C)
+ *   E2, bottom     ff_st_hook_a / ff_st_hook_b / ff_zwst_hook, three more
+ *                  instruction patches (0x41A680, 0x41A808, 0x431384)
+ *
+ * Six of the seven are in the ON-CHIP flash 0x404000-0x47FFFF; only D1's
+ * task-set-B raster hook 0x12067C is in external flash.  The patch README's
+ * hook table is the authority on that count.
+ *
+ * All three sites in the FIRST group are `bl` whose whole EABI volatile set is
+ * provably dead, so all three use HOOK_TAIL (16-byte frame, saves LR only) and
+ * tail-branch with
  * `ba` to the function the site originally called, which therefore still runs,
  * in the same task, in the same order.  One flash word changes per site.
  *
@@ -90,3 +100,196 @@ ff_zw_hook:
     add   3, 3, 12
     blr                                         /* back to 0x41D410          */
     .size ff_zw_hook, . - ff_zw_hook
+
+/*
+ * ---------------------------------------------------------------------------
+ * The three E2 stubs (brief E2, issue #35): start enrichment and start
+ * ignition.  Like ff_zw_hook above, none of them replaces a branch, so there
+ * is nothing to tail-branch to and the displaced STORE is re-done here --
+ * hook technique 3 of docs/06_patch_pipeline.md section 4.
+ *
+ *   0041A67C  addi  r31,r3,0
+ *   0041A680  sth   r31,0x303c(r13)   <-- becomes `bl ff_st_hook_a`
+ *   0041A684  addi  r11,r1,0x18       ; the epilogue, already
+ *
+ *   0041A804  bl    0x410060
+ *   0041A808  sth   r3,0x303c(r13)    <-- becomes `bl ff_st_hook_b`
+ *   0041A80C  lbz   r12,-0x16d0(r13)
+ *
+ *   00431380  li    r31,0x7f
+ *   00431384  stb   r31,0x20a6(r13)   <-- becomes `bl ff_zwst_hook`
+ *   00431388  lwz   r0,0x14(r1)       ; the epilogue, already
+ *
+ * Note the register difference the two %ESSTT twins force: the low-pressure
+ * module publishes out of **r31** and the high-pressure twin out of **r3**.
+ * That is the only thing separating ff_st_hook_a from ff_st_hook_b; they share
+ * every other instruction.
+ *
+ * Why no frame and no register saves (re/findings/start.md section 9.2,
+ * VERIFIED-STATIC).  All three functions use the EABI save/restore millicode
+ * (`_savegpr_*` 0x0B8234/0x0B8238, `_restgpr_*_x` 0x0B81D8/0x0B81DC) or
+ * open-code it, so **LR is already in the caller's frame at 4(old_sp)** and the
+ * register holds a dead return address at every one of the three words; a `bl`
+ * into these stubs clobbers nothing. r0, r11 and r12 are dead at all three
+ * sites, CR0 is dead (nothing reads it before the next writer), CTR and XER
+ * are untouched and r1 is never written here.
+ *
+ * The value register itself (r31, or r3 at the second site) is NEVER modified,
+ * although it is dead after the store too: the stubs copy it into r0 and work
+ * there, so the displaced instruction stays a pure read of its operand.
+ *
+ * Both stock cells are addressed ABSOLUTELY, out of med9_stock.h, with an
+ * explicit `lis` of the high half -- 0x80302C and 0x802096 both have a low
+ * half below 0x8000, so no `@ha` carry correction and no relocation is
+ * involved.  RAM in our own block goes through the linker's
+ * `PATCH_RAM@ha` / `@l` pair exactly as ff_zw_hook does.  r2 and r13 appear
+ * nowhere; `tools/blobdis.py --check-sda` enforces it.
+ * ---------------------------------------------------------------------------
+ */
+
+/*
+ * ff_st_hook_a / ff_st_hook_b - S1, the cranking lever.
+ *
+ * Publish `min((v * fst_q10) >> 10, 0xFFFF)` instead of `v`.  Four things send
+ * it down the untouched path, and each of them stores the very halfword the
+ * stock `sth` would have stored:
+ *
+ *   - **`B_stend` (0x7FE921) is set**, i.e. the start is over.  See the
+ *     paragraph below: this one is not optional;
+ *   - the state block does not carry our magic (the first milliseconds after
+ *     power-up, or a corrupted block);
+ *   - `fst_q10 <= 1024`, which is the shipped value, every activation in
+ *     which `ff_st_enable` is 0, and any corrupt value that would LEAN the
+ *     cranking mixture out;
+ *   - implicitly, `ff_st_enable = 0`, because the producer then pins
+ *     `fst_q10` at exactly 1024.
+ *
+ * ### Why the B_stend gate is in the stub and not left to the stock code
+ *
+ * `re/findings/start.md` section 3 reads the low-pressure twin as
+ * `if (B_stend) { 0x80302C = 0x400; return; }` and infers that the hooked
+ * store cannot run outside the start.  **That inference is wrong, and the
+ * disassembly says so** (corrected in start.md section 9.3):
+ *
+ *   0041A2D0  lbz   r12,-0x16cf(r13)   ; B_stend 0x7FE921
+ *   0041A2D4  cmpwi r12,0
+ *   0041A2D8  beq   0x41a2e4           ; not finished -> the real computation
+ *   0041A2DC  li    r31,0x400          ; finished -> the neutral 1.0 ...
+ *   0041A2E0  b     0x41a680           ; ... published THROUGH THIS STORE
+ *
+ * The compiler shared the epilogue: the early-out does not return, it jumps to
+ * 0x41A680 with r31 = 0x400.  Without the gate the stub would multiply the
+ * ECU's explicit "no start enrichment" by `f_st` on every segment of the
+ * running engine - the one thing this feature must never do.  The
+ * high-pressure twin is built differently (`bne 0x41a824` at 0x41A6A4 skips
+ * its store), but both stubs carry the gate: it is the same condition the
+ * stock code tests, in the same cell, and it makes "S1 acts only during the
+ * start" true of the STORE rather than of one path to it.
+ *
+ * `tools/find_branch_refs.py data/passat_azx_ori.bin 0x41A680 0x41A808
+ * 0x431384 --no-ptr` lists every branch into the three words: 0x41A2E0
+ * (this early-out), 0x41A7E0 and 0x431374 (both ordinary computation paths).
+ *
+ * `clrlwi` before the multiply takes exactly the 16 bits the stock `sth`
+ * would have stored, so the scaled path cannot disagree with the neutral one
+ * about what "the value" is.  `mullw` of two 16-bit quantities cannot wrap a
+ * 32-bit register, so the only bound needed afterwards is the 0xFFFF
+ * saturation `re/findings/start.md` section 3.3 asks for.
+ *
+ * Cost, per start-module activation of the segment task, for ff_st_hook_a
+ * (ff_st_hook_b is one instruction cheaper - it falls through instead of
+ * branching to the shared tail):
+ *
+ *     9   the start is over, B_stend set     <- the case that runs all day
+ *    14   no valid state block
+ *    17   fst_q10 = 1024, the shipped value
+ *    23   scaling (25 when the 0xFFFF saturation fires)
+ */
+    .section .text.ff_st_hook, "ax", @progbits
+    .globl ff_st_hook_a
+    .type  ff_st_hook_a, @function
+    .align 2
+ff_st_hook_a:
+    mr    0, 31                                 /* site 0x41A680: v in r31   */
+    b     .Lff_st_publish
+    .size ff_st_hook_a, . - ff_st_hook_a
+
+    .globl ff_st_hook_b
+    .type  ff_st_hook_b, @function
+ff_st_hook_b:
+    mr    0, 3                                  /* site 0x41A808: v in r3    */
+.Lff_st_publish:
+    lis   11, 0x80                              /* 0x800000, the stock half  */
+    lbz   12, (MED9_B_STEND - 0x800000)(11)     /* B_stend 0x7FE921          */
+    cmpwi 12, 0
+    bne   .Lff_st_store                         /* start over -> stock       */
+    lis   11, PATCH_RAM@ha
+    lwz   12, (PATCH_RAM + FF_OFF_MAGIC)@l(11)  /* ff_state.magic            */
+    xoris 12, 12, 0x4646
+    cmplwi 12, 0x3031                           /* "FF01"?                   */
+    bne   .Lff_st_store                         /* no valid state -> stock   */
+    lhz   12, (PATCH_RAM + FF_OFF_FST_Q10)@l(11)
+    cmplwi 12, FF_FST_ONE
+    ble   .Lff_st_store                         /* neutral or bad -> stock   */
+    clrlwi 0, 0, 16                             /* the halfword sth stores   */
+    mullw 12, 12, 0                             /* <= 0xFFFF * 0xFFFF        */
+    srwi  12, 12, 10                            /* Q10 -> plain              */
+    cmplwi 12, 0xFFFF
+    ble   .Lff_st_ok
+    li    12, -1
+    clrlwi 12, 12, 16                           /* saturate at 0xFFFF        */
+.Lff_st_ok:
+    mr    0, 12
+.Lff_st_store:
+    lis   11, (MED9_KSTA_ADAPTED >> 16)
+    sth   0, (MED9_KSTA_ADAPTED & 0xFFFF)(11)   /* 0x80302C                  */
+    blr
+    .size ff_st_hook_b, . - ff_st_hook_b
+
+/*
+ * ff_zwst_hook - Z1, the start ignition angle.
+ *
+ * `zwstt` = clamp_s8(stock + zwst_add).  The byte read from the state block is
+ * range-checked UNSIGNED against FF_ZWST_HARD_MAX, which rejects every
+ * negative byte as well (0x80..0xFF read as 128..255) and is what lets the
+ * stub get away with only the upper s8 clamp: the sum of an s8 and a value in
+ * 0..8 cannot go below -128.  The stock clamp that used to protect this store
+ * runs BEFORE it (0x431368-0x431380), not after, which is exactly why the
+ * clamp is re-done here and not left to the ECU.
+ *
+ * The producer is proved to run first: `ff_fuel`'s task-set-A tick hook is at
+ * 0x432940 and `zwstt_build` is called from 0x432B04, with 114 consecutive
+ * argument-less `bl` and no branch in between, in the same 10 ms task
+ * (re/findings/start.md section 9.1).  The magic check is kept anyway, for the
+ * case where `ff_fuel` is not running at all.
+ *
+ * Cost: 9 instructions when the block is invalid or the byte is out of range,
+ * 16 when it adds, 17 when the +127 clamp fires - once per 10 ms activation,
+ * and only while the start is in progress (`zwstt_build` returns at 0x4312B0
+ * without reaching the store once 0x7FECCA is set, which is why THIS stub
+ * needs no B_stend gate of its own).
+ */
+    .section .text.ff_zwst_hook, "ax", @progbits
+    .globl ff_zwst_hook
+    .type  ff_zwst_hook, @function
+    .align 2
+ff_zwst_hook:
+    mr    0, 31                                 /* the stock s8 in r31       */
+    lis   11, PATCH_RAM@ha
+    lwz   12, (PATCH_RAM + FF_OFF_MAGIC)@l(11)  /* ff_state.magic            */
+    xoris 12, 12, 0x4646
+    cmplwi 12, 0x3031                           /* "FF01"?                   */
+    bne   .Lff_zwst_store                       /* no valid state -> stock   */
+    lbz   12, (PATCH_RAM + FF_OFF_ZWST_ADD)@l(11)
+    cmplwi 12, FF_ZWST_HARD_MAX                 /* 0 <= zwst_add <= 8 ?      */
+    bgt   .Lff_zwst_store                       /* out of range -> stock     */
+    extsb 0, 0
+    add   0, 0, 12
+    cmpwi 0, 127                                /* the stock s8 clamp        */
+    ble   .Lff_zwst_store
+    li    0, 127
+.Lff_zwst_store:
+    lis   11, (MED9_ZWSTT >> 16)
+    stb   0, (MED9_ZWSTT & 0xFFFF)(11)          /* 0x802096                  */
+    blr
+    .size ff_zwst_hook, . - ff_zwst_hook
