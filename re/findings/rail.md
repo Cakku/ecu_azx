@@ -804,6 +804,22 @@ limit for the window is wanted, the clean insertion point is the min-chain at
 there propagates to the throttle exactly the way the stock protection limits
 do, with no new path and no DTC.
 
+> **Added 2026-09-17 (E3, #41): the other four inputs of that min-chain are
+> now named, and they are almost all switched off.** `0x80234C` comes from
+> `rl_limit_charge_protect` 0x0FBE74 and `0x802358` / `0x802360` / `0x80235E`
+> from the previously unidentified **`rl_limit_rail_and_speed` 0x0FC250**.
+> In this dataset `cand_KLRLMXMI` (0x5D7E3A), `cand_KFRLMXBTS` (0x5D7DC2),
+> `cand_KFRLMXBTS2` (0x5D7E08) and `cand_KLRLMXN` (0x5D7E52) are **all
+> 0xFFFF**, the code word `cand_CWRLMXBTS` (0x5D7E5E) is 0, `cand_KFFRLMXN`
+> is all 128 and `cand_KLFRLMXT` all 255, and the rail-pressure limit
+> `0x80235E` is armed only below `cand_TMRLMXPR` = −20.25 °C. The **one**
+> calibrated limiter is `cand_KLRLMXNRED` (0x5D7EAE): 100 % of charge up to
+> 3520 rpm, then 71 / 60 / 55 / 52 / 50 % at 4000 / 4520 / 5000 / 5520 /
+> 6520 rpm, armed by the debounced flag 0x7FEA84. So the min-chain has room
+> for an extra `min()`, but a flex-fuel run that arms 0x7FEA84 loses half its
+> charge above 6000 rpm — log 0x802358 and 0x80235A.
+> `re/findings/calibration_names.md` §9.3.
+
 ### 12.4 Watch list
 
 * `%HDR` anti-windup bit `0x7FD2D9 & 2` and the enable set `0x7FD2F4`: a
