@@ -81,14 +81,22 @@ class EthanolNode:
     implausible: bool = False
     #: status 3 from the first frame (row 6)
     not_ready: bool = False
+    #: simulated second at which the configured fault starts.  procedure.md
+    #: section 5 says "Pico running at a steady E-value first (let ff_e_filt
+    #: settle) ... Then, one step at a time": before this the node is
+    #: nominal, after it the fault applies.  None = from the first frame.
+    fault_after: float | None = None
 
     def __post_init__(self):
         self.counter = 0
         self.sent = 0
 
     # -- the frame --------------------------------------------------------
+    def faulted(self, t: float) -> bool:
+        return self.fault_after is None or t >= self.fault_after
+
     def ethanol_at(self, t: float) -> int:
-        if self.implausible:
+        if self.implausible and self.faulted(t):
             return 101
         if self.ramp is None:
             return self.e_pct
@@ -99,6 +107,8 @@ class EthanolNode:
         return int(round(a + (b - a) * f))
 
     def status_at(self, t: float) -> int:
+        if not self.faulted(t):
+            return STATUS_OK
         return STATUS_NOT_READY if self.not_ready else self.status
 
     def sending(self, t: float) -> bool:
@@ -116,8 +126,8 @@ class EthanolNode:
         assert d.fuel_temp_c == self.temp_c
         return data
 
-    def advance_counter(self) -> None:
-        if not self.stall:
+    def advance_counter(self, t: float | None = None) -> None:
+        if not self.stall or (t is not None and not self.faulted(t)):
             self.counter = (self.counter + 1) & 0xFF
 
     def describe(self, t: float = 0.0) -> str:
@@ -130,17 +140,23 @@ class FrameSender:
     """Paces an :class:`EthanolNode` onto a `CanLink` at its own rate."""
 
     def __init__(self, link, node: EthanolNode | None = None, *,
-                 t0: float | None = None, clock=time.monotonic):
+                 t0: float | None = None, clock=time.monotonic,
+                 scale: float = 1.0):
         self.link = link
         self.node = node or EthanolNode()
         self.clock = clock
+        #: simulated seconds per wall second.  `logging/ecu_sim.py` can be run
+        #: with `--time-scale`, and the node has to be stretched the same way
+        #: or the ECU would see a 10 Hz frame arrive every 50 simulated ms.
+        self.scale = max(scale, 1e-6)
         self.t0 = self.clock() if t0 is None else t0
         self.period = 1.0 / max(self.node.rate_hz, 0.001)
         self._next = 0.0
         self.sent = 0
 
     def elapsed(self) -> float:
-        return self.clock() - self.t0
+        """Simulated seconds since the node powered up."""
+        return (self.clock() - self.t0) * self.scale
 
     def pump(self, t: float | None = None) -> bool:
         """Send a frame if one is due at simulated second `t`.  True if sent."""
@@ -154,12 +170,13 @@ class FrameSender:
             return False
         data = self.node.frame(t)
         self.link.send(self.node.can_id, data)
-        self.node.advance_counter()
+        self.node.advance_counter(t)
         self.sent += 1
         self.node.sent = self.sent
         return True
 
     def run(self, seconds: float, sleep: float = 0.002) -> int:
+        """Send for `seconds` **simulated** seconds."""
         deadline = self.elapsed() + seconds
         while self.elapsed() < deadline:
             if not self.pump():
@@ -208,7 +225,8 @@ def main(argv=None) -> int:
     node = EthanolNode(e_pct=a.e_pct, temp_c=a.temp, status=a.status, fw=a.fw,
                        can_id=a.id, rate_hz=a.rate, ramp=a.e_ramp,
                        stall=a.stall, stop_after=a.stop_after,
-                       implausible=a.implausible, not_ready=a.not_ready)
+                       implausible=a.implausible, not_ready=a.not_ready,
+                       fault_after=a.fault_after)
     link = open_link(parse_bus_spec(a.bus))
     sender = FrameSender(link, node)
     print(f"ethanol node on {link.description}, id {node.can_id:#05x}, "

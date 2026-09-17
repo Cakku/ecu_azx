@@ -60,6 +60,7 @@ which is this, from Python -- also what `tests/test_med9kwp.py` does::
 from __future__ import annotations
 
 import argparse
+import collections
 import contextlib
 import json
 import math
@@ -107,6 +108,21 @@ FFCAL001_BASE = 0x5E2510
 NVM_PUMP_WRAPPER = 0x061944
 #: the relative fuel mass the segment stub scales (injection.md section 6.1)
 RK_FUEL_MASS = 0x803038
+#: what the stock word at 0x42247C branches to, and what ff_fuel_rk_hook
+#: tail-branches to once it has scaled `rk` (injection.md section 6.2).  A
+#: STOCK baseline run calls this directly, so the two runs of the E0
+#: equivalence comparison execute the same stock code.
+RKSPLIT = 0x41C3A0
+
+#: Stack pointer for the hook calls.  `Med9Emu.call()` parks r1 at the boot
+#: stack top 0x7FEFFC, and a C function's frame there runs straight over
+#: application variables -- `zwist_display_b1` (0x7FEF87) is 0x75 bytes below
+#: it, and a stock-vs-patched comparison then differs by the frame rather than
+#: by the patch.  On the real part every task has its own stack; the OS task
+#: stacks are 0x7FF3C0-0x7FF76F (`re/findings/scheduler.md`, and the
+#: patches/ff_fuel README puts its RAM block deliberately above them), so the
+#: runner uses the top of that region.
+TASK_STACK_TOP = 0x7FF768
 
 #: wire sub-function -> (internal session number, required security state)
 SESSION_MAP = {
@@ -367,26 +383,36 @@ class PatchRunner:
     #: slow host cannot stall the CAN bus while it catches up
     MAX_CATCHUP_S = 0.5
 
-    def __init__(self, emu, patch_dir: str, *, task_set: str = "A",
+    def __init__(self, emu, patch_dir: str | None, *, task_set: str = "A",
                  ram: "AnimatedRam | None" = None, segments: bool = True,
                  nvm_pump: bool = True, tick_ms: float = 10.0):
         from emu.toucan import SLOT15, RxMailbox
 
         self.emu = emu
         self.patch_dir = patch_dir
-        with open(os.path.join(patch_dir, "patch.json"), encoding="utf-8") as fh:
-            build = json.load(fh)["build"]
-        self.syms = {k: int(v, 0) for k, v in build["symbols"].items()}
+        if patch_dir is None:
+            #: STOCK mode: no patch, so the only thing to run per segment is
+            #: what the unmodified word at 0x42247C calls.  This is what makes
+            #: a stock baseline comparable with a --sim-patch run instead of
+            #: differing by every cell rksplit touches.
+            self.syms = {}
+            self.hook = None
+            self.rk_hook = RKSPLIT
+        else:
+            with open(os.path.join(patch_dir, "patch.json"), encoding="utf-8") as fh:
+                build = json.load(fh)["build"]
+            self.syms = {k: int(v, 0) for k, v in build["symbols"].items()}
+            self.hook = self.syms["ff_fuel_hook_a" if task_set.upper() == "A"
+                                  else "ff_fuel_hook_b"]
+            self.rk_hook = self.syms.get("ff_fuel_rk_hook")
         self.task_set = task_set.upper()
-        self.hook = self.syms["ff_fuel_hook_a" if self.task_set == "A"
-                              else "ff_fuel_hook_b"]
-        self.rk_hook = self.syms.get("ff_fuel_rk_hook")
         self.ram = ram
         self.segments_enabled = segments and self.rk_hook is not None
         self.nvm_pump = nvm_pump
         self.tick_s = tick_ms / 1000.0
         self.mailbox = RxMailbox(emu, SLOT15)
-        self.can_id = int.from_bytes(emu.read(FFCAL001_BASE + 0x0C, 2), "big")
+        self.can_id = (int.from_bytes(emu.read(FFCAL001_BASE + 0x0C, 2), "big")
+                       if patch_dir is not None else 0x0EC)
 
         self.sim_t = 0.0
         self.ticks = 0
@@ -394,7 +420,13 @@ class PatchRunner:
         self.frames_in = 0
         self.errors: list[str] = []
         self._seg_accum = 0.0
-        self._pending: bytes | None = None
+        #: Frames wait in a short queue rather than overwriting one slot.  A
+        #: real mailbox does overwrite, but simulated time moves in bursts of
+        #: up to MAX_CATCHUP_S while the sender thread runs on the wall clock,
+        #: so one slot would drop most of a burst and the ECU would see 2 Hz
+        #: instead of 10.  The queue is bounded, so a runner that falls badly
+        #: behind still drops the oldest, exactly as the hardware would.
+        self._pending: "collections.deque[bytes]" = collections.deque(maxlen=8)
         self._lock = threading.Lock()
         self.mailbox.idle()
 
@@ -403,13 +435,12 @@ class PatchRunner:
         """Every frame the simulator sees; ours is copied into the mailbox."""
         if can_id == self.can_id and len(data) == 8:
             with self._lock:
-                self._pending = bytes(data)
+                self._pending.append(bytes(data))
                 self.frames_in += 1
 
     def _take_frame(self) -> bytes | None:
         with self._lock:
-            frame, self._pending = self._pending, None
-        return frame
+            return self._pending.popleft() if self._pending else None
 
     # -- the clock ---------------------------------------------------------
     def advance(self, target_s: float) -> None:
@@ -429,7 +460,8 @@ class PatchRunner:
             self.mailbox.arm(frame)
         else:
             self.mailbox.idle()
-        self._call(self.hook, "10 ms hook")
+        if self.hook is not None:
+            self._call(self.hook, "10 ms hook")
         self.ticks += 1
         if self.nvm_pump:
             self._call(NVM_PUMP_WRAPPER, "nvm pump", max_insns=4_000_000)
@@ -449,7 +481,8 @@ class PatchRunner:
             self.segments += 1
 
     def _call(self, addr: int, what: str, max_insns: int = 2_000_000) -> None:
-        res = self.emu.call(addr, reset=False, max_insns=max_insns)
+        res = self.emu.call(addr, regs={"r1": TASK_STACK_TOP}, reset=False,
+                            max_insns=max_insns)
         if not res.ok and len(self.errors) < 20:
             self.errors.append(
                 f"{what} at {addr:#08x}: {res.stop_reason} at {res.pc:#08x} "
@@ -494,7 +527,7 @@ class Med9Handlers:
                  clock=None, session_timeout_s: float | None = None,
                  patch_dir: str | None = None, eeprom: str | None = None,
                  time_scale: float = 1.0, run_patch: bool = True,
-                 wip_polls: int = 0):
+                 stock_tasks: bool = False, wip_polls: int = 0):
         from emu import Med9Emu
         if patch_dir:
             dump_path = apply_patch_to_temp(patch_dir, dump_path)
@@ -526,15 +559,16 @@ class Med9Handlers:
             self.ram.flexfuel = True
         if eeprom:
             self._install_eeprom(eeprom, wip_polls)
-        if patch_dir and run_patch:
-            self.runner = PatchRunner(self.emu, patch_dir,
+        if (patch_dir and run_patch) or stock_tasks:
+            self.runner = PatchRunner(self.emu, patch_dir if run_patch else None,
                                       task_set=self.ram.live_task_set,
                                       ram=self.ram if self.animate else None,
                                       nvm_pump=self.eeprom is not None)
             #: with the hooks running, `ff_state` is the patch's own, so the
             #: AnimatedRam stand-in must keep its hands off 0x7FFB00
-            self.ram.flexfuel = False
-            self.ram.owns_patch_ram = False
+            if patch_dir:
+                self.ram.flexfuel = False
+                self.ram.owns_patch_ram = False
         self.power_on()
 
     # -- the EEPROM device -------------------------------------------------
@@ -885,6 +919,11 @@ def main(argv=None) -> int:
                     help="apply a patch directory (patches/ff_fuel) to a "
                          "temporary image AND run its hooks on a simulated "
                          "10 ms raster -- the bench rehearsal of brief E4")
+    ap.add_argument("--sim-stock-tasks", action="store_true",
+                    help="without --sim-patch: still run the stock code the "
+                         "patch's hooks replace (rksplit per segment, the NVM "
+                         "pump per 10 ms), so a STOCK baseline log is "
+                         "comparable with a --sim-patch run")
     ap.add_argument("--eeprom", metavar="FILE", default=None,
                     help="back the QSPI EEPROM with this 2 KB image "
                          "(emu/qspi_eeprom.py); created from the firmware's "
@@ -916,6 +955,7 @@ def main(argv=None) -> int:
         args.dump, seed=args.seed or None, animate=not args.no_animate,
         session_timeout_s=args.session_timeout or None,
         patch_dir=args.sim_patch, eeprom=args.eeprom,
+        stock_tasks=args.sim_stock_tasks,
         time_scale=args.time_scale, wip_polls=args.wip_polls,
         ram=AnimatedRam(live_task_set=args.task_set,
                         statics=dict(DEFAULT_STATICS)))
