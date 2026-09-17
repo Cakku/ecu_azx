@@ -95,6 +95,19 @@ identity above is evidence about the ECU's own scaling; the display formula is
 still COMMUNITY and may well carry a different normalisation for the tester.
 Do not use the one to correct the other without a log.
 
+> **SETTLED 2026-09-17 (E3, #41), and D3 was right.** The u8 is not merely
+> *consistent with* `rl_w >> 5`, it **is** `rl_w >> 5`: at 0x419280
+> `rlwinm r6,r5,0x1b,0x15,0x1f` shifts `rl_w` right by five and 0x419284
+> stores it to 0x7FEF74, with the clamp `cmplwi r12,0x1fe0` (= 255 × 32) two
+> instructions earlier; the two initialisation sites 0x11BC38 / 0x12D8B4 write
+> the pair `rl_w = 4267` / `u8 rl = 133` together. So 1 LSB = 32 × 100/4096 =
+> **100/128 %**, VERIFIED-STATIC from the instruction, not from a grid.
+> The display side is settled too, in the emulator: the real handler for id 2
+> emits **B = the raw byte with no arithmetic** and a constant `A = 0x85`, so
+> `A` is a tester-side normalisation and never was a claim about the ECU's
+> LSB. There is no contradiction to resolve — both notes describe different
+> things, and `measuring_vars.md` §7.5 has the sweep and the reproduction.
+
 ## 3. The shared nmot × rl breakpoint blocks (VERIFIED-STATIC)
 
 `FUN_000BDB58` (0x0BDB58-0x0BDC4B) is the central axis-key process. It
