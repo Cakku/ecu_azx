@@ -9,7 +9,7 @@ re-checksums the block.
 
 Two outputs:
 
-  build/ffcal001.bin    the 232 bytes that go into the image
+  build/ffcal001.bin    the 266 bytes that go into the image (v2; v1 was 232)
   ffcal001_rows.csv     descriptor rows in the exact column format of
                         `re/calibration_draft.csv`, for the integrator to
                         append at merge time (brief D3 owns that file, so D1
@@ -33,6 +33,16 @@ The F curve is the docs/05 section 3.3 mass factor, evaluated by
 calibration cannot drift apart.  F(0) = 1024 exactly, which is what makes E0
 bit-identical to stock.
 
+Version 2 (brief E1, issue #34, 2026-09-17) APPENDED the ignition blend and
+moved nothing: `ff_zw_enable` (+0xE6, shipped **0**), `ff_dzw_max` (+0xE7),
+and the two 8-point breakpoint axes of `ff_dzw_map` (+0xE8, +0xF8); the
+checksum moved from +0xE6 to +0x108 with the length.  `ff_fzw_curve`, which
+v1 reserved as all-zero, now carries the docs/05 section 3.4 shape (0 at E0,
+the u8 maximum 255 from E50 on) and `ff_dzw_map` stays all zero, so the
+shipped file is still inert -- with `ff_zw_enable = 1` as well.  The ECU-side
+`ff_cal_ok()` accepts **version 2 only**: a v1 block flashed under a v2 blob
+is rejected exactly like a corrupt one, i.e. mode 0, F = 1024 and dzw_e = 0.
+
 Usage:
     ./.venv/bin/python3 patches/ff_fuel/ffcal001.py                # build both
     ./.venv/bin/python3 patches/ff_fuel/ffcal001.py --print        # human dump
@@ -51,12 +61,15 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 sys.path.insert(0, str(REPO))
-from emu.models.flexfuel import CURVE_N, f_curve_from_formula  # noqa: E402
+from emu.models.flexfuel import (  # noqa: E402
+    CURVE_N, DZW_N, DZW_NMOT_AXIS, DZW_RL_AXIS, f_curve_from_formula,
+    fzw_curve_default,
+)
 
 CAL_BASE = 0x005E2510
 MAGIC = b"FFCAL001"
-VERSION = 1
-LENGTH = 0x00E8                      # total, checksum included
+VERSION = 2                          # E1 (#34) appended the ignition blend
+LENGTH = 0x010A                      # total, checksum included
 
 # offset, name, struct code, count - must match patches/ff_fuel/src/ff_state.h
 SCALARS = (
@@ -75,6 +88,10 @@ SCALARS = (
     (0x1D, "ff_persist_block", "B", "-", "D2: EEP_CONF block number (eeprom.md section 5)"),
     (0x1E, "ff_persist_offset", "B", "-", "D2: payload offset inside that block"),
     (0x1F, "ff_persist_rate_s", "B", "s", "D2: minimum seconds between two commits"),
+    (0xE6, "ff_zw_enable", "B", "-", "E1 (#34): 1 = apply the ignition blend;"
+                                     " 0 (shipped) makes dzw_e permanently 0"),
+    (0xE7, "ff_dzw_max", "B", "0.75 degCA", "E1: |dzw_e| ceiling in counts;"
+                                            " clamped to FF_DZW_HARD_MAX (16) in code"),
 )
 
 TABLES = (
@@ -83,23 +100,37 @@ TABLES = (
      "fuel MASS factor over ethanol %, 17 points 0..100 step 6.25; F(0) = 1024"
      " is bit-identical to stock; read by ff_f_of() every activation"),
     (0x42, "ff_fzw_curve", CURVE_N, "B", 0, "curve_1d", "1/256",
-     "RESERVED for the ignition blend (docs/05 section 3.4); neutral 0 in the MVP"),
-    (0x54, "ff_dzw_map", 64, "b", 1, "map_2d_data", "0.75 degCA",
-     "RESERVED 8x8 ignition offset (docs/05 section 3.4); neutral 0 in the MVP"),
+     "E1 (#34): ignition blend factor over ethanol %, 17 points 0..100 step 6.25."
+     " f_zw(0) = 0 is what makes E0 bit-identical for the ignition too;"
+     " 255 = 0.996 is the u8 maximum and the plateau from E50 on"),
+    (0x54, "ff_dzw_map", 64, "b", 1, "map_2d", "0.75 degCA",
+     "E1 (#34): 8 nmot rows x 8 rl columns of ignition ADVANCE at f_zw = 1,"
+     " read as interp_2d_s8(val, nx=8, key_nmot, key_rl). ALL ZERO as shipped,"
+     " so the file is inert even with ff_zw_enable = 1; calibrate it from +0"
+     " towards +2 degCA only in cells where dwkrz stays 0"),
     (0x94, "ff_fst_map", 36, "H", 0, "map_2d_data", "1/1024",
      "RESERVED 6x6 start/warm-up factor (docs/05 section 3.5); neutral 1024"),
     (0xDC, "ff_prail_add", 8, "B", 0, "curve_1d", "0.1 MPa",
      "RESERVED rail-pressure adder over ethanol % (docs/05 section 3.6); neutral 0"),
+    (0xE8, "ff_dzw_nmot_axis", DZW_N, "H", 0, "axis", "0.25 rpm",
+     "E1 (#34): the 8 row breakpoints of ff_dzw_map, every other breakpoint of"
+     " the stock KFZW nmot axis 0x5C7736 (520..6520 rpm), so a cell lines up"
+     " with a stock KFZW row"),
+    (0xF8, "ff_dzw_rl_axis", DZW_N, "H", 0, "axis", "100/4096 %",
+     "E1 (#34): the 8 column breakpoints of ff_dzw_map, eight of the twelve"
+     " breakpoints of the stock KFZW rl axis 0x5C7758 (10.2..103.9 %)"),
 )
 
 CRC_OFF = LENGTH - 2
 
 DEFAULT_TABLES = {
     "ff_F_curve": None,                      # from the formula
-    "ff_fzw_curve": [0] * CURVE_N,
+    "ff_fzw_curve": None,                    # from the docs/05 3.4 shape
     "ff_dzw_map": [0] * 64,
     "ff_fst_map": [1024] * 36,
     "ff_prail_add": [0] * 8,
+    "ff_dzw_nmot_axis": list(DZW_NMOT_AXIS),
+    "ff_dzw_rl_axis": list(DZW_RL_AXIS),
 }
 
 
@@ -126,8 +157,12 @@ def build(params: dict) -> bytes:
     for off, name, n, code, _signed, _kind, _unit, _note in TABLES:
         values = params.get(name)
         if values is None:
-            values = (f_curve_from_formula() if name == "ff_F_curve"
-                      else DEFAULT_TABLES[name])
+            if name == "ff_F_curve":
+                values = f_curve_from_formula()
+            elif name == "ff_fzw_curve":
+                values = fzw_curve_default()
+            else:
+                values = DEFAULT_TABLES[name]
         if len(values) != n:
             raise CalError(f"{name} needs {n} values, got {len(values)}")
         struct.pack_into(">" + code * n, blk, off, *(int(v) for v in values))
@@ -140,6 +175,24 @@ def build(params: dict) -> bytes:
         raise CalError("ff_F_curve must be monotonically non-decreasing")
     if max(curve) > 2048:
         raise CalError("ff_F_curve exceeds the 2048 (2.000) ceiling the patch clamps to")
+
+    # --- E1 (#34): the same three properties for the ignition blend --------
+    fzw = blk[0x42:0x42 + CURVE_N]
+    if fzw[0] != 0:
+        raise CalError(f"ff_fzw_curve[0] must be exactly 0 (no advance at E0), "
+                       f"got {fzw[0]} - E0 would not be bit-identical")
+    if any(b < a for a, b in zip(fzw, fzw[1:])):
+        raise CalError("ff_fzw_curve must be monotonically non-decreasing")
+    for name, off in (("ff_dzw_nmot_axis", 0xE8), ("ff_dzw_rl_axis", 0xF8)):
+        axis = struct.unpack_from(">" + "H" * DZW_N, blk, off)
+        if any(b <= a for a, b in zip(axis, axis[1:])):
+            raise CalError(f"{name} must be strictly increasing, got {list(axis)}"
+                           " - the breakpoint search assumes it")
+    dzw_max = blk[0xE7]
+    if dzw_max > 16:
+        raise CalError(f"ff_dzw_max is {dzw_max} counts = {dzw_max * 0.75:.2f} degCA;"
+                       " the patch clamps to FF_DZW_HARD_MAX = 16 (12.00 degCA) in"
+                       " code, so anything above that is a calibration that lies")
 
     crc = (~sum(blk[:CRC_OFF])) & 0xFFFF
     struct.pack_into(">H", blk, CRC_OFF, crc)
@@ -174,16 +227,17 @@ def rows(params: dict) -> list[dict]:
     """Descriptor rows in the column format of re/calibration_draft.csv."""
     out: list[dict] = []
 
-    def row(addr, kind, x_n, y_n, elem_size, signed, name, note, x_elem=""):
+    def row(addr, kind, x_n, y_n, elem_size, signed, name, note, x_elem="",
+            x_axis_addr="", y_axis_addr="", y_elem=""):
         out.append({
             "addr": f"0x{addr:06X}", "kind": kind,
-            "x_axis_addr": "", "y_axis_addr": "",
+            "x_axis_addr": x_axis_addr, "y_axis_addr": y_axis_addr,
             "x_n": str(x_n), "y_n": str(y_n) if y_n else "",
             "elem_size": str(elem_size), "signed": str(signed),
             "consumer_func": "ff_fuel@patches/ff_fuel",
             "name_or_blank": name, "confidence": "static",
             "evidence": f"{EVIDENCE}; {note}",
-            "x_elem": x_elem, "y_elem": "", "struct_addr": "", "sites": "1",
+            "x_elem": x_elem, "y_elem": y_elem, "struct_addr": "", "sites": "1",
         })
 
     row(CAL_BASE + 0x08, "scalar", 1, "", 2, 0, "ff_cal_version",
@@ -196,14 +250,19 @@ def rows(params: dict) -> list[dict]:
     for off, name, n, code, signed, kind, unit, note in TABLES:
         y_n = ""
         x_n = n
+        extra = {}
         if name == "ff_dzw_map":
-            x_n, y_n = 8, 8
+            # E1: the only table in the block with axes of its own.  x is the
+            # rl column (interp_2d_s8 indexes val[iy * nx + ix]), y the nmot row.
+            x_n, y_n = DZW_N, DZW_N
+            extra = {"x_axis_addr": f"0x{CAL_BASE + 0xF8:06X}",
+                     "y_axis_addr": f"0x{CAL_BASE + 0xE8:06X}",
+                     "x_elem": "u16", "y_elem": "u16"}
         elif name == "ff_fst_map":
             x_n, y_n = 6, 6
         row(CAL_BASE + off, kind, x_n, y_n,
             1 if code in ("B", "b") else 2, signed, name,
-            f"{note} [{unit}]",
-            x_elem="" if y_n == "" else "")
+            f"{note} [{unit}]", **extra)
     row(CAL_BASE + CRC_OFF, "scalar", 1, "", 2, 0, "ff_cal_crc",
         "FFCAL001 header: bit-complement of the 16-bit sum of bytes [0, length-2)")
     return out

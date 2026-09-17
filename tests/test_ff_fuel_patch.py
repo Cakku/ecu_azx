@@ -205,8 +205,10 @@ class TestApply(DumpUnchanged):
 
     def test_the_on_chip_and_ram_warnings_are_both_raised(self):
         self.assertTrue(any('"static"' in w for w in self.warnings), self.warnings)
-        self.assertEqual(sum("on-chip flash" in w for w in self.warnings), 2,
-                         "both on-chip hook sites must warn")
+        self.assertEqual(sum("on-chip flash" in w for w in self.warnings), 3,
+                         "all three on-chip hook sites must warn: the fuel hook "
+                         "0x42247C, the set-A raster hook 0x432940 and E1's "
+                         "ignition hook 0x41D40C")
 
 
 @requires_dump

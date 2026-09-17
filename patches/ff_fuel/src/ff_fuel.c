@@ -128,11 +128,20 @@ static void ff_state_init(void)
 }
 
 /*
- * The tail of every activation: refresh what the measuring-block handlers read
- * (annex, so it may happen here) and re-checksum the core.
+ * The tail of every activation, on every path out of ff_tick(): recompute the
+ * ignition offset, refresh what the measuring-block handlers read (annex, so
+ * it may happen here) and re-checksum the core.
+ *
+ * E1 (#34): `ff_zw_update()` belongs here and not in the mode-1 branch,
+ * because it has to run on the activation that leaves OK/HOLD as well - that
+ * is what makes the #37 ignition rule ("straight to gasoline, no hold, no
+ * ramp") true by construction rather than by a branch somebody has to
+ * remember.  It writes only `dzw_e` and `fzw_q8`, both core, both above, so
+ * the checksum below still covers them.
  */
 static void ff_finish(void)
 {
+    ff_zw_update();
     ff_diag_publish();
     ff_state.csum = ff_core_csum();
 }
