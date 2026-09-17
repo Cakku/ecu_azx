@@ -195,6 +195,8 @@ to copy.
 | Never | 0x000000-0x00FFFF (boot, immobiliser pairing 0x6C00), 0x1C0000-0x1DFFFF (stock calibration, except deliberate map edits), 0x400000-0x403FFF (the 16 KB of on-chip flash that is not in our read) | 0x404000-0x47FFFF **is** in our read and is checksummed; it needs `"onchip_edit": true` per change (see §1, 2026-09-16) |
 | **RAM** | **0x7FFB00-0x7FFBFF (256 B)**, inside the reference-free internal-SRAM region 0x7FF770-0x7FFFEB | VERIFIED-STATIC that no instruction in the image names any byte of 0x7FF770-0x7FFFEB; **dynamic confirmation pending #23**. Address it absolutely (`lis`/`addi`), never through r13. Not cleared at cold start, so the patch needs a magic + checksum header. See below. |
 
+> **2026-09-17 (integration, after brief E6).** `tools/patch_apply.py` also refuses 0x010000-0x01FFFF and 0x080000-0x09FFFF, with no unlock flag: the firmware's own OBD programming service refuses both (`re/findings/flash_programming.md` §3), so a change there could only be written by BDM. Every range `patches/ff_fuel` touches today lies inside the whitelist that service enforces.
+
 Branch reach: `b/bl` have ±32 MB range, so any placement is reachable with a
 single instruction. Code at 0x15xxxx addresses calibration with
 `lis 0x5E`, like the stock code.
