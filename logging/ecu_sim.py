@@ -197,6 +197,14 @@ class AnimatedRam:
     #: the reference model, created lazily so a stock image never builds one
     _ff: object = None
     _ff_ticks: int = 0
+    #: {address: the bytes this stand-in last wrote there}, for the cells that
+    #: step aside once something else writes them (see `apply`)
+    _owned: dict = field(default_factory=dict)
+
+    def _own(self, emu, addr: int, size: int) -> bool:
+        """True while `addr` still holds what this stand-in last put there."""
+        last = self._owned.get(addr)
+        return last is None or emu.read(addr, size) == last
 
     def flexfuel_block(self, t: float) -> bytes:
         """`struct ff_state` as the patch would have written it by time `t`."""
@@ -270,11 +278,20 @@ class AnimatedRam:
         emu.write(0x7FEFB2, struct.pack(">H", int(load * 4096 / 100)))
         # rk (0x803038): re-produced every activation, see rk_base()
         emu.write(0x803038, struct.pack(">H", self.rk_base(t)))
-        # dwkrz (0x7FCE57..5C) and its mean wkrm (0x7FCE76), both s8 and <= 0
+        # dwkrz (0x7FCE57..5C) and its mean wkrm (0x7FCE76), both s8 and <= 0.
+        # These two yield to anyone who writes them: a test or a bench operator
+        # poking a knock pattern into the simulator must not have it wiped out
+        # by the next activation, which is how they behaved when they were
+        # static values rather than an animation.
         knock = self.dwkrz(t)
-        emu.write(0x7FCE57, knock)
         signed = [b - 256 if b & 0x80 else b for b in knock]
-        emu.write(0x7FCE76, bytes([int(sum(signed) / len(signed)) & 0xFF]))
+        mean = bytes([int(sum(signed) / len(signed)) & 0xFF])
+        if self._own(emu, 0x7FCE57, 6):
+            emu.write(0x7FCE57, knock)
+            self._owned[0x7FCE57] = knock
+        if self._own(emu, 0x7FCE76, 1):
+            emu.write(0x7FCE76, mean)
+            self._owned[0x7FCE76] = mean
         # tmot, u8, T = 0.75*x - 48 degC: 20 degC warming to 90 degC over 120 s
         degc = 20.0 + 70.0 * min(t / 120.0, 1.0)
         emu.write(0x8021EF, bytes([int((degc + 48.0) / 0.75) & 0xFF]))

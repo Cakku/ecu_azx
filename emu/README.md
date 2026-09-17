@@ -165,3 +165,73 @@ project.
 | `ext_sram_probe.py` | brief C2 (#23): runs `ext_sram_probe` (0x011898) under both CS1 hardware models. Plain RAM -> 0x7F8012 = 0x44 (64 KB); with a hook that folds 0x808000 onto 0x800000, i.e. a 32 KB part in the 256 KB OR1 window -> 0x41 (32 KB). `python3 -m emu.ext_sram_probe`; checked by `tests/test_ram_survey.py` |
 | `os_clock.py` | brief C4 (#44): runs the ERCOSEK dispatchers against a virtual Time Base and measures every raster period from the activation-counter writes. `mftb`/`mftbu` are rewritten in emulator memory into a load from a scratch cell the driver advances to whatever the code programs into TBREF0, which is how a Unicorn run can have a controlled clock at all (limitation 1 below); `os_ActivateTask` and `os_set_alarm_cycle` are stubbed to a `blr` plus a hook. `python3 -m emu.os_clock --set a --seconds 5`; checked by `tests/test_ercosek_tasks.py` |
 | `../tests/test_emu.py` | the regression tests for all of it |
+
+## Device models (brief E4, 2026-09-17)
+
+Until wave E the harness only ever *read* peripherals: `stub_read(addr, value)`
+answered a poll, and `_hook_write` did nothing but log. Anything that needs a
+device to **answer a write** — the SPI EEPROM above all — could not be driven.
+`emu/core.py` now has two additive hooks for that; a harness with no device
+installed behaves exactly as it did before.
+
+```python
+emu.stub_write(addr, fn)            # fn(emu, addr, size, value)
+emu.add_device(start, end, model)   # model.on_read / model.on_write
+```
+
+Both callbacks run **before** Unicorn performs the access. That ordering is
+not a detail: a write callback that stores to the very address being written
+is overwritten again by the pending store. A device that has to change the
+register the code just wrote arms itself in `on_write` and does the work on
+the next access — which, for both QSPI drivers in this image, is the `lbz
+SPSR` poll on the next instruction.
+
+### `emu/qspi_eeprom.py` — QSMCM QSPI + M95160
+
+```python
+from emu.qspi_eeprom import install_eeprom, factory_image, cold_start
+qspi, binding = install_eeprom(emu, device=M95160(factory_image()))
+cold_start(emu)                     # nvm_read_all_blocks to idle
+```
+
+* `M95160` is the device: WREN/WRDI/RDSR/WRSR/READ/WRITE, WEL and WIP,
+  16-bit addressing, 32-byte pages that wrap **inside** the page, and a 2 KB
+  array that loads from and saves to a file. `wip_polls=n` makes a page write
+  report busy for n status polls.
+* `QspiEeprom` is the queue engine: a write that sets SPE in SPCR1 runs queue
+  entries NEWQP..ENDQP, drives each TXRAM byte through the device while PCS0
+  is low, fills RXRAM, clears SPE and sets SPSR.SPIF.
+* `NvmDeviceBinding` fills the block manager's two device function pointers
+  (0x7FAB70/0x7FAB74) with sixteen-instruction trampolines onto the firmware's
+  own `eeprom_read_bytes` / `eeprom_write_bytes`. Those pointers being 0 in
+  BSS — not a missing device — is what brief D2 saw as "state 0x53 walks into
+  the OS halt spin at 0x110F0".
+
+Proof that the model behaves like the part is the firmware itself: the boot
+loopback test (0x017CF0) and the WEL test (0x017A84) both return 1, and the
+three application primitives round-trip. `python3 -m emu.qspi_eeprom
+--self-test` prints the table; `re/findings/eeprom.md` section 10 has the
+derivation and the three findings that fell out of it.
+
+### `emu/toucan.py` — receive message buffers
+
+`can_rx_poll` (0x4379C8) only looks at the module's IFLAG bit, the buffer's
+control word and the eight payload bytes, so that is all `RxMailbox` models.
+`SLOT15` is the spare slot `patches/ff_fuel` claims for the Pico frame.
+
+```python
+from emu.toucan import RxMailbox, SLOT15
+mb = RxMailbox(emu, SLOT15)
+mb.arm(payload)        # a matching frame arrived
+mb.idle()              # nothing new since the last poll
+```
+
+### A stack that does not land on application RAM
+
+`Med9Emu.call()` parks r1 at the boot stack top 0x7FEFFC. That is right for a
+leaf, and wrong for a C function out of a raster task: a frame there runs
+straight over `zwist_display_b1` (0x7FEF87) and its neighbours, and a
+stock-versus-patched comparison then differs by the frame rather than by the
+patch. On the real part each task has its own stack; pass
+`regs={"r1": 0x7FF768}` (the top of the OS task-stack region 0x7FF3C0-0x7FF76F)
+when calling task code, as `logging/ecu_sim.py::PatchRunner` does.
