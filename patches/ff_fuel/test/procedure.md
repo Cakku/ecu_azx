@@ -17,11 +17,16 @@ a fact.
 > 1. **`"ram_status": "static"`** — 0x7FFB00/0x100 is VERIFIED-STATIC only
 >    (`re/findings/ram.md` §8.1). The runtime half of #23 (RequestUpload
 >    snapshots across key cycles, `tools/ram_snapshot_diff.py`) is outstanding.
-> 2. **Two of the three hook words are in the on-chip flash**
->    (0x42247C and 0x432940, region 0x404000-0x47FFFF). The block checksums are
->    handled and `verify` says ALL OK, but **whether KESSv2 protocol 179 writes
->    that region at all has never been demonstrated on this ECU.** Prove it
->    with the read-back of §1 before trusting anything else in this file.
+> 2. **Seven of the eight hook words are in the on-chip flash**
+>    (region 0x404000-0x47FFFF; only the set-B raster hook 0x12067C is
+>    external — see the table in §1). The block checksums are handled and
+>    `verify` says ALL OK, and brief E6 showed from the dump that the ECU's
+>    **own** OBD programming service whitelists and can program that region
+>    (`re/findings/flash_programming.md` §7.1). **Whether KESSv2 protocol 179
+>    drives that route for the on-chip array has still never been demonstrated
+>    on this ECU.** Prove it with the read-back of §1 before trusting anything
+>    else in this file. *(Updated 2026-09-17; the text said "two of the three"
+>    until wave E added five hooks.)*
 
 ## 0. Prerequisites
 
@@ -52,19 +57,38 @@ python3 tools/bindiff.py data/passat_azx_ori.bin work/readback.bin \
 
 Exit 0 means every changed byte is one of ours or a checksum descriptor.
 
-**The on-chip question is answered here.** Look at the two words in the
-read-back specifically:
+**The on-chip question is answered here.** Look at the seven on-chip words
+in the read-back specifically (file offset = CPU address − 0x204000):
 
 ```bash
-python3 tools/blobdis.py work/readback.bin --file-off 0x21E47C --addr 0x42247C --len 4
-python3 tools/blobdis.py work/readback.bin --file-off 0x22E940 --addr 0x432940 --len 4
+for site in 0x42247C:0x21E47C 0x432940:0x22E940 0x41D40C:0x21940C \
+            0x41A680:0x216680 0x41A808:0x216808 0x431384:0x22D384 \
+            0x45845C:0x25445C; do
+  python3 tools/blobdis.py work/readback.bin --file-off ${site#*:} --addr ${site%:*} --len 4
+done
 ```
+
+| Site | Hook (brief) | Stock word |
+|---|---|---|
+| 0x42247C | `rk` scaling (D1) | `4B FF 9F 25` |
+| 0x432940 | set-A 10 ms raster (D1) | `4B C8 B0 A5` |
+| 0x41D40C | ignition offset (E1) | `7C 63 52 14` |
+| 0x41A680 | cranking fuel, low-pressure `%ESSTT` (E2) | `B3 ED 30 3C` |
+| 0x41A808 | cranking fuel, high-pressure twin (E2) | `B0 6D 30 3C` |
+| 0x431384 | start ignition `zwstt` (E2) | `9B ED 20 A6` |
+| 0x45845C | rail setpoint adder (E5) | `B3 CD 32 00` |
 
 | Read-back | Meaning |
 |---|---|
-| both are `bl 0x152000` / `bl 0x152020` | KESS writes the on-chip flash; the fuel hook and the set-A raster hook are live |
-| both unchanged (`4B FF 9F 25`, `4B C8 B0 A5`) | KESS wrote only the external flash. The patch is then **inert on the fuel path** — the set-B raster hook at 0x12067C still runs and still fills the state block, so §2 and §3 still work as a receive test, but `rk` is never scaled. Record it and reopen #32 with a BDM/BSL plan |
-| one changed, one not | stop; that is a partial write and the image is not what either tool thinks it is |
+| all seven are `bl` into 0x152000-0x1538FF (the blob) | KESS writes the on-chip flash; every feature's hook is live |
+| all seven unchanged | KESS wrote only the external flash. The patch is then **inert on every fuel, ignition, start and rail path** — the set-B raster hook at 0x12067C still runs and still fills the state block, so §2 and §3 still work as a receive test, but nothing is scaled. Record it and reopen #32 with the fallback table of `flash_programming.md` §7.3 |
+| some changed, some not | stop; that is a partial write and the image is not what either tool thinks it is |
+
+Also read EEP_CONF block 10 (EEPROM 0x260, 32 B) before and after, and confirm
+file 0x1E2500 holds `5A 5A 5A 5A` in the file you flash (`flash_programming.md`
+§7.2). The stock word of 0x45845C above is quoted from E5's disassembly; the
+others from D1/E1/E2 — `tools/blobdis.py data/passat_azx_ori.bin --file-off …`
+re-reads any of them.
 
 Roll back by writing `data/passat_azx_ori.bin`
 (`b15590d3f1874ace3125c5d047c09a686db9b8bb498187663539ebab205609b3`).

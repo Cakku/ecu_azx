@@ -263,8 +263,8 @@ def checks_for(name: str, s: dict) -> list[tuple[str, bool, str]]:
             f"fails={last(s, 'ff_persist_fails')} "
             f"err={last(s, 'ff_persist_err')}")
         chk("7 the mirror read over DDLI agrees with ff_e_persist",
-            last(s, "eep_blk8_mirror_b0") == last(s, "ff_e_persist"),
-            f"mirror+0={last(s, 'eep_blk8_mirror_b0')} "
+            last(s, "eep_blk8_mirror_b2") == last(s, "ff_e_persist"),
+            f"mirror+2={last(s, 'eep_blk8_mirror_b2')} "
             f"e_persist={last(s, 'ff_e_persist')}")
         chk("7 the queue is idle in almost every sample",
             sum(1 for _t, v in s.get("nvm_queue_state", [])
@@ -281,12 +281,12 @@ def checks_for(name: str, s: dict) -> list[tuple[str, bool, str]]:
 
 
 def _csum_always_ok(s) -> bool:
-    """The session only logs +0, +14, +29 and the checksum, so this is weak.
+    """The session only logs +0..+2, +14, +29 and the checksum, so this is weak.
 
     It checks the one thing the log can: the checksum word never changes
     without the payload byte changing with it.
     """
-    pairs = list(zip(s.get("eep_blk8_mirror_b0", []),
+    pairs = list(zip(s.get("eep_blk8_mirror_b2", []),
                      s.get("eep_blk8_mirror_csum", [])))
     if not pairs:
         return False

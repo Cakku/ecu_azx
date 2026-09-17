@@ -111,7 +111,8 @@
     "prsoll_clamped, prsoll_rate, prsoll_w, prist_w, vhdp_spare,",
     "vmsv_limited, wbho1s_w, dwi_inj_angle and the required margin",
     "0x7FD290.  ff_length is now 76 and the second checksummed range runs",
-    "+0x40..+0x4B; see ff_state.h."
+    "+0x40..+0x4B; see ff_state.h.",
+    "2026-09-17 (integration, after E7): three variables were declared twice after E5 (ti_sum as 4 B x 0.001 ms and as u16 us, dwi_inj_angle, prist_w); the first definition of each was dropped. ti_sum is the u16 at 0x8030C4 in microseconds (injection.md section 8, rail.md section 11)."
   ],
   "ecu": "03H906032 / 1037382557",
   "dump_sha256": "b15590d3f1874ace3125c5d047c09a686db9b8bb498187663539ebab205609b3",
@@ -684,27 +685,6 @@
       "notes": "the cell the rk hook scales. Stock vs patched at E0 must be identical sample for sample"
     },
     {
-      "name": "ti_sum",
-      "addr": "0x8030C4",
-      "size": 4,
-      "signed": false,
-      "scale": 0.001,
-      "offset": 0,
-      "unit": "ms",
-      "source": "re/findings/injection.md section 8"
-    },
-    {
-      "name": "dwi_inj_angle",
-      "addr": "0x803088",
-      "size": 2,
-      "signed": false,
-      "scale": 0.0234375,
-      "offset": 0,
-      "unit": "degCA",
-      "source": "re/findings/rail.md section 7",
-      "notes": "the injection window signal: rk x 1.5 raises this by ~50 %"
-    },
-    {
       "name": "zwist_display_b1",
       "addr": "0x7FEF87",
       "size": 1,
@@ -809,17 +789,6 @@
       "unit": "%",
       "source": "re/symbols.csv; re/findings/ignition.md section 2",
       "notes": "relative load, the KFZW column-axis input and the x input of ff_dzw_map. NOT the same cell as rl_for_fuel (0x7FED38), which is selected from it at 0x418A3C - log both when a cell of the ignition map does not seem to be the one being exercised"
-    },
-    {
-      "name": "prist_w",
-      "addr": "0x8031DA",
-      "size": 2,
-      "signed": false,
-      "scale": 0.005,
-      "offset": 0,
-      "unit": "bar",
-      "source": "re/findings/rail.md section 2",
-      "notes": "must stay above 13 bar (rail.md section 14) or three limp-home limits arm at once"
     },
     {
       "name": "nmot_w",

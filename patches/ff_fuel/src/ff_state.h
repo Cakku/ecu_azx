@@ -559,7 +559,7 @@ void ff_rail_update(void);
  */
 #define FF_MW_ID_PRAIL   2184u        /* field 1, formula 0x53               */
 #define FF_MW_ID_PRIST   2185u        /* field 2, formula 0x53               */
-#define FF_MW_ID_WINMRG  2186u        /* field 3, formula 0x22, A = 250      */
+#define FF_MW_ID_WINMRG  2186u        /* field 3, formula 0x22, A = 225      */
 #define FF_MW_ID_MSVSAT  2187u        /* field 4, formula 0x36 (a count)     */
 #define FF_MW_GROUP_PR   109u         /* 0x6D; its 0x7F echo (236) is empty  */
 

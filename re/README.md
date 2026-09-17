@@ -123,9 +123,10 @@ Until a patched image is loaded every cell of the block reads 255, because
 2. Work on a **copy**. `data/passat_azx_ori.bin` must keep its SHA-256
    `b15590d3…09b3`; the test suite fails if it changes.
 3. After saving from TunerPro the block checksums are wrong. Run
-   `python3 tools/checksum.py fix <copy>` and then
-   `python3 tools/checksum.py verify -q <copy>`, which must print
-   `ALL OK (65 blocks)`.
+   `python3 tools/checksum.py fix <copy> -o <fixed>` — without `-o` it writes
+   `<copy>.fixed.bin` and leaves `<copy>` alone (it never edits in place) —
+   and then `python3 tools/checksum.py verify -q <fixed>`, which must print
+   `ALL OK (65 blocks)`. *(Corrected 2026-09-17, found by brief E7.)*
 4. Before anything is flashed: `python3 tools/bindiff.py data/passat_azx_ori.bin
    <copy>` and check that **every** changed byte is inside the map you meant to
    change plus the checksum descriptors. `docs/04_re_guidelines.md` section 6 is

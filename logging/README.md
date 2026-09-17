@@ -203,8 +203,8 @@ The logger merges adjacent variables into one DDLI chunk and bridges holes of
 up to 8 bytes, because the firmware allows only **20 chunks on dynamic id 0xF0
 and 3 on each of 0xF1-0xF9** (`re/findings/kwp.md` section 4.1). More than
 that spills onto the next id, which is then polled in the same sample; past
-47 chunks it refuses and says so. `wave_b_confirm.json`'s 24 variables need
-18 chunks and 48 bytes per sample.
+47 chunks it refuses and says so. `wave_b_confirm.json`'s 26 variables need
+17 chunks and 56 bytes per sample (counts corrected 2026-09-17, brief E7).
 
 | File | The question it answers |
 |---|---|

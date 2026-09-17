@@ -45,9 +45,9 @@
       "_unit": "counts, u16, 0x803038; THE signal of this patch. At E0 the patched code never writes it, so the only spread here is the ECU's own cycle-to-cycle variation"
     },
     "ti_sum": {
-      "max_abs": 0.4,
-      "mean_abs": 0.1,
-      "_unit": "ms, 1 us/LSB, 0x8030C4 (injection.md section 8)"
+      "max_abs": 400,
+      "mean_abs": 100,
+      "_unit": "us, 1 us/LSB, u16 0x8030C4 (injection.md section 8, rail.md section 11); was 0.4/0.1 ms while the session file still carried the 4-byte ms definition (fixed 2026-09-17)"
     },
     "zwist_display_b1": {
       "max_abs": 3.0,
