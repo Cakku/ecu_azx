@@ -125,6 +125,97 @@ class TestPatchRunner(DumpUnchanged):
                                     for b in raw), raw.hex())
 
 
+# --------------------------------- the DDLI path, across several ids --------
+@requires_dump
+@requires_sim
+class TestDdliAcrossSeveralIds(DumpUnchanged):
+    """`ddli_def_table`'s entry-array pointers (kwp.md 4.1, 2026-09-17).
+
+    The session file has grown past one dynamic id, and every id has its own
+    entry array -- 0x80366C for 0xF0, 0x80370C + (n-1)*0x18 for 0xF1..0xF9.
+    `ddli_init` (0x12E39C) fills those pointers, and the emulator has no OS to
+    run it, so `Med9Handlers.power_on` calls it.  Without that, all ten ids
+    share one array at address 0: the second id defined overwrites the first
+    one's entries and the writes land on the exception branch table.
+    """
+
+    SLOT = 0x804038
+
+    @staticmethod
+    def define(h, lid, chunks):
+        h.handle(bytes([0x2C, lid, 0x04]))
+        payload = bytearray([0x2C, lid])
+        pos = 1
+        for addr, size in chunks:
+            payload += bytes([0x03, pos, size, (addr >> 16) & 0xFF,
+                              (addr >> 8) & 0xFF, addr & 0xFF])
+            pos += size
+        return h.handle(bytes(payload))[-1]
+
+    def test_power_on_filled_the_entry_array_pointers(self):
+        h = handlers()
+        want = [0x80366C] + [0x80370C + i * 0x18 for i in range(9)]
+        got = [struct.unpack(">I", h.emu.read(self.SLOT + 8 * i + 4, 4))[0]
+               for i in range(10)]
+        self.assertEqual(got, want)
+
+    def test_a_second_dynamic_id_does_not_clobber_the_first(self):
+        h = handlers(animate=False)
+        h.runner = None
+        base = 0x807400
+        h.emu.write(base, bytes(range(0x10, 0x10 + 24)))
+        h.handle(b"\x10\x89")
+        first = [(base + i, 1) for i in range(20)]
+        second = [(base + 20 + i, 1) for i in range(3)]
+        self.assertEqual(self.define(h, 0xF0, first), b"\x6c\xf0")
+        self.assertEqual(self.define(h, 0xF1, second), b"\x6c\xf1")
+        self.assertEqual(h.handle(b"\x21\xf0")[-1][2:],
+                         bytes(range(0x10, 0x24)))
+        self.assertEqual(h.handle(b"\x21\xf1")[-1][2:],
+                         bytes(range(0x24, 0x27)))
+
+    def test_defining_ids_leaves_the_exception_branch_table_alone(self):
+        h = handlers(animate=False)
+        h.runner = None
+        before = h.emu.read(0x000000, 0x100)
+        h.handle(b"\x10\x89")
+        for lid in (0xF0, 0xF1, 0xF2):
+            self.define(h, lid, [(0x7FFB00, 2), (0x7FFB02, 2)])
+        self.assertEqual(h.emu.read(0x000000, 0x100), before,
+                         "entries must go to 0x80366C/0x80370C, not to 0")
+
+    def test_the_whole_session_file_reads_back_byte_for_byte(self):
+        """Every chunk of every id, against a direct read of the same RAM."""
+        sess = med9log.load_session(str(SESSION), str(PATCH_JSON))
+        plan = med9log.plan_chunks(sess.variables)
+        h = handlers(animate=False)
+        drive(h.runner, 2.0)
+        h.runner = None
+        h.handle(b"\x10\x89")
+        for lid in plan.ids:
+            self.define(h, lid, [(c.address, c.size) for c in plan.chunks[lid]])
+        for lid in plan.ids:
+            with self.subTest(lid=hex(lid)):
+                got = h.handle(bytes([0x21, lid]))[-1]
+                self.assertEqual(got[:2], bytes([0x61, lid]))
+                want = b"".join(h.emu.read(c.address, c.size)
+                                for c in plan.chunks[lid])
+                self.assertEqual(got[2:], want)
+
+    def test_the_firmware_still_refuses_more_than_its_budget(self):
+        """20 entries on 0xF0, 3 on the others -- tbl_ddli_max_entries."""
+        h = handlers(animate=False)
+        h.runner = None
+        h.handle(b"\x10\x89")
+        base = 0x807400
+        self.assertEqual(self.define(h, 0xF0, [(base + i, 1) for i in range(21)]),
+                         b"\x7f\x2c\x12")
+        self.assertEqual(self.define(h, 0xF1, [(base + i, 1) for i in range(4)]),
+                         b"\x7f\x2c\x12")
+        self.assertEqual(self.define(h, 0xF1, [(base + i, 1) for i in range(3)]),
+                         b"\x6c\xf1")
+
+
 # ------------------------------------------- the measuring blocks over KWP ---
 @requires_dump
 @requires_sim

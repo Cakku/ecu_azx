@@ -93,6 +93,16 @@ SEC_LFSR_ROUNDS = 0x7FB770
 SEC_RETRY_FLAG = 0x7FB780
 H_SESSION_SET = 0x13CEE4             # kwp_session_set: stb r3,0x803D3E
 H_DDLI_WIPE = 0x35034                # kwp_sid_2C_h2: wipes all 10 dynamic ids
+#: `ddli_init` (kwp.md 4.1, dated note of 2026-09-17).  It fills the ten
+#: entry-array pointers at `ddli_def_table+4`: id 0xF0 -> 0x80366C (0xA0 B =
+#: 20 entries), ids 0xF1..0xF9 -> 0x80370C + (n-1)*0x18 (3 entries each).
+#: Nothing else in the image writes those words, `kwp_sid_2C_h2` clears only
+#: the count byte, and the firmware reaches this routine through the
+#: function-pointer table at 0x0B1B88 -- which the emulator never runs.  Left
+#: unrun, every pointer is 0, so all ten ids share one entry array at address
+#: 0 and the second dynamic id defined silently overwrites the first one's
+#: entries.  The simulator therefore calls the real routine at power-on.
+H_DDLI_INIT = 0x12E39C
 
 # scratch inside the external SRAM, above everything the application uses
 IO_STRUCT = 0x807800
@@ -400,6 +410,17 @@ class PatchRunner:
     #: slow host cannot stall the CAN bus while it catches up
     MAX_CATCHUP_S = 0.5
 
+    #: and how much WALL time it may spend doing so.  This is the one that
+    #: matters: the simulator answers TP2.0 from the same thread, and the
+    #: tester gives up on an ACK after T1 = 100 ms x 4 tries.  A 0.5 s
+    #: catch-up at `--time-scale 5` is fifty activations, which is 40 ms of
+    #: host CPU on an idle M2 and more than twice that when the test suite is
+    #: running beside it -- enough to lose a channel.  With a wall budget the
+    #: bus is serviced every few milliseconds whatever the scale, and
+    #: simulated time simply falls behind, which is already how a slow host
+    #: behaves (logging/README.md section 9).
+    MAX_CATCHUP_WALL_S = 0.005
+
     def __init__(self, emu, patch_dir: str | None, *, task_set: str = "A",
                  ram: "AnimatedRam | None" = None, segments: bool = True,
                  nvm_pump: bool = True, tick_ms: float = 10.0):
@@ -435,6 +456,9 @@ class PatchRunner:
         self.ticks = 0
         self.segments = 0
         self.frames_in = 0
+        #: how often a catch-up ran out of its wall budget, i.e. how often the
+        #: simulated clock fell behind the wall clock
+        self.lagged = 0
         self.errors: list[str] = []
         self._seg_accum = 0.0
         #: Frames wait in a short queue rather than overwriting one slot.  A
@@ -465,9 +489,13 @@ class PatchRunner:
         if target_s <= self.sim_t:
             return
         target_s = min(target_s, self.sim_t + self.MAX_CATCHUP_S)
+        wall_deadline = time.monotonic() + self.MAX_CATCHUP_WALL_S
         while self.sim_t + self.tick_s <= target_s:
             self.sim_t += self.tick_s
             self._one_tick()
+            if time.monotonic() >= wall_deadline:
+                self.lagged += 1
+                return
 
     def _one_tick(self) -> None:
         if self.ram is not None:
@@ -508,6 +536,7 @@ class PatchRunner:
     def status(self) -> str:
         return (f"sim {self.sim_t:.2f} s, {self.ticks} activations, "
                 f"{self.segments} segments, {self.frames_in} frames in"
+                + (f", {self.lagged} catch-ups cut short" if self.lagged else "")
                 + (f", {len(self.errors)} hook errors" if self.errors else ""))
 
 
@@ -635,6 +664,14 @@ class Med9Handlers:
         self.emu.write(SEC_LEVEL_FLAGS, bytes([0x03]))
         self.emu.write(SEC_LFSR_ROUNDS, bytes([5]))
         self.emu.write(SEC_RETRY_FLAG, b"\x00")
+        # The application's start-up runs ddli_init through the function-
+        # pointer table at 0x0B1B88; the emulator has no OS to walk that table,
+        # so run the firmware's own routine here.  Without it every dynamic id
+        # points its entry array at address 0 and the second id defined
+        # overwrites the first one's entries (kwp.md 4.1, 2026-09-17).
+        res = self.emu.call(H_DDLI_INIT, reset=False)
+        if not res.ok:                                       # pragma: no cover
+            self.log.append(f"ddli_init did not return: {res.stop_reason}")
         self.ram.power_on(self.emu)
         self.t0 = self.clock()
 
