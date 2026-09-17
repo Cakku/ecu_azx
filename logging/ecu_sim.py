@@ -93,6 +93,16 @@ SEC_LFSR_ROUNDS = 0x7FB770
 SEC_RETRY_FLAG = 0x7FB780
 H_SESSION_SET = 0x13CEE4             # kwp_session_set: stb r3,0x803D3E
 H_DDLI_WIPE = 0x35034                # kwp_sid_2C_h2: wipes all 10 dynamic ids
+#: `ddli_init` (kwp.md 4.1, dated note of 2026-09-17).  It fills the ten
+#: entry-array pointers at `ddli_def_table+4`: id 0xF0 -> 0x80366C (0xA0 B =
+#: 20 entries), ids 0xF1..0xF9 -> 0x80370C + (n-1)*0x18 (3 entries each).
+#: Nothing else in the image writes those words, `kwp_sid_2C_h2` clears only
+#: the count byte, and the firmware reaches this routine through the
+#: function-pointer table at 0x0B1B88 -- which the emulator never runs.  Left
+#: unrun, every pointer is 0, so all ten ids share one entry array at address
+#: 0 and the second dynamic id defined silently overwrites the first one's
+#: entries.  The simulator therefore calls the real routine at power-on.
+H_DDLI_INIT = 0x12E39C
 
 # scratch inside the external SRAM, above everything the application uses
 IO_STRUCT = 0x807800
@@ -635,6 +645,14 @@ class Med9Handlers:
         self.emu.write(SEC_LEVEL_FLAGS, bytes([0x03]))
         self.emu.write(SEC_LFSR_ROUNDS, bytes([5]))
         self.emu.write(SEC_RETRY_FLAG, b"\x00")
+        # The application's start-up runs ddli_init through the function-
+        # pointer table at 0x0B1B88; the emulator has no OS to walk that table,
+        # so run the firmware's own routine here.  Without it every dynamic id
+        # points its entry array at address 0 and the second id defined
+        # overwrites the first one's entries (kwp.md 4.1, 2026-09-17).
+        res = self.emu.call(H_DDLI_INIT, reset=False)
+        if not res.ok:                                       # pragma: no cover
+            self.log.append(f"ddli_init did not return: {res.stop_reason}")
         self.ram.power_on(self.emu)
         self.t0 = self.clock()
 
