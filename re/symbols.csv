@@ -137,7 +137,6 @@ cpu_addr,file_off,space,kind,name,size,evidence,confidence,source,notes
 0x0A331C,0x0A331C,ext_flash,const,kwp_sec_l2_key_add,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0A331C,dynamic,ghidra,"level-2 key constant 0x00011170; key = seed + 0x11170 (confirms community claim, VERIFIED-DYNAMIC)"
 0x0A3320,0x0A3320,ext_flash,func,kwp_sid_3B_h2,0x20,ghidra passat_azx_ori.bin 2026-09-15 @0A3320,static,ghidra,"KWP2000/OBD service 0x3b handler (h2), tbl_kwp_services[2]"
 0x0A33A4,0x0A33A4,ext_flash,func,kwp_sid_36_h2,0x10,ghidra passat_azx_ori.bin 2026-09-15 @0A33A4,static,ghidra,"KWP2000/OBD service 0x36 handler (h2), tbl_kwp_services[11]"
-0x0A33B4,0x0A33B4,ext_flash,func,kwp_transfer_mode4,0x2A0,0x36 h1 calls it when upload mode==4,static,dump,TransferData for the 0x480000-0x480400 window; uses 32-entry segment table DAT_000b2ff2
 0x0A376C,0x0A376C,ext_flash,func,kwp_sid_3B_dispatch,0x4,ghidra passat_azx_ori.bin 2026-09-15 @0A376C,static,ghidra,"VERIFIED-STATIC record dispatcher for SID 0x3B: looks the record local id up in tbl_kwp_3b_records and runs each field descriptor. B4 #18, re/findings/variants.md 4"
 0x0A3A18,0x0A3A18,ext_flash,table,tbl_runtime_check_regions_c,,"0x404000-0x47FFFF, 0x5C2E00-0x5FFFFF",static,dump,
 0x0A5658,0x0A5658,ext_flash,table,tbl_measuring_vars,0x2260,"tools/measuring_vars.py; lis r12,0xA / addi r12,r12,0x5658 at 0x045780 then lwzx r31,r12,id*4",static,dump,"TKMWL: 2200 x 4 B handler pointers; corrects the 0xA5654 MED9Toolchain candidate, which matched the preceding blr"
