@@ -55,6 +55,7 @@ WANTED: tuple[tuple[str, str | None], ...] = (
     ("tmst", None),                    # 0x8021F6, coolant latched at start
     ("ksta_adapted", None),            # 0x80302C, the cranking lever (S1)
     ("zwstt", None),                   # 0x802096, the start angle (Z1)
+    ("B_stend", None),                 # 0x7FE921, the gate of both S1 stubs
 )
 
 CONFIDENCE_TAG = {

@@ -88,5 +88,9 @@
  * Start ignition angle, s8, 0.75 deg CA per LSB */
 #define MED9_ZWSTT             0x00802096
 
+/* B_stend  [VERIFIED-STATIC, ghidra]  sram_int, size 0x1
+ * Start finished, four cycles after 0x7FE920 */
+#define MED9_B_STEND           0x007FE921
+
 
 #endif /* MED9_STOCK_H */

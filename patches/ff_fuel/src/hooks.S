@@ -150,10 +150,12 @@ ff_zw_hook:
 /*
  * ff_st_hook_a / ff_st_hook_b - S1, the cranking lever.
  *
- * Publish `min((v * fst_q10) >> 10, 0xFFFF)` instead of `v`.  Three things
- * send it down the untouched path, and each of them stores the very halfword
- * the stock `sth` would have stored:
+ * Publish `min((v * fst_q10) >> 10, 0xFFFF)` instead of `v`.  Four things send
+ * it down the untouched path, and each of them stores the very halfword the
+ * stock `sth` would have stored:
  *
+ *   - **`B_stend` (0x7FE921) is set**, i.e. the start is over.  See the
+ *     paragraph below: this one is not optional;
  *   - the state block does not carry our magic (the first milliseconds after
  *     power-up, or a corrupted block);
  *   - `fst_q10 <= 1024`, which is the shipped value, every activation in
@@ -162,16 +164,46 @@ ff_zw_hook:
  *   - implicitly, `ff_st_enable = 0`, because the producer then pins
  *     `fst_q10` at exactly 1024.
  *
+ * ### Why the B_stend gate is in the stub and not left to the stock code
+ *
+ * `re/findings/start.md` section 3 reads the low-pressure twin as
+ * `if (B_stend) { 0x80302C = 0x400; return; }` and infers that the hooked
+ * store cannot run outside the start.  **That inference is wrong, and the
+ * disassembly says so** (corrected in start.md section 9.3):
+ *
+ *   0041A2D0  lbz   r12,-0x16cf(r13)   ; B_stend 0x7FE921
+ *   0041A2D4  cmpwi r12,0
+ *   0041A2D8  beq   0x41a2e4           ; not finished -> the real computation
+ *   0041A2DC  li    r31,0x400          ; finished -> the neutral 1.0 ...
+ *   0041A2E0  b     0x41a680           ; ... published THROUGH THIS STORE
+ *
+ * The compiler shared the epilogue: the early-out does not return, it jumps to
+ * 0x41A680 with r31 = 0x400.  Without the gate the stub would multiply the
+ * ECU's explicit "no start enrichment" by `f_st` on every segment of the
+ * running engine - the one thing this feature must never do.  The
+ * high-pressure twin is built differently (`bne 0x41a824` at 0x41A6A4 skips
+ * its store), but both stubs carry the gate: it is the same condition the
+ * stock code tests, in the same cell, and it makes "S1 acts only during the
+ * start" true of the STORE rather than of one path to it.
+ *
+ * `tools/find_branch_refs.py data/passat_azx_ori.bin 0x41A680 0x41A808
+ * 0x431384 --no-ptr` lists every branch into the three words: 0x41A2E0
+ * (this early-out), 0x41A7E0 and 0x431374 (both ordinary computation paths).
+ *
  * `clrlwi` before the multiply takes exactly the 16 bits the stock `sth`
  * would have stored, so the scaled path cannot disagree with the neutral one
  * about what "the value" is.  `mullw` of two 16-bit quantities cannot wrap a
  * 32-bit register, so the only bound needed afterwards is the 0xFFFF
  * saturation `re/findings/start.md` section 3.3 asks for.
  *
- * 10 instructions on the invalid-block path, 13 at the shipped calibration,
- * 19 when it scales (20 with the saturation), once per start-module
- * activation of the segment task - and only while the start is in progress,
- * because %ESSTT returns before both stores once `B_stend` is set.
+ * Cost, per start-module activation of the segment task, for ff_st_hook_a
+ * (ff_st_hook_b is one instruction cheaper - it falls through instead of
+ * branching to the shared tail):
+ *
+ *     9   the start is over, B_stend set     <- the case that runs all day
+ *    14   no valid state block
+ *    17   fst_q10 = 1024, the shipped value
+ *    23   scaling (25 when the 0xFFFF saturation fires)
  */
     .section .text.ff_st_hook, "ax", @progbits
     .globl ff_st_hook_a
@@ -187,6 +219,10 @@ ff_st_hook_a:
 ff_st_hook_b:
     mr    0, 3                                  /* site 0x41A808: v in r3    */
 .Lff_st_publish:
+    lis   11, 0x80                              /* 0x800000, the stock half  */
+    lbz   12, (MED9_B_STEND - 0x800000)(11)     /* B_stend 0x7FE921          */
+    cmpwi 12, 0
+    bne   .Lff_st_store                         /* start over -> stock       */
     lis   11, PATCH_RAM@ha
     lwz   12, (PATCH_RAM + FF_OFF_MAGIC)@l(11)  /* ff_state.magic            */
     xoris 12, 12, 0x4646
@@ -227,7 +263,11 @@ ff_st_hook_b:
  * (re/findings/start.md section 9.1).  The magic check is kept anyway, for the
  * case where `ff_fuel` is not running at all.
  *
- * 9 instructions when the block is invalid, 16 when it adds.
+ * Cost: 9 instructions when the block is invalid or the byte is out of range,
+ * 16 when it adds, 17 when the +127 clamp fires - once per 10 ms activation,
+ * and only while the start is in progress (`zwstt_build` returns at 0x4312B0
+ * without reaching the store once 0x7FECCA is set, which is why THIS stub
+ * needs no B_stend gate of its own).
  */
     .section .text.ff_zwst_hook, "ax", @progbits
     .globl ff_zwst_hook

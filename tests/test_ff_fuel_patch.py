@@ -103,7 +103,15 @@ def cal_from_block(blk: bytes) -> ff.Cal:
                   fzw_curve=list(blk[0x42:0x42 + 17]),
                   dzw_map=list(blk[0x54:0x54 + 64]),
                   dzw_nmot_axis=list(struct.unpack_from(">8H", blk, 0xE8)),
-                  dzw_rl_axis=list(struct.unpack_from(">8H", blk, 0xF8)))
+                  dzw_rl_axis=list(struct.unpack_from(">8H", blk, 0xF8)),
+                  # --- E2 (#35) ---------------------------------------------
+                  st_enable=blk[0x108], zwst_enable=blk[0x109],
+                  fst_max=struct.unpack_from(">H", blk, 0x10A)[0],
+                  zwst_max=blk[0x10C], zwst_tmax=blk[0x10D],
+                  fst_map=list(struct.unpack_from(">36H", blk, 0x94)),
+                  fst_e_axis=list(blk[0x10E:0x114]),
+                  fst_tmst_axis=list(blk[0x114:0x11A]),
+                  fzwst_curve=list(struct.unpack_from(">6b", blk, 0x11A)))
 
 
 @requires_dump

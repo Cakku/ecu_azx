@@ -95,6 +95,13 @@ runs the same computation on a second map set — the FR's `…HDR`
 high-pressure-start variant (`KFKSTTHDR` / `KFWKSTTHDR`). Decompiled body,
 relevant tail:
 
+> **Correction 2026-09-17 (brief E2, issue #35):** the `return` on the first
+> line below is a decompiler artefact. The early-out does not return — it sets
+> `r31 = 0x400` and **branches to 0x41A680**, the same `sth` the normal path
+> uses, so that store executes on every activation whether the start is over or
+> not. §9.3 has the five instructions and what it means for the S1 hook. The
+> high-pressure twin `FUN_0041a690` really does branch past its store.
+
 ```c
 if (DAT_007fe921 != 0) { DAT_0080302c = 0x400; return; }        /* not starting -> 1.0 */
 ...
@@ -436,7 +443,7 @@ start ignition zwstt (deg CA, + = before TDC)
 
 | | where | format | when it acts |
 |---|---|---|---|
-| **S1 — cranking fuel** | `sth` at **0x41A680** (and 0x41A808 for the HDR twin), publishing 0x80302C | u16, **1024 = 1.0**, saturate 0xFFFF | only while `B_stend` (0x7FE921) is clear; the ECU forces 1.0 afterwards, so the hook is inert outside the start |
+| **S1 — cranking fuel** | `sth` at **0x41A680** (and 0x41A808 for the HDR twin), publishing 0x80302C | u16, **1024 = 1.0**, saturate 0xFFFF | ~~only while `B_stend` (0x7FE921) is clear; the ECU forces 1.0 afterwards, so the hook is inert outside the start~~ **corrected 2026-09-17 (E2, §9.3): 0x41A680 also executes with 0x400 in r31 once `B_stend` is set, so the hook must test `B_stend` itself** |
 | **Z1 — start ignition** | `stb` at **0x431384**, publishing `zwstt` 0x802096 | **s8, 0.75 °CA per LSB** | same window; **no knock protection acts here** |
 | S2 — running mixture (not recommended) | `sth` at 0x41A250, publishing 0x803020 | u16, Q12 (4096 = 1.0) | every running operating point; duplicates B6's hook at 0x42247C |
 | warm-running ignition | B7's word at 0x41D40C | s8, 0.75 °CA per LSB | after start end |
@@ -573,11 +580,42 @@ of the three is r2 or r13, so `tools/blobdis.py --check-sda` passes.
 
 ### 9.3 Two properties of the sites that make them safe
 
-* **S1 is inert outside the start by stock construction.** `esstt_ksta`'s
-  first act is `if (B_stend) { 0x80302C = 0x400; return; }` (§3), and that
-  early return leaves *before* both stores. So the words at 0x41A680 and
-  0x41A808 execute only while the start is in progress, and no patch gate is
-  needed to keep `f_st` out of the running engine — the ECU already does it.
+* **S1 is NOT inert outside the start, and §3's `return` is a decompiler
+  artefact.** This is the one thing in this section that had to be found by
+  reading the words rather than the decompilation, and it is the reason the
+  S1 stub carries a gate. §3 renders the top of `esstt_ksta` as
+  `if (B_stend) { 0x80302C = 0x400; return; }` and §7 concludes "the hook is
+  inert outside the start". The compiler shared the epilogue instead:
+
+  ```
+  0041A2D0  lbz   r12,-0x16cf(r13)   ; B_stend 0x7FE921
+  0041A2D4  cmpwi r12,0
+  0041A2D8  beq   0x41a2e4           ; not finished -> the real computation
+  0041A2DC  li    r31,0x400          ; finished -> the neutral 1.0 ...
+  0041A2E0  b     0x41a680           ; ... published THROUGH the hooked store
+  ```
+
+  `tools/find_branch_refs.py data/passat_azx_ori.bin 0x41A680 0x41A808
+  0x431384 --no-ptr` lists exactly one branch into each word — 0x41A2E0 for
+  the first, and the ordinary computation paths 0x41A7E0 and 0x431374 for the
+  other two. So **0x41A680 runs on every activation of the segment task for as
+  long as the engine runs**, with r31 = 0x400, and a stub that scaled it
+  unconditionally would multiply the ECU's explicit "no start enrichment" by
+  `f_st` at every operating point. Both S1 stubs therefore read `B_stend`
+  0x7FE921 themselves and take the untouched path when it is set — the same
+  condition the stock code tests, in the same cell, which makes the property
+  true of the *store* instead of of one path to it.
+
+  The **high-pressure twin is built differently**: its `bne 0x41A824` at
+  0x41A6A4 jumps past the store to the epilogue, so 0x41A808 genuinely is
+  unreachable once `B_stend` is set. The gate is in both stubs anyway, because
+  they share the code and because the asymmetry is a compiler decision, not a
+  fact anyone should depend on.
+
+  **Z1 needs no such gate.** `zwstt_build` tests 0x7FECCA at 0x4312A8 and
+  `bne 0x431388` goes to its epilogue — past the store at 0x431384. The Z1
+  word is genuinely unreachable once the start has finished, and there is no
+  shared-epilogue branch into it (`find_branch_refs` above).
 * **Z1's offset is not clipped away by `zwmin`.** `%ZWMIN` (`zwmin_build`
   0x458E74, called from 0x45CB0C in set A's **20 ms** task 0x45CAC4) chooses
   between a map and `zwstt` on bit 3 of `cand_CWZWMN` 0x5C7972. That byte is
