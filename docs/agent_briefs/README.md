@@ -122,7 +122,55 @@ Issue bookkeeping after wave C (2026-09-16): #25 closed; #27, #20, #44 have
 their completed rows ticked; #11 carries the period correction; no milestone
 is complete yet (every remaining Phase 2/3 item needs the bench).
 
-## Wave E — next (2026-09-17): Phase 5 code, definition pass 2, simulator rehearsal, the on-chip question
+## Wave E — done on `integration/wave-E` (2026-09-17): Phase 5 code, definition pass 2, simulator rehearsal, the on-chip question
+
+**Status 2026-09-17 (late): all seven briefs ran and are merged on
+`integration/wave-E`** (E3 75ee087, E1 4b2c63d, E2 19aa6c2, E4 0ee67ce +
+692ceed, E5 d0dff85, E6 374ed9c, E7 305ec37, then the integration fixes);
+608+ tests OK, checksums ALL OK, XDF regenerated after each patch brief
+(1079 tables, 179 constants). The human merges it into `main`. Results in
+one line each:
+
+* **E1** ignition blend at 0x41D40C, FFCAL001 v2, group 108; `scheduler.md`
+  §11.8: **task set A is live** by necessity (static).
+* **E3** 157 → 259 named objects; the u8 `rl` scaling settled in the emulator
+  (`rl_w >> 5`; VCDS A = 133 is a display normalisation); lambda path still
+  not found (lead: pointer-written byte 0x7FD066).
+* **E2** start enrichment at 0x41A680 / 0x41A808 and start ignition at
+  0x431384, FFCAL001 v3, group 69; the suite caught that `%ESSTT`'s early-out
+  **branches into** the hooked store, so the stubs gate on `B_stend`.
+* **E4** QSPI + M95160 device model, `ecu_sim.py --sim-patch` runs the patch
+  with a simulated Pico (`ethanol_frame_send.py`) and `bench_rehearsal.py`
+  executes every procedure; **found D2's `ff_persist_offset = 0` sat on
+  block 8's `{id, version}` stamp** (fixed to 2 by E5); the emulator now runs
+  `ddli_init` (the ten dynamic ids used to share one entry array).
+* **E5** rail setpoint adder at 0x45845C (before the KLPRMAX clamp, which
+  re-reads the cell), window diagnostics in group 109, FFCAL001 v4; torque
+  limiter deliberately not implemented (design note in `procedure_e5.md`).
+* **E6** `re/findings/flash_programming.md`: the ECU's **own OBD programming
+  route whitelists and can program 0x404000-0x47FFFF**; no boot-time
+  integrity gate; the only hard check is the `5A5A` marker at file 0x1E2500
+  (recoverable); `10 85` reboots into a second KWP stack; the one-shot init
+  table (1,028 entries) binds no function pointers. `tools/flash_segments.py`.
+* **E7** `docs/07_workflow.md`, every command run; found the duplicated
+  session variables and four stale doc statements, fixed at integration.
+
+Integration fixes worth knowing: `patch.mk` header dependencies (a stale
+object had produced a blob disagreeing with `patch.json`), `patch_apply.py`
+refuses 0x010000-0x01FFFF and 0x080000-0x09FFFF (the OBD route refuses them),
+`re/symbols.csv` merged as a union each time (one duplicate removed).
+
+**Open after wave E (desk):** `tools/logcmp.py` cannot do the raster-counter
+alignment step (`bench_rehearsal.py::_align_on_raster` is the implementation
+to lift); the lambda-target path (`LAMSOLL` / `KFLBTS`) and the ~700 remaining
+`cand_*` objects; the torque limiter at the min-chain 0x0C7CF8; the RAM
+bootstrap loader (0x7F8728) and its own whitelist; the init-table entries the
+simulator still skips (`boot.md` §6 lists five worth calling); which driver
+the factory software binds at 0x7FAB70/0x7FAB74. **Open for the bench:**
+everything listed under "still hardware-only" below, now with `docs/07` and
+`flash_programming.md` §7.2 as the checklist for the first flash — eight hook
+words, seven on-chip, all inside the whitelist the firmware enforces.
+
 
 | Pair | Brief | Issues | Needs | Owns (nobody else edits these while it runs) |
 |---|---|---|---|---|
