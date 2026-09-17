@@ -58,10 +58,41 @@ _TABLE: dict[int, tuple] = {
     0x1A: (lambda a, b: float(b - a), "degC", COMMUNITY, ""),
     0x21: (lambda a, b: (100.0 * b / a) if a else 100.0 * b, "%", COMMUNITY,
            "A is the full-scale count; A=0x85 reads 100 % at B=0x85"),
-    0x22: (lambda a, b: (b - 128) * 0.01 * a, "kW", COMMUNITY, ""),
+    0x22: (lambda a, b: (b - 128) * 0.01 * a, "kW", COMMUNITY,
+           "signed, A is the scale: THIS ECU uses A=0x4B for an ignition "
+           "angle in degCA, see _REFINE below"),
     0x23: (lambda a, b: a * b / 100.0, "l/h", COMMUNITY, ""),
     0x36: (lambda a, b: float((a << 8) | b), "count", COMMUNITY, ""),
     0x37: (lambda a, b: a * b / 200.0, "s", COMMUNITY, ""),
+}
+
+#: Formula ids whose unit depends on the operand `A`, because `A` is the
+#: scale the handler chose and the same formula serves several quantities.
+#: `refine(a) -> (unit, tag)`; anything not listed keeps the table's own.
+#:
+#: **0x22 with A = 0x4B is an ignition angle, not power (E4, 2026-09-17).**
+#: The six stock knock-retard handlers at **0x039CD0, 0x039CE8, 0x039D00,
+#: 0x039D18, 0x039D30 and 0x039D48** are byte for byte
+#:
+#:     li   r3,0x22            ; the formula id
+#:     lbz  r5,-0x3199(r13)    ; dwkrz[i], 0x7FCE57..0x7FCE5C, s8
+#:     li   r4,0x4b            ; A = 75
+#:     addi r5,r5,0x80         ; B = value + 128
+#:     b    0x38eb4            ; the shared emit helper
+#:
+#: so `B - 128` is the raw s8 and the reading is `0.01 * 75 * (B - 128)` =
+#: **0.75 degCA per count**, which is exactly the ignition resolution of
+#: `re/findings/ignition.md` section 6 and the scale
+#: `logging/sessions/ff_fuel.json` gives the same six bytes.  E1's measuring
+#: block 108 fields 2 and 3 reuse the identical encoding
+#: (`patches/ff_fuel/src/ff_diag.c`, `emu/models/flexfuel.py::triples_zw`).
+#: VERIFIED-STATIC; the kW reading of the public tables is what A = 0x64 or
+#: similar would mean on another control unit, and is kept for those.
+DEGCA_SCALE_A = 0x4B
+
+_REFINE: dict[int, object] = {
+    0x22: lambda a: (("degCA", CROSSCHECKED) if a == DEGCA_SCALE_A
+                     else ("kW", COMMUNITY)),
 }
 
 #: ids that are containers rather than numbers
@@ -125,6 +156,9 @@ def decode(formula: int, a: int, b: int) -> Decoded:
         out.value = float(fn(a, b))
     except ZeroDivisionError:                                # pragma: no cover
         return out
+    refine = _REFINE.get(formula)
+    if refine is not None:
+        unit, tag = refine(a)
     out.unit = unit
     out.tag = tag
     return out
@@ -137,6 +171,9 @@ def table_lines() -> list[str]:
             f"  {TEXT:#04x}  text; A=B=0 is 'not implemented'     [{COMMUNITY}]"]
     for fid in sorted(_TABLE):
         _fn, unit, tag, note = _TABLE[fid]
+        if fid in _REFINE:
+            unit, tag = _REFINE[fid](DEGCA_SCALE_A)
+            unit = f"{unit}@A=0x4B"
         rows.append(f"  {fid:#04x}  unit {unit:<6} [{tag}]"
                     + (f"  {note}" if note else ""))
     return sorted(rows)

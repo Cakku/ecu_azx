@@ -170,6 +170,8 @@ class Med9Emu:
         self.default_r2 = self._resolve_r2(r2)
         self.default_msr = msr
         self._read_stubs: dict[int, object] = {}
+        self._write_stubs: dict[int, object] = {}
+        self._devices: list[tuple[int, int, object]] = []
         self._cur: Result | None = None
         self._stop_pc: int | None = None
         self.uc = Uc(UC_ARCH_PPC, UC_MODE_32 | UC_MODE_BIG_ENDIAN)
@@ -220,8 +222,42 @@ class Med9Emu:
         """
         self._read_stubs[addr] = value
 
+    def stub_write(self, addr: int, fn) -> None:
+        """Call `fn(emu, addr, size, value)` when the code writes `addr`.
+
+        The callback runs **before** Unicorn stores the value, so a write it
+        makes to the very same address is overwritten again by the pending
+        store.  Write elsewhere, or defer the work to the next access (which
+        is what :class:`emu.qspi_eeprom.QspiEeprom` does).
+        """
+        self._write_stubs[addr] = fn
+
+    def add_device(self, start: int, end: int, model) -> None:
+        """Install a write-side device model over the CPU range [start, end).
+
+        `model` may implement ``on_write(emu, addr, size, value)`` and
+        ``on_read(emu, addr, size)``; both are optional and are called before
+        Unicorn performs the access.  Devices are additive: a harness with no
+        device behaves exactly as it did before (`emu/README.md` section on
+        device models).
+        """
+        self._devices.append((start, end, model))
+
     def clear_stubs(self) -> None:
         self._read_stubs.clear()
+        self._write_stubs.clear()
+        self._devices.clear()
+
+    def _dispatch(self, addr: int, size: int, write: bool, value: int = 0) -> None:
+        for start, end, model in self._devices:
+            if addr < end and start < addr + size:
+                fn = getattr(model, "on_write" if write else "on_read", None)
+                if fn is None:
+                    continue
+                if write:
+                    fn(self, addr, size, value)
+                else:
+                    fn(self, addr, size)
 
     # -- memory -----------------------------------------------------------
     def read(self, addr: int, size: int) -> bytes:
@@ -257,6 +293,8 @@ class Med9Emu:
 
     def _hook_read(self, uc, access, address, size, value, ud):
         pc = uc.reg_read(UC_PPC_REG_PC)
+        if self._devices:
+            self._dispatch(address, size, False)
         stub = self._read_stubs.get(address)
         if stub is not None:
             v = stub(pc, address, size) if callable(stub) else stub
@@ -269,6 +307,11 @@ class Med9Emu:
         pc = uc.reg_read(UC_PPC_REG_PC)
         r = mm.region_of(address)
         self._log(Access(pc, address, size, value & 0xFFFFFFFF, True, r.name if r else "?"))
+        if self._devices:
+            self._dispatch(address, size, True, value & 0xFFFFFFFF)
+        stub = self._write_stubs.get(address)
+        if stub is not None:
+            stub(self, address, size, value & 0xFFFFFFFF)
 
     def _hook_unmapped(self, uc, access, address, size, value, ud):
         pc = uc.reg_read(UC_PPC_REG_PC)

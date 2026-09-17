@@ -413,16 +413,26 @@ before reading the table below:
 
 | blk | EEPROM | flags&3 | free payload offsets | contiguous free |
 |---|---|---|---|---|
-| **8** | 0x1C0 (+ copy 0x1E0) | 1 | +0..+13, +15..+28 | **14 + 14 bytes** |
+| **8** | 0x1C0 (+ copy 0x1E0) | 1 | ~~+0..+13~~ **+2..+13**, +15..+28 | ~~14~~ **12** + 14 bytes |
 | 11 | 0x280 (+ copy 0x2A0) | 1 | +0..+10, +14..+28 | 11 + 15 bytes, but the immobiliser writes this block behind the manager's back — avoid |
 | 12 | 0x2C0 | 0 | +0..+3, +10..+18, +20..+29 | 4 + 9 + 10 bytes |
 | 3 | 0x100 | 0 | +0..+1, +9..+29 | 21 bytes |
 | 7 | 0x180 (+ copy 0x1A0) | 1 | +0..+1, +9..+11, +14..+28 | 15 bytes, but this is the coding block a tester rewrites |
 | **24** | 0x620 | 0 | +0..+1, +3..+252 | **252 bytes**, single copy, 255-byte block (8 pages per write) |
 
+> **2026-09-17 (E4, #38) — correction to this whole table.** Payload **+0 and
+> +1 of every block are a {block id, version} stamp** that
+> `nvm_read_all_blocks` validates against the flash default record; a block
+> whose stamp is wrong is discarded and the mirror is reloaded from the
+> defaults. They are **not free** in block 8 or in any other block whose
+> default record starts with its own number (1, 2, 3, 5, 7, 8, 10, 11 at
+> least). Derivation and the emulated proof: §10.5. The "Recommendation"
+> below must therefore read **offset +2**, and `ff_persist_offset` in
+> `patches/ff_fuel/ffcal001.json` — which ships as 0 — has to move.
+
 ### Recommendation for a one-byte ethanol store
 
-**Block 8, payload offset +0, one byte.** Reasons:
+**Block 8, payload offset ~~+0~~ +2, one byte.** Reasons:
 
 * Block 8 is **duplicated** (copies at 0x1C0 and 0x1E0), so the manager's own
   fallback-to-second-copy logic protects the value for free.
@@ -563,6 +573,10 @@ found. This is a **correction to the reading implied in
 1. Which concrete driver is bound to the device function pointers at
    0x7FAB70/0x7FAB74. Needs either a dynamic trace or a careful look at the
    module that fills the structure they live in.
+   *2026-09-17 (E4, #38): **NARROWED**, not settled — §10.3. The signature is
+   now VERIFIED-STATIC (`rc = (*fp)(eepAddr, len, buf, statusPtr)`, non-zero
+   rc = started, `*statusPtr = 1` = success), and the fact that the pointers
+   are 0 in the emulator is exactly what brief D2 saw as the halt spin.*
 2. The PCS encoding used by the **boot** driver (command bytes 0x20/0x80,
    PCS field = 0b0000, i.e. all four chip selects driven low) contradicts the
    application driver's clean PCS0-only encoding (0x0E/0x8E). Either the boot
@@ -750,3 +764,184 @@ the value that survives a power cut is at most one minute and one hysteresis
 step old — which is what the requirement asks for, and it does not depend on
 an orderly shutdown at all. A future brief that wants a true key-off flush
 should start at the function-pointer table 0x0B1A80+ and find its consumer.
+
+---
+
+## 10. The device model, and what actually blocked the EEPROM in the emulator
+### (E4, 2026-09-17, #38 — closes the D2 limit)
+
+Brief D2 could stage a block and queue a commit but never saw the request
+record leave status 1: `nvm_queue_pump` reached state 0x23, the write state
+machine set **0x53**, and the next instruction "walked into the OS halt spin
+at 0x110F0". D2 read that as *no device answers*. It is not.
+
+Reproduce everything below with
+
+```bash
+./.venv/bin/python3 -m emu.qspi_eeprom --self-test
+./.venv/bin/python3 -m emu.qspi_eeprom --blank work/eeprom.bin --factory
+./.venv/bin/python3 -m unittest tests.test_qspi_eeprom
+```
+
+### 10.1 Corrections to sections 1-3 and 9
+
+| Claim | Correction | Tag |
+|---|---|---|
+| §3.5/§9: the start-up read is `FUN_00062280`, the write-back `FUN_00062740` | **They start at 0x06227C and 0x06273C.** Both functions open with `mr r11,r1` (the frame base the `_savegpr` helper at 0xB8224-0xB8244 stores through) and only then `stwu r1,-0x20(r1)`. Calling 0x62280 skips that and the helper writes through r11 = 0, which faults at once. The manager's own pointer table agrees: the word at file **0xB3224 is 0x0006273C**, not 0x62740 | VERIFIED-STATIC: `blobdis.py --file-off 0x62268 --addr 0x62268 --len 0x20` |
+| §1.2: "the QSPI RAMs are 32 entries" | confirmed again from `eeprom_qspi_xfer`: TXRAM is formed as `0x705000+0x17E` with `sthu 2(r30)`, CMDRAM as `0x705000+0x1BF` with `stbu 1(r29)`, RXRAM as `0x705000+0x13E` with `lhzu 2(r30)` (file 0x085964-0x085988, 0x085A50-0x085A58) | VERIFIED-STATIC |
+| §3.5: "Nothing writes 0x7FAB6C-0x7FAB7C with a statically resolvable instruction" | still true, and it is the whole of D2's blocker — see §10.3 | VERIFIED-STATIC |
+
+Register facts the device model rests on, all from `eeprom_qspi_xfer`
+(0x085920) and the two boot self-tests (all **VERIFIED-STATIC**):
+
+| Address | Register | Evidence |
+|---|---|---|
+| 0x70501A | SPCR1, **SPE = 0x8000** | `lhz r10,0x1a(r31); ori r10,r10,0x8000; sth` at 0x0859C4-0x0859CC |
+| 0x70501C | SPCR2, **ENDQP = bits 8-12**, NEWQP = bits 0-4 | `rlwinm r11,r11,0,0x18,0x12` then `((n-1)&0x1F)<<8`, 0x085998-0x0859B4 |
+| 0x70501E | SPCR3, **LOOPQ = 0x04** | `lbz r11,0x1e(r7); ori r11,r11,4; stb` at 0x017D6C-0x017D78 |
+| 0x70501F | SPSR, **SPIF = 0x80** | `rlwinm r12,r12,0x19,0x1f,0x1f` keeps bit 24 of the word, 0x0859E4-0x0859EC |
+| — | **the hardware clears SPE when the queue ends** | 0x017AB8-0x017AC0 spins while SPE is set, i.e. it is the busy flag, and 0x017AC4 clears it defensively |
+| — | the last queue entry's CONT does not keep PCS asserted | `eeprom_write_byte` ends its 5-entry queue with command **0x8E** (0x085ADC-0x085AE4) and the device must still see the WRITE complete |
+
+`eeprom_write_byte`'s exact queue, from file 0x085A9C-0x085AE4, settles the
+CONT question §2 left open: `{0x0006,0x0E}` WREN **without** CONT (a one-byte
+instruction), then `{0x0002,0x8E}` `{addr>>8,0x8E}` `{addr&0xFF,0x8E}`
+`{data,0x8E}` — four entries with CONT set, so the page write is one chip
+select that is released by the *end of the queue*. The WIP poll is a separate
+two-entry queue `{0x0005,0x8E} {0x0000,0x8E}` re-run until `rx[1] & 1 == 0`
+(0x085AFC-0x085B38).
+
+### 10.2 `emu/qspi_eeprom.py`, and the firmware's own proof
+
+`M95160` is a byte-level device (WREN/WRDI/RDSR/WRSR/READ/WRITE, WEL and WIP,
+16-bit address, 32-byte pages that wrap **inside** the page); `QspiEeprom` is
+the queue engine. The proof that the pair behaves like the part is the
+firmware, not a hand-written expectation:
+
+| Firmware routine | Result |
+|---|---|
+| `FUN_00017CF0` QSPI loopback self-test | returns **1**, error byte 0 |
+| `FUN_00017A84` EEPROM WEL self-test | returns **1** (WEL clear after WRDI, set after WREN) |
+| `eeprom_write_byte` 0x085A8C | the byte appears in the device array |
+| `eeprom_read_bytes` 0x085BC0, 0x40 B | three queues of ≤ 0x1D bytes, exact round trip |
+| `eeprom_write_bytes` 0x085B54 | 4 B written byte at a time |
+
+VERIFIED-DYNAMIC (emulated), `tests/test_qspi_eeprom.py`.
+
+One emulator detail that is not a fact about the ECU: Unicorn calls a write
+hook **before** it performs the store, so the model cannot clear SPE inside
+the hook that saw SPE set. It arms itself there and runs the queue on the
+next QSPI access, which in both drivers is the `lbz SPSR` poll that follows
+immediately (0x017994, 0x0859E4).
+
+### 10.3 What really blocked D2: two unbound function pointers
+
+The block manager reaches the device only through
+`(*0x7FAB70)(eepAddr, len, buf, statusPtr)` at **0x05FD88** and
+`(*0x7FAB74)(...)` at **0x06068C**. Both words are BSS, no instruction in the
+image stores to them (§7 Q1, re-checked with `find_abs_refs.py --range
+0x7FAB40 0x7FAB90` and `sda_xref.py`), so in the emulator they are **0** and
+the manager's `blrl` branches to address 0 — the reset vector, which runs the
+boot code and ends in the OS halt spin at 0x110F0. The state byte 0x53 D2
+saw is written at **0x060664**, four instructions before that `blrl`. So:
+
+> **The EEPROM was never "not answering". The manager was calling a null
+> pointer.** A QSPI device model alone would not have helped. VERIFIED-STATIC
+> for the call sites, VERIFIED-DYNAMIC for the failure mode.
+
+The *signature* the two call sites require is VERIFIED-STATIC and is what
+`NvmDeviceBinding` implements with two sixteen-instruction trampolines onto
+the real §2 primitives:
+
+* the return value is checked at 0x05FDBC: **non-zero = transfer started**
+  (go to state 0x44 and wait); zero is the failure path;
+* the driver later writes **1** into `*statusPtr` for success — 0x05FE84
+  compares the byte at 0x7FCC79 against 1, and *any* other non-zero value is
+  a failure; 0 means "still in flight" and the state machine simply returns.
+
+Which driver the factory software installs there is still **open**. What is
+now settled is that it is a four-argument, asynchronous-completion wrapper,
+not `eeprom_read_bytes` itself (three arguments, returns a count).
+
+### 10.4 Two sub-states no start-up code seeds
+
+`nvm_dev_block_read` (0x05FCC8) and `nvm_dev_block_write` (0x060524) dispatch
+on **0x7FADAC** and **0x7FADAD**; the entry states are 0x40 and 0x50. Each
+routine resets its own byte to that value only **after** it finishes a block
+(`li r9,0x40; stb r9,0(r25)` at 0x060510, `li r9,0x50` at 0x0609D4). On a
+cold emulator, where all RAM is zero, the first call therefore falls into the
+default branch and reports "failed" — the first mirrored block of the
+start-up read is silently skipped and the first commit fails once. No
+statically resolvable instruction writes 0x40/0x50 there, so how the real ECU
+arms them is **open**; `emu.qspi_eeprom.cold_start()` seeds both and says so.
+
+`nvm_read_all_blocks` is also the manager's **initialiser**: its final state
+(0x062534) sets bit 1 of the flag halfword at 0x7F9E3C and parks the request
+queue at **0x7FADAB = 0x20**. Until it has run, `nvm_block_request` queues
+work that nothing will ever pump — which is why `tests/test_ff_diag_patch.py`
+has to write 0x20 into 0x7FADAB by hand. VERIFIED-STATIC + VERIFIED-DYNAMIC.
+
+### 10.5 **A block's payload starts with a {block id, version} stamp**
+
+This is the finding that matters for issue #38.
+
+`nvm_read_all_blocks`, after both copies of a block have been read and their
+checksums verified and found equal, compares the **first halfword of the
+block payload** against the first halfword of that block's record in the
+flash default table (0x060458-0x060470: `lhz r12,0(r29)` on the read buffer
+against `lhzx r11, *(0xB318C), table[blk].dflt`). A mismatch sets the return
+code to 0x80 and the caller re-initialises the mirror **from the defaults**.
+
+The default records make the meaning plain — every one of them starts with
+its own block number and a version byte:
+
+```
+blk 1  01 03 02 04 ...      blk 5  05 03 'HARDWAREXAB00000'
+blk 2  02 04 03 04 ...      blk 8  08 01 00 80 80 80 80 00 00 80 00 80 80 ff ...
+blk 3  03 04 b4 3a ...      blk 11 0b 02 00 00 ...
+```
+
+Emulated, with a synthetic 2 KB image and a device that answers
+(`tests/test_qspi_eeprom.py::TestBlockManager`):
+
+| Block 8 payload | Mirror after `nvm_read_all_blocks` |
+|---|---|
+| `FF FF FF …` (erased) | the **defaults** `08 01 00 80 80 …` |
+| `55 01 …` (E% at +0) | the **defaults** |
+| `08 55 …` (E% at +1) | the **defaults** |
+| `08 01 55 …` (E% at +2) | `08 01 55 …` — **accepted** |
+
+**Consequence for `patches/ff_fuel`.** `ff_persist_offset` ships as **0**, so
+the stored ethanol percent lands exactly on the block-id byte. Every cold
+start then throws the block away and reloads the defaults, and the mirror
+byte the patch reads back is `0x08` — a perfectly plausible **8 %**, not the
+`0xFF` that means "nothing known". The value never survives a key cycle and
+the failure is silent. The fix is one calibration byte,
+`ff_persist_offset = 2` (procedure_d2.md §B4 already documents the lever),
+and §5's "free payload offsets +0..+13" for block 8 must read **+2..+13**.
+The same correction applies to blocks 1, 3, 7, 11 and 12 in that table.
+
+### 10.6 The full #38 path, emulated end to end
+
+With `ff_persist_offset = 2`, a factory-shaped device image and the 10 ms
+hook plus the real pump wrapper `nvm_pump_wrapper` (0x061944) called once per
+simulated activation:
+
+| Step | Result |
+|---|---|
+| cold start, `nvm_read_all_blocks` | block 8 mirror = the device image |
+| 600 activations at E85 then one with the rate limit open | request record `{buf 0, blk 8, off 0, len 0, shape 3, status 1}` and the mirror already carries the new E% at +2 with a correct block checksum |
+| ~7 further activations, pump only | record status **2** |
+| the next activation | `ff_persist_state` = 3, `ff_persist_err` = 2, `ff_persist_writes` = 1, `ff_persist_fails` = 0 |
+| the device | **both** copies, 0x1C0 and 0x1E0, carry the byte and verify |
+| payload +14 | unchanged |
+| payload +29 | **changes** 0xFF → 0x00 — it is the manager's own ReplV byte and it moves on the first commit; `logging/sessions/ff_fuel.json` check 7 and `procedure_d2.md` §B2 say it never changes, and that is wrong |
+| power cut: a fresh `Med9Emu` with that device image | `e_key` = `e_filt` = stored × 16, `e_persist` = stored, `ff_persist_err` = 2 |
+
+VERIFIED-DYNAMIC (emulated),
+`tests/test_qspi_eeprom.py::TestPersistenceThroughTheDevice`. It is *not* a
+bench measurement: it proves the code path, the call shapes and the data
+layout, not the device's timing. `M95160(wip_polls=n)` is there to make the
+WIP poll take n rounds when someone wants to rehearse a slow part.
+
+Section 7 open question 1 is therefore **narrowed, not settled**: see §10.3.

@@ -404,3 +404,99 @@ is not forwarding the channel-setup broadcast. In rough order of effort:
 None of this is settled: **the whole "in the car" half of section 7 and all of
 section 9 are HYPOTHESIS until the first OBD session happens.**
 
+
+## 9. Bench rehearsal — running the patch inside the simulator (E4, 2026-09-17)
+
+Every bench procedure in `patches/ff_fuel/test/` was written before any
+hardware existed and none of them had been executed. They can now all be run
+against `logging/ecu_sim.py`, which applies the patch to a temporary image and
+drives **the patch's own hooks** on a simulated 10 ms raster, with a simulated
+Pico on the same in-process bus and a simulated SPI EEPROM behind the block
+manager. Nothing about this is a measurement: it debugs the procedure, the
+session file and the tolerances, not the ECU.
+
+### The three commands
+
+```bash
+# 1. the whole chain in one process: node -> ECU -> logger
+./.venv/bin/python3 logging/med9log.py log --sim \
+    --sim-patch patches/ff_fuel --eeprom work/eeprom.bin \
+    --sim-node --node-e-pct 85 \
+    --session logging/sessions/ff_fuel.json --patch patches/ff_fuel/patch.json \
+    --sim-seconds 60 --time-scale 5 -o work/rehearsal.csv
+
+# 2. the measuring blocks, without a logger
+./.venv/bin/python3 logging/med9log.py groups --sim \
+    --sim-patch patches/ff_fuel --eeprom work/eeprom.bin 111 108
+
+# 3. all eleven procedure steps, graded
+./.venv/bin/python3 logging/bench_rehearsal.py --fresh-eeprom
+```
+
+`bench_rehearsal.py` writes `logging/samples/ff_fuel_sim_*.csv` — every one of
+them carries `# simulated: true` — and prints a table of the numbered checks
+of `logging/sessions/ff_fuel.json`. Those files are **never** part of a bench
+comparison set (C3's rule); they are there so a reader can see what a passing
+run looks like.
+
+The node can also be run on its own, which is what you want on the real bench
+before the ECU is involved:
+
+```bash
+./.venv/bin/python3 logging/ethanol_frame_send.py --bus gs_usb:0 --e-pct 85
+./.venv/bin/python3 logging/ethanol_frame_send.py --bus gs_usb:0 \
+    --e-ramp 0:85:40 --fault-after 40 --status 2
+```
+
+### Wall-clock time and simulated time
+
+The 10 ms hook costs about 0.5 ms of host CPU, so the simulator can run the
+ECU faster than real time. `--time-scale X` asks for X simulated seconds per
+wall second (5 is comfortable on an M2; the segment hook and the NVM pump add
+roughly another half).
+
+* **`--seconds` is wall-clock**, because that is what the logger measures and
+  what the CSV's `time_s` column holds. **`--sim-seconds` is ECU seconds** and
+  simply divides by the scale — it is the knob a procedure written in ECU
+  seconds wants.
+* The ethanol node's clock is scaled with the ECU's, so 10 Hz stays 10 Hz *in
+  ECU time*, and `--node-stop-after` / `--node-fault-after` / `--node-e-ramp`
+  are all in ECU seconds.
+* Every animated cell and every hook read the same simulated instant: with a
+  patch running, "now" is the runner's own clock, which advances in whole
+  10 ms activations and can fall **behind** the wall clock on a slow host.
+  Nothing desynchronises when it does; the run is simply slower than the ECU
+  would be, and `# sim_time_scale:` in the header records what was asked for.
+* Therefore **every rate criterion must be evaluated against the ECU's own
+  clock, not against `time_s`** — the live raster counter (100 per second,
+  `re/findings/scheduler.md` section 11) is in the session file for exactly
+  this. `logging/bench_rehearsal.py::ecu_slope` is the two-line helper, and
+  the same division is what makes "2 %/s" mean anything in a scaled log.
+
+### Comparing two runs — the missing line of the E0 recipe
+
+Two logs are two separate power-ups, and the tens of milliseconds between
+"the ECU powered on" and "the tester finished the DDLI setup" are not the same
+twice. On the rpm ramp that offset alone is worth a third of the `nmot_w`
+budget in `patches/ff_fuel/test/tolerance.json` and says nothing about the
+software. Both logs carry the live raster counter, so the offset is
+**measurable**: shift the candidate's time axis by
+`(raster_cand - raster_base) / 100` before comparing.
+`bench_rehearsal.py::_align_on_raster` does it, and with that one step
+`tools/logcmp.py` passes on identical animation and fails on `rk_fuel_mass`
+alone when `rk` is perturbed by 3 %. A bench comparison of two drives needs
+the same step.
+
+### What the simulator now models, and what it still does not
+
+| Modelled | Where |
+|---|---|
+| the patch's 10 ms raster hook of the live task set | `ecu_sim.PatchRunner` |
+| the segment hook, at `rpm * cylinders / 120`, with `rk` re-produced upstream first | same |
+| the stock NVM queue pump, which both 10 ms background tasks call | same |
+| TouCAN C message buffer 6 fed from the python-can bus | `emu/toucan.py` |
+| the QSPI queue and an M95160 on PCS0, with a file behind it | `emu/qspi_eeprom.py` |
+| the EEP_CONF block manager's start-up read and its device pointers | same |
+| **not** the ignition stub at 0x41D40C | it is a mid-function trampoline; `ff_dzw_e` is produced by the 10 ms half anyway |
+| **not** any other OS task | the stock baseline runs only what the hook sites replace (`--sim-stock-tasks`) |
+| **not** the PowerPC time base | it never advances under Unicorn (`kwp.md` section 12.6) |

@@ -45,6 +45,7 @@ import json
 import os
 import struct
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -290,18 +291,98 @@ def plan_chunks(variables: list[Variable], *, first_id: int = DDLI_FIRST,
 # ---------------------------------------------------------------------------
 # connection
 # ---------------------------------------------------------------------------
+class SimNode:
+    """`logging/ethanol_frame_send.py`'s node on the simulator's virtual bus.
+
+    A second `CanLink` on the same in-process channel, pumped by a daemon
+    thread, so `--sim --sim-node` rehearses node, ECU and logger together --
+    the one-command form of `patches/ff_fuel/test/procedure.md` sections 3-5.
+    """
+
+    def __init__(self, channel: str, args):
+        from ethanol_frame_send import EthanolNode, FrameSender
+        ramp = None
+        if getattr(args, "node_e_ramp", None):
+            a, b, secs = args.node_e_ramp.split(":")
+            ramp = (int(a, 0), int(b, 0), float(secs))
+        self.node = EthanolNode(
+            e_pct=args.node_e_pct, temp_c=args.node_temp,
+            status=args.node_status, ramp=ramp, stall=args.node_stall,
+            stop_after=args.node_stop_after,
+            implausible=args.node_implausible, not_ready=args.node_not_ready,
+            fault_after=getattr(args, "node_fault_after", None))
+        self.link = open_link(parse_bus_spec(f"virtual:{channel}"))
+        self.link.set_accept(set())          # the node never listens
+        self.sender = FrameSender(self.link, self.node,
+                                  scale=getattr(args, "time_scale", 1.0))
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def _loop(self):
+        while not self._stop.is_set():
+            if not self.sender.pump():
+                time.sleep(0.002)
+
+    def __enter__(self):
+        self._thread = threading.Thread(target=self._loop, name="ethanol_node",
+                                        daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+        self.link.close()
+
+
+def start_simulator(args):
+    """`logging/ecu_sim.py` on an in-process virtual bus, per the --sim flags.
+
+    `--sim-patch` also runs the patch's own hooks, so `ff_ticks` really
+    counts and `ff_rk_calls` really follows engine speed; `--eeprom` gives the
+    block manager a device that answers.  Time inside the simulator is
+    simulated: `--time-scale` sets how many simulated seconds one wall second
+    buys, and `--seconds` on `log` still counts WALL seconds, so a log of
+    `--seconds 10 --time-scale 2` covers twenty simulated seconds of ECU
+    behaviour.  If the host cannot keep up the simulated clock falls behind
+    and the run is simply slower than the ECU would be; nothing desynchronises,
+    because every animated cell reads the same simulated instant as the hooks.
+    """
+    from ecu_sim import AnimatedRam, DEFAULT_STATICS, EcuSimulator
+    channel = f"med9sim{os.getpid()}"
+    kw = {"seed": 0x12345678}
+    if getattr(args, "sim_dump", None):
+        kw["dump"] = args.sim_dump
+    if getattr(args, "sim_patch", None):
+        kw["patch_dir"] = args.sim_patch
+    if getattr(args, "eeprom", None):
+        kw["eeprom"] = args.eeprom
+    from ecu_sim import Med9Handlers
+    handlers = Med9Handlers(
+        kw.pop("dump", None) or str(REPO / "data" / "passat_azx_ori.bin"),
+        seed=kw.pop("seed"), patch_dir=kw.pop("patch_dir", None),
+        eeprom=kw.pop("eeprom", None),
+        stock_tasks=getattr(args, "sim_stock_tasks", False),
+        time_scale=getattr(args, "time_scale", 1.0),
+        ram=AnimatedRam(live_task_set=getattr(args, "sim_task_set", "A"),
+                        statics=dict(DEFAULT_STATICS)))
+    sim = EcuSimulator.on_virtual_bus(channel, handlers=handlers)
+    return sim
+
+
+
 @contextlib.contextmanager
 def connection(args):
     """Yield a connected `KwpClient`, over the simulator or over real hardware."""
     sim = None
     if args.sim:
-        from ecu_sim import EcuSimulator
-        channel = f"med9sim{os.getpid()}"
-        sim = EcuSimulator.on_virtual_bus(
-            channel, seed=0x12345678,
-            **({"dump": args.sim_dump} if args.sim_dump else {}))
+        sim = start_simulator(args)
+        channel = sim.link.description.split(":", 1)[1]
         stack = contextlib.ExitStack()
         stack.enter_context(sim.background())
+        if getattr(args, "sim_node", False):
+            stack.enter_context(SimNode(channel, args))
         spec = f"virtual:{channel}"
     else:
         stack = contextlib.ExitStack()
@@ -326,8 +407,24 @@ def connection(args):
 # ---------------------------------------------------------------------------
 # log
 # ---------------------------------------------------------------------------
+def _fmt(value: float) -> str:
+    """CSV text for one value.
+
+    `%.6g` silently truncated `ff_magic` (0x46463031 = 1179599921) to
+    1.179e+09 and would do the same to `ff_ticks` past 999999, so an integral
+    value is written in full and only fractions get six significant digits.
+    """
+    if float(value).is_integer() and abs(value) < 1e15:
+        return f"{value:.0f}"
+    return f"{value:.6g}"
+
+
 def cmd_log(args) -> int:
     session = load_session(args.session, args.patch)
+    if getattr(args, "sim_seconds", None):
+        # Time inside --sim is simulated; this is the knob a bench procedure
+        # written in ECU seconds wants (see start_simulator's docstring).
+        args.seconds = args.sim_seconds / max(args.time_scale, 1e-6)
     plan = plan_chunks(session.variables)
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -353,7 +450,17 @@ def cmd_log(args) -> int:
         fh.write(f"# transport: {TRANSPORT_DDLI}\n")
         fh.write(f"# source_file: {session.path}\n")
         if args.sim:
-            fh.write("# simulated: logging/ecu_sim.py -- NOT a recording of an ECU\n")
+            # `simulated: true` is the machine-readable marker the wave-E
+            # rules ask for; tools/logcmp.py turns every `# k: v` line into
+            # Log.meta, so a comparison set can refuse simulated members.
+            fh.write("# simulated: true\n")
+            fh.write("# simulated_by: logging/ecu_sim.py -- NOT a recording "
+                     "of an ECU\n")
+            if getattr(args, "sim_patch", None):
+                fh.write(f"# sim_patch: {args.sim_patch}\n")
+            if getattr(args, "eeprom", None):
+                fh.write(f"# sim_eeprom: {args.eeprom}\n")
+            fh.write(f"# sim_time_scale: {getattr(args, 'time_scale', 1.0):g}\n")
         writer = csv.writer(fh)
         writer.writerow(["time_s", "var", "value", "unit"])
 
@@ -383,7 +490,7 @@ def cmd_log(args) -> int:
                     continue
                 for name, value, raw_value, unit in v.decode(raw):
                     writer.writerow([f"{stamp:.4f}", name,
-                                     f"{value:.6g}", unit])
+                                     _fmt(value), unit])
                     rows += 1
                     if args.raw:
                         writer.writerow([f"{stamp:.4f}", f"{name}_raw",
@@ -541,12 +648,11 @@ def cmd_probe(args) -> int:
     sim = None
     stack = contextlib.ExitStack()
     if args.sim:
-        from ecu_sim import EcuSimulator
-        channel = f"med9sim{os.getpid()}"
-        sim = EcuSimulator.on_virtual_bus(
-            channel, seed=0x12345678,
-            **({"dump": args.sim_dump} if args.sim_dump else {}))
+        sim = start_simulator(args)
+        channel = sim.link.description.split(":", 1)[1]
         stack.enter_context(sim.background())
+        if getattr(args, "sim_node", False):
+            stack.enter_context(SimNode(channel, args))
         spec = f"virtual:{channel}"
     else:
         spec = args.bus
@@ -609,6 +715,47 @@ def _add_bus_args(p) -> None:
                         "dump). Point it at work/<patch>.bin to rehearse a "
                         "patched ECU, e.g. measuring block 111 of "
                         "patches/ff_fuel")
+    p.add_argument("--sim-patch", metavar="DIR", default=None,
+                   help="with --sim: apply this patch directory to a "
+                        "temporary image AND run its hooks on a simulated "
+                        "10 ms raster, so the state block really moves "
+                        "(patches/ff_fuel; brief E4)")
+    p.add_argument("--eeprom", metavar="FILE", default=None,
+                   help="with --sim: back the simulated ECU's QSPI EEPROM "
+                        "with this 2 KB image, created from the firmware's "
+                        "own block defaults if it is missing and written back "
+                        "on exit. This is what makes the eep_blk8_* variables "
+                        "and a power-cut rehearsal real")
+    p.add_argument("--sim-task-set", choices=("A", "B"), default="A",
+                   help="with --sim: which OS task set is live "
+                        "(scheduler.md 11.8 -- A is the realistic default)")
+    p.add_argument("--time-scale", type=float, default=1.0, metavar="X",
+                   help="with --sim: simulated seconds per wall-clock second")
+    p.add_argument("--sim-stock-tasks", action="store_true",
+                   help="with --sim and WITHOUT --sim-patch: still run the "
+                        "stock code the patch's hooks replace, so a stock "
+                        "baseline is comparable with a --sim-patch run")
+    p.add_argument("--sim-node", action="store_true",
+                   help="with --sim: also run logging/ethanol_frame_send.py's "
+                        "node on the same in-process bus, so the whole bench "
+                        "chain -- node, ECU, logger -- is rehearsed at once")
+    p.add_argument("--node-e-pct", type=int, default=85, metavar="PCT")
+    p.add_argument("--node-temp", type=int, default=25, metavar="DEGC")
+    p.add_argument("--node-status", type=int, default=0, choices=(0, 1, 2, 3),
+                   help="0 OK, 1 sensor fault, 2 contaminated, 3 not ready")
+    p.add_argument("--node-e-ramp", default=None, metavar="A:B:S",
+                   help="ramp the node's ethanol from A %% to B %% over S s")
+    p.add_argument("--node-stall", action="store_true",
+                   help="freeze the node's rolling counter (#37 matrix row 4)")
+    p.add_argument("--node-stop-after", type=float, default=None, metavar="S",
+                   help="the node stops sending after S seconds (row 2)")
+    p.add_argument("--node-implausible", action="store_true",
+                   help="the node reports 101 %% ethanol (row 5)")
+    p.add_argument("--node-not-ready", action="store_true",
+                   help="the node reports status 3 (row 6)")
+    p.add_argument("--node-fault-after", type=float, default=None, metavar="S",
+                   help="the node runs nominally for S simulated seconds "
+                        "before the configured fault starts")
     p.add_argument("--address", type=lambda s: int(s, 0), default=0x01,
                    help="module logical address (default 0x01, engine)")
     p.add_argument("--rx-id", type=lambda s: int(s, 0), default=0x300,
@@ -628,7 +775,11 @@ def main(argv=None) -> int:
     _add_bus_args(p)
     p.add_argument("--session", required=True, help="logging/sessions/<x>.json")
     p.add_argument("-o", "--output", required=True, help="logs/<date>.csv")
-    p.add_argument("--seconds", type=float, default=10.0)
+    p.add_argument("--seconds", type=float, default=10.0,
+                   help="WALL-clock seconds to log for")
+    p.add_argument("--sim-seconds", type=float, default=None, metavar="S",
+                   help="with --sim: log for S SIMULATED seconds instead, "
+                        "i.e. S / --time-scale wall seconds")
     p.add_argument("--rate", type=float, default=0.0,
                    help="cap the sample rate in Hz (default: as fast as the bus allows)")
     p.add_argument("--raw", action="store_true",
