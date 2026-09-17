@@ -278,7 +278,7 @@
       "kind": "hook",
       "old": "b3ed303c",
       "new": "4bd37a09",
-      "why": "esstt_ksta (0x41A264, %ESSTT), called from task_segment_a (0x4223B0, TCB 5, id 40) at 0x422464: the word is `sth r31,0x303C(r13)`, the store that publishes ksta_adapted 0x80302C - NOT a branch, so this is hook technique 3 of docs/06 section 4. ff_st_hook_a scales the value by fst_q10 in Q10, saturates at 0xFFFF and performs the store ABSOLUTELY (lis r11,0x80 / sth r0,0x302C(r11)). r0, r11, r12, LR and CR0 are all dead at the word and r31 is never written (re/findings/start.md section 9.2). %ESSTT returns before this store once B_stend 0x7FE921 is set, so the hook is inert outside the start by stock construction.",
+      "why": "esstt_ksta (0x41A264, %ESSTT), called from task_segment_a (0x4223B0, TCB 5, id 40) at 0x422464: the word is `sth r31,0x303C(r13)`, the store that publishes ksta_adapted 0x80302C - NOT a branch, so this is hook technique 3 of docs/06 section 4. ff_st_hook_a scales the value by fst_q10 in Q10, saturates at 0xFFFF and performs the store ABSOLUTELY (lis r11,0x80 / sth r0,0x302C(r11)). r0, r11, r12, LR and CR0 are all dead at the word and r31 is never written (re/findings/start.md section 9.2). IMPORTANT: this store is NOT unreachable outside the start. %ESSTT's B_stend early-out shares it - 0x41A2DC `li r31,0x400` / 0x41A2E0 `b 0x41A680` - so the word runs on every segment of the running engine with the neutral 1.0 in r31, and the stub tests B_stend 0x7FE921 itself before it scales anything (start.md section 9.3).",
       "onchip_edit": true
     },
     {
@@ -286,7 +286,7 @@
       "kind": "hook",
       "old": "b06d303c",
       "new": "4bd37889",
-      "why": "esstt_ksta_hdr (0x41A68C), the high-pressure %ESSTT twin, called from task_segment_b (0x4224BC, TCB 6, id 41) at 0x422530. Same store of the same cell 0x80302C, but out of **r3** rather than r31, which is the only difference between ff_st_hook_b and ff_st_hook_a. Same dead-register set, same absolute store (re/findings/start.md section 9.2).",
+      "why": "esstt_ksta_hdr (0x41A68C), the high-pressure %ESSTT twin, called from task_segment_b (0x4224BC, TCB 6, id 41) at 0x422530. Same store of the same cell 0x80302C, but out of **r3** rather than r31, which is the only difference between ff_st_hook_b and ff_st_hook_a. Same dead-register set, same absolute store (re/findings/start.md section 9.2). This twin DOES branch past its store when B_stend is set (`bne 0x41A824` at 0x41A6A4), unlike the low-pressure one; the stub carries the same B_stend gate anyway because the two share their code and the asymmetry is a compiler decision, not a contract.",
       "onchip_edit": true
     },
     {
@@ -294,7 +294,7 @@
       "kind": "hook",
       "old": "9bed20a6",
       "new": "4bd20d6d",
-      "why": "zwstt_build (0x431294), whose only caller is 0x432B04 inside task set A's 10 ms raster 0x4328E4 (scheduler.md section 11.8): the word is `stb r31,0x20A6(r13)`, the store that publishes zwstt 0x802096. ff_zwst_hook adds zwst_add, re-does the s8 clamp that the stock code applies BEFORE this store (0x431368-0x431380) and stores absolutely to 0x802096. The producer provably runs first: ff_fuel's set-A tick hook is 0x432940 and the 114 words between it and 0x432B04 are all `bl` (start.md section 9.1). While B_stend is clear this byte REPLACES the whole per-bank angle and the knock retard is bypassed, which is why the calibration ceiling is 3.00 degCA and the code ceiling 6.00 degCA.",
+      "why": "zwstt_build (0x431294), whose only caller is 0x432B04 inside task set A's 10 ms raster 0x4328E4 (scheduler.md section 11.8): the word is `stb r31,0x20A6(r13)`, the store that publishes zwstt 0x802096. ff_zwst_hook adds zwst_add, re-does the s8 clamp that the stock code applies BEFORE this store (0x431368-0x431380) and stores absolutely to 0x802096. The producer provably runs first: ff_fuel's set-A tick hook is 0x432940 and the 114 words between it and 0x432B04 are all `bl` (start.md section 9.1). While B_stend is clear this byte REPLACES the whole per-bank angle and the knock retard is bypassed, which is why the calibration ceiling is 3.00 degCA and the code ceiling 6.00 degCA. No B_stend gate is needed in this stub: zwstt_build's own test of 0x7FECCA at 0x4312A8 branches to its epilogue at 0x431388, PAST the store, and find_branch_refs finds no other branch into the word.",
       "onchip_edit": true
     },
     {
