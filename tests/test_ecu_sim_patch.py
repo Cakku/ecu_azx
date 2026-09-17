@@ -272,17 +272,31 @@ class TestPersistenceThroughTheSimulator(DumpUnchanged):
                          "a restart sees what the last run left on the device")
 
     def test_the_patch_reads_the_store_at_its_calibrated_offset(self):
-        """And with the shipped offset 0 it reads the block id, not an E%."""
+        """Offset 2 (E5's fix of the D2 bug, #38): the factory record reads
+        E0, a stored byte at payload +2 reads back, and the {id, version}
+        stamp at +0/+1 is what the manager validates, not what we read."""
         tmp = Path(tempfile.mkdtemp())
         path = tmp / "eeprom.bin"
         path.write_bytes(qe.factory_image(str(DUMP)))
         h = handlers(eeprom=str(path))
         drive(h.runner, 0.5, frames=False)
         st = h.emu.read(PATCH_RAM, 0x40)
-        self.assertEqual(struct.unpack_from(">H", st, 0x30)[0], 8,
-                         "ff_persist_offset = 0 sits on the {block id} byte, "
-                         "so the patch reads 8 % (eeprom.md section 10.5)")
+        self.assertEqual(struct.unpack_from(">H", st, 0x30)[0], 0,
+                         "the factory record is 08 01 00 ...: payload +2 is "
+                         "0x00 = E0, not the block id (eeprom.md section 10.5)")
         self.assertEqual(st[0x33], 2, "the read itself succeeded")
+
+        # a stored value behind the stamp survives a restart and is read back
+        path.write_bytes(qe.factory_image(str(DUMP),
+                                          payloads={8: bytes([0x08, 0x01, 55])}))
+        h2 = handlers(eeprom=str(path))
+        self.assertEqual(h2.emu.read(0x7F9F80, 3), bytes([8, 1, 55]),
+                         "the start-up read accepted the block")
+        drive(h2.runner, 0.5, frames=False)
+        st2 = h2.emu.read(PATCH_RAM, 0x40)
+        self.assertEqual(struct.unpack_from(">H", st2, 0x30)[0], 55,
+                         "ff_persist_offset = 2 reads the stored E%")
+        self.assertEqual(st2[0x33], 2)
 
 
 # ------------------------------------------------ the logger, end to end ----
