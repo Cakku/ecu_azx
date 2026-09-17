@@ -60,5 +60,21 @@
  * 8 data bytes of tbl_can_rx slot 15 (id 0x7FF, TouCAN module 2 = C, message buffer 6, DLC 8) */
 #define MED9_CAN_RX_BUF_SPARE0 0x00803F9C
 
+/* nmot_w  [VERIFIED-STATIC, ghidra]  sram_int, size 0x2
+ * for the use, COMMUNITY for the name */
+#define MED9_NMOT_W            0x007FEE74
+
+/* rl_w  [VERIFIED-STATIC, ghidra]  sram_int, size 0x2
+ * Relative load, u16, 100%/4096 per LSB - the KFZW column-axis input (lhz -0x103e(r13) at 0x41D358 */
+#define MED9_RL_W              0x007FEFB2
+
+/* cand_mw_percyl_block  [VERIFIED-STATIC, dump]  sram_int, size 6
+ * CORRECTED 2026-09-17 (E1, issue #34): the confidence was `hypothesis`, which described the NAME, */
+#define MED9_DWKRZ             0x007FCE57
+
+/* zwgru_low_octane_latch  [VERIFIED-STATIC, dump]  sram_int, size 0x1
+ * The two latch bits of the stock low-octane-fuel detector zwgru_low_octane_detect 0x0F436C */
+#define MED9_ZW_LOW_OCT_LATCH  0x007FD31B
+
 
 #endif /* MED9_STOCK_H */

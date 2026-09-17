@@ -93,10 +93,16 @@ def cal_from_block(blk: bytes) -> ff.Cal:
     """A model `Cal` describing an FFCAL001 image, so the two cannot drift."""
     can_id, timeout, hold, tau, slew, tick = struct.unpack_from(">6H", blk, 0x0C)
     mode, e_ovr, stall = struct.unpack_from(">3B", blk, 0x18)
+    zw_enable, dzw_max = struct.unpack_from(">2B", blk, 0xE6)       # E1 (#34)
     return ff.Cal(can_id=can_id, timeout_ms=timeout, hold_s=hold,
                   filter_tau_ms=tau, slew_pct_s=slew, tick_ms=tick,
                   mode=mode, e_override=e_ovr, stall_max=stall,
-                  f_curve=list(struct.unpack_from(">17H", blk, 0x20)))
+                  f_curve=list(struct.unpack_from(">17H", blk, 0x20)),
+                  zw_enable=zw_enable, dzw_max=dzw_max,
+                  fzw_curve=list(blk[0x42:0x42 + 17]),
+                  dzw_map=list(blk[0x54:0x54 + 64]),
+                  dzw_nmot_axis=list(struct.unpack_from(">8H", blk, 0xE8)),
+                  dzw_rl_axis=list(struct.unpack_from(">8H", blk, 0xF8)))
 
 
 @requires_dump
@@ -205,8 +211,10 @@ class TestApply(DumpUnchanged):
 
     def test_the_on_chip_and_ram_warnings_are_both_raised(self):
         self.assertTrue(any('"static"' in w for w in self.warnings), self.warnings)
-        self.assertEqual(sum("on-chip flash" in w for w in self.warnings), 2,
-                         "both on-chip hook sites must warn")
+        self.assertEqual(sum("on-chip flash" in w for w in self.warnings), 3,
+                         "all three on-chip hook sites must warn: the fuel hook "
+                         "0x42247C, the set-A raster hook 0x432940 and E1's "
+                         "ignition hook 0x41D40C")
 
 
 @requires_dump

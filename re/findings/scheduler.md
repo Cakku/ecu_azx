@@ -523,7 +523,7 @@ Not settled here, and deliberately not guessed. What did fall out:
 | Which ISR activates each raster task (nothing writes the TCB flag bytes with an r13-relative store; activation goes through the TCB pointer) | **CLOSED 2026-09-16 (C4) — sections 11.2-11.4.** `os_ActivateTask` (0x475E8C) is the only writer of the counter bytes; the fast rasters come from the time table on Time Base reference A, the slow ones from alarm 1 plus the divider chain 0x40BEF0 |
 | What the seven ISR tasks (ids 1-7) are bound to | open — B6/B7. C4 adds: they are activated from the ISR wrappers at 0x40A9F0-0x40ACDC and 0x417C40-0x417D18, not from any timer |
 | Are `0x6FC048`/`0x6FC04C` really SIMASK2/SIMASK3? | **CLOSED 2026-09-16 (C4) — section 12.3.** Yes; MPC561RM's USIU register map names 0x2FC048/0x2FC04C exactly that |
-| Which of the two task sets (A: 0x4328E4/0x45CAC4, B: 0x1205A0/0x120FAC) is live with the engine running | open — one bench log of the raster counters, section 11.7 |
+| Which of the two task sets (A: 0x4328E4/0x45CAC4, B: 0x1205A0/0x120FAC) is live with the engine running | **SETTLED 2026-09-17 (E1, issue #34) — section 11.8.** **Set A**, by necessity: the only producers of `prsoll` (0x45822C) and `zwstt` (0x431294) are reached from set A's tasks 23 and 19 and from nowhere else, so the engine cannot run on set B. The bench log of section 11.7 is now a confirmation, not the decision |
 
 #### Added 2026-09-15 (integration, after brief B9) — the period of TCB 11 (0x45CAC4) is in doubt
 
@@ -845,6 +845,10 @@ jitter: every gap equals every other gap for the same task.
 
 Two things the dump cannot answer:
 
+> **SETTLED 2026-09-17 (E1, issue #34), item 1 only — see §11.8.** Task set A
+> is live by necessity; item 2 (the absolute rate) is still a bench read, and
+> the counter log below is still worth doing as the confirmation.
+
 1. **Which task set runs with the engine turning.** Set A (`0x4328E4`,
    `0x45CAC4`) is installed by `os_init`; `0x11DA64` — a process of the
    priority-0 init task — switches to set B if the byte 0x7FEB5E is non-zero
@@ -878,6 +882,99 @@ any pair of these counters twice, N seconds apart, at idle:
 
 A 2 % tolerance separates the two hypotheses, so any logger that timestamps to
 50 ms and runs for 10 s does it.
+
+### 11.8 Added 2026-09-17 (brief E1, issue #34) — **task set A is live by necessity** (VERIFIED-STATIC)
+
+§11.7's first question does not need the bench after all. Two values the
+engine cannot run without are produced **only** by processes of task set A,
+and nothing in set B — or in the shared event/ISR tasks — reaches a producer
+of either. SETTLED for §11.7 item 1; item 2 (the absolute rate) is still a
+bench read, and a bench read-back of the raster counters is still the proof
+of *this* result, because the argument below is a static reachability
+argument and cannot see an indirect call.
+
+**The two producers, and their single call sites.**
+
+```bash
+./.venv/bin/python3 tools/find_branch_refs.py data/passat_azx_ori.bin 0x45822C
+#   file 0x258C08  cpu 0x45CC08  bl        <- the only caller
+./.venv/bin/python3 tools/find_branch_refs.py data/passat_azx_ori.bin 0x431294
+#   file 0x22EB04  cpu 0x432B04  bl        <- the only caller
+```
+
+| Producer | Writes | Only caller | Inside |
+|---|---|---|---|
+| `hdrpsol_main` 0x45822C | `prsoll` 0x8031F4 (`sth r26,0x3204(r13)` at 0x45872C) | 0x45CC08 | **set A** 20 ms task 0x45CAC4 (id 23) |
+| `zwstt` builder 0x431294 | `zwstt` 0x802096 (`stb r31,0x20A6(r13)` at 0x431384) | 0x432B04 | **set A** 10 ms task 0x4328E4 (id 19) |
+
+**Every writer of the two cells, from the whole image.**
+
+```bash
+./.venv/bin/python3 tools/sda_xref.py data/passat_azx_ori.bin --var 0x8031F4
+./.venv/bin/python3 tools/sda_xref.py data/passat_azx_ori.bin --var 0x802096
+```
+
+`prsoll` has 11 references and exactly **two** stores: 0x45872C (above) and
+0x132300. The second one is a one-shot default inside the small function at
+**0x1322E0**
+
+```
+001322E0  lis   r12,0x5D ; lbz r12,0x521E(r12) ; rlwinm. (bit 7 of 0x5D521E)
+001322EC  beq   0x132308
+001322F0  li    r12,0 ; sth r12,0x31F2(r13)            ; 0x8031E2
+001322F8  lis   r3,0x5D ; lhz r3,0x5576(r3)            ; a calibration word
+00132300  sth   r3,0x3204(r13)                          ; prsoll <- constant
+00132304  sth   r3,0x31F0(r13)
+00132308  blr
+```
+
+which copies a **calibration constant** into `prsoll`, has no `bl` caller
+anywhere in the image (`callgraph.py`), and is referenced by exactly one
+pointer word, **0x0B1E94** — below the task process-list block that starts at
+0x0B1ED4, i.e. it is in the one-shot init list, not in any task's process
+list. It is an initialiser, not the running setpoint producer.
+
+`zwstt` has 5 references and exactly **one** store to 0x802096, at 0x431384.
+(The `stb r4,0x20A7(r13)` at 0x1137E0 writes 0x8020**97**, the byte *after*
+`zwstt`, so it is not a writer of it.)
+
+**The reachability walk.** `tools/callgraph.py`'s `reachable()` seeded with
+*every process* of every task descriptor (`tools/ercosek_tasks.py`
+`decode_thunks`, the `procs` list, wrappers 0x0B5878/0x0B5978 removed):
+
+| Seeds | Tasks | Processes | Functions reached | `hdrpsol_main` | `zwstt` builder |
+|---|---|---|---|---|---|
+| set A (ids 17-19, 21-26) | 9 | 478 | 1,633 | **reached** (only from id 23) | **reached** (only from id 19) |
+| set B (ids 30-38) | 9 | 105 | 572 | not reached | not reached |
+| event/ISR/common (ids 0-9, 15, 16, 20, 28, 29, 39-42) | 19 | 163 | 804 | not reached | not reached |
+
+The common row matters as much as the set-B row: the segment task (id 40) and
+the ignition task (id 41) are in it, so the two producers are not hiding in
+the engine-synchronous half either.
+
+**Conclusion.** If task set B were the live one, `prsoll` would keep whatever
+the init list left in it and `zwstt` would never be computed at all — the
+high-pressure pump would have no setpoint and the start ignition angle no
+producer. The engine cannot run that way, so **set A is the live set**, which
+is also what §11.7's process-count argument suggested (214 against 67
+processes at 100 ms). VERIFIED-STATIC.
+
+**Caveats, both real.**
+
+* The walk resolves relative branches only. Set B's reach contains **125**
+  `bctrl`/`blrl` sites and 11 computed `bctr` jumps that truncate it (set A:
+  162 and 28; common: 62 and 5). None of the four dispatch tables that feed
+  them is a plausible route to `%HDRPSOL` or the `zwstt` builder, but the walk
+  cannot prove it.
+* The bench read-back of the five raster counters in §11.7 is still worth
+  doing, and now has a prediction to falsify: 0x7FD754 and 0x7FD75C move,
+  0x7FD758 / 0x7FD760 / 0x7FD778 stay frozen.
+
+**No hook was changed.** `patches/ff_fuel` keeps both 10 ms hooks
+(0x432940 in set A, 0x12067C in set B) and its `ff_src_owner` arbitration:
+this is a static argument, the patch's redundancy costs one flash word plus
+`ff_src_seen`, and `ff_src_seen` is the one-sample bench confirmation of
+exactly this section.
 
 ## 12. Added 2026-09-16 (brief C4) — the clock registers, from MPC561RM
 

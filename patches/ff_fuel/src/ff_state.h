@@ -44,8 +44,8 @@
  *   +24   2    e_key            tick      decay target, 1/16 % (D2: from EEPROM)
  *   +26   2    e_frac           tick      sub-count of e_filt, 1/1024 of a count
  *   +28   1    frame_bad        tick      1 = the last frame was rejected
- *   +29   1    reserved_core0   tick      0
- *   +2A   2    reserved_core1   tick      0
+ *   +29   1    dzw_e            tick      E1: s8 ignition offset, 0.75 degCA
+ *   +2A   2    fzw_q8           tick      E1: f_zw(E), 1/256, 0..255
  *   --- annex: NOT covered by csum (other writers, or pure diagnostics) ------
  *   +2C   4    rk_calls         rk hook   segment-task invocations since power-up
  *   +30   2    e_persist        D2        E% staged for / read back from EEPROM
@@ -65,6 +65,20 @@
  * tests, logging/sessions/ff_fuel.json and emu/models/flexfuel.py are
  * unaffected: the whole annex is outside the checksum and carries no control
  * value.
+ *
+ * E1 (issue #34, 2026-09-17) took D1's two reserved CORE fields at +29 and
+ * +2A for `dzw_e` and `fzw_q8`, and that is the whole RAM cost of the
+ * ignition blend.  Nothing moved, the length is still 0x40 and the magic is
+ * still "FF01", so `ff_persist_buf` and `ff_nvm_req` keep their addresses.
+ * The core was the right half for them: `dzw_e` is a CONTROL value that the
+ * segment-synchronous trampoline in src/hooks.S consumes, it is written only
+ * by the periodic tick, and being inside the checksum means a corrupted
+ * `dzw_e` makes the very next activation re-initialise the block instead of
+ * leaving a stale offset in the ignition path.  The trampoline itself checks
+ * only the magic, exactly as `ff_rk_scale` does -- what bounds it is the
+ * `ff_dzw_max` clamp on the producing side, the FF_DZW_HARD_MAX clamp in
+ * code, and the stock s8 clamp at 0x41D410 plus `zwmin` and the
+ * -54..+58.5 degCA output clamp downstream (re/findings/ignition.md 8, 11).
  *
  * The EEP_CONF request record is NOT part of this block.  The block manager
  * keeps a pointer to it for milliseconds after the call returns
@@ -99,11 +113,28 @@
 #ifndef FF_STATE_H
 #define FF_STATE_H
 
+#ifndef __ASSEMBLER__
 #include "../../common/types.h"
+#endif
+
+/*
+ * Everything below that is a plain #define is visible to the ASSEMBLER too:
+ * src/hooks.S includes this file so the hand-written ignition trampoline can
+ * spell its RAM offsets with the same names the C uses instead of repeating
+ * numbers.  Constants the assembler may see therefore carry NO `u` suffix.
+ */
 
 /* ------------------------------------------------------------ RAM state --- */
 #define FF_MAGIC   0x46463031u        /* "FF01" */
 #define FF_LENGTH  0x0040u
+
+/*
+ * Byte offsets inside `struct ff_state` that src/hooks.S addresses directly.
+ * src/ff_ign.c asserts each of them against the struct, so a field that moves
+ * fails the build rather than the engine.
+ */
+#define FF_OFF_MAGIC   0x00
+#define FF_OFF_DZW_E   0x29
 
 #define FF_MODE_INIT      0u
 #define FF_MODE_OK        1u
@@ -121,6 +152,8 @@
 #define FF_F_MIN       1024u          /* 1.000, bit-identical to stock    */
 #define FF_F_MAX       2048u          /* 2.000, the hard ceiling in code  */
 #define FF_FRAC        1024u          /* sub-count resolution of e_frac   */
+
+#ifndef __ASSEMBLER__
 
 struct ff_state {
     volatile u32 magic;               /* +00 */
@@ -149,8 +182,8 @@ struct ff_state {
     volatile u16 e_key;               /* +24 */
     volatile u16 e_frac;              /* +26 */
     volatile u8  frame_bad;           /* +28 */
-    volatile u8  reserved_core0;      /* +29 */
-    volatile u16 reserved_core1;      /* +2A */
+    volatile s8  dzw_e;               /* +29  E1 */
+    volatile u16 fzw_q8;              /* +2A  E1 */
     /* --- annex, not checksummed ---------------------------------------- */
     volatile u32 rk_calls;            /* +2C */
     volatile u16 e_persist;           /* +30  D2 */
@@ -243,8 +276,8 @@ void ff_diag_publish(void);
 
 /* ------------------------------------------------------ FFCAL001 layout --- */
 #define FF_CAL_BASE        0x005E2510u
-#define FF_CAL_VERSION     1u
-#define FF_CAL_LENGTH      0x00E8u    /* what ffcal001.py emits today       */
+#define FF_CAL_VERSION     2u         /* E1 appended the ignition blend     */
+#define FF_CAL_LENGTH      0x010Au    /* what ffcal001.py emits today       */
 
 #define FF_CAL_MAGIC0      (FF_CAL_BASE + 0x00u)   /* "FFCA" */
 #define FF_CAL_MAGIC1      (FF_CAL_BASE + 0x04u)   /* "L001" */
@@ -265,13 +298,59 @@ void ff_diag_publish(void);
 #define FF_CAL_O_P_OFFSET  0x1Eu      /* u8, D2: payload offset in that block */
 #define FF_CAL_O_P_RATE_S  0x1Fu      /* u8, D2: minimum seconds between commits */
 #define FF_CAL_O_F_CURVE   0x20u      /* 17 x u16, Q10, E 0..100 step 6.25 % */
-#define FF_CAL_O_FZW_CURVE 0x42u      /* 17 x u8,  1/256, reserved (0)       */
-#define FF_CAL_O_DZW_MAP   0x54u      /* 8 x 8 s8, 0.75 degCA, reserved (0)  */
+#define FF_CAL_O_FZW_CURVE 0x42u      /* 17 x u8,  1/256, E1: the blend factor */
+#define FF_CAL_O_DZW_MAP   0x54u      /* 8 x 8 s8, 0.75 degCA, E1 (all 0)    */
 #define FF_CAL_O_FST_MAP   0x94u      /* 6 x 6 u16, Q10, reserved (1024)     */
 #define FF_CAL_O_PRAIL_ADD 0xDCu      /* 8 x u8, 0.1 MPa, reserved (0)       */
-#define FF_CAL_O_CRC       0xE6u      /* u16 at length-2 */
+/* --- appended by E1 (issue #34); v1 ended at 0xE6 with the checksum ------ */
+#define FF_CAL_O_ZW_ENABLE 0xE6u      /* u8, 0 = the blend is never applied  */
+#define FF_CAL_O_DZW_MAX   0xE7u      /* u8, |dzw_e| ceiling in s8 counts    */
+#define FF_CAL_O_DZW_NMOT  0xE8u      /* 8 x u16, nmot_w breakpoints (rows)  */
+#define FF_CAL_O_DZW_RL    0xF8u      /* 8 x u16, rl_w breakpoints (columns) */
+#define FF_CAL_O_CRC       0x108u     /* u16 at length-2 */
 
 #define FF_CURVE_N     17u
 #define FF_CURVE_STEP  100u           /* 6.25 % in 1/16 % units */
 
+/* ---------------------------------------- E1: the ignition blend (#34) --- */
+#define FF_DZW_N         8u           /* ff_dzw_map is 8 rows x 8 columns   */
+#define FF_FZW_MAX       255u         /* the u8 ceiling of ff_fzw_curve     */
+#define FF_FZW_ONE       256u         /* f_zw = ff_fzw_curve[..] / FF_FZW_ONE */
+/*
+ * The ceiling the CODE applies whatever the calibration says, the ignition
+ * counterpart of FF_F_MAX.  16 counts = 12.00 degCA is above the widest
+ * KFZWOP - KFZW gap in this dataset (~9 degCA at 4500 rpm / 90 %,
+ * re/findings/ignition.md 12), so it never binds a sane calibration, and it
+ * bounds a corrupt one to well inside the s8 range the stock clamp allows.
+ */
+#define FF_DZW_HARD_MAX  16
+
+/* src/ff_ign.c; called from ff_finish() at the end of every activation. */
+void ff_zw_update(void);
+
+/* --------------------------------- E1: the measuring block 108 (#34) ----- */
+/*
+ * Facts about the image, not choices the code makes: the handler pointers go
+ * into tbl_measuring_vars (0xA5658) ids 2192-2195 and the group words into
+ * tbl_measuring_groups (0x5C5518) group 108, both written by patch.json.
+ * Evidence: re/findings/measuring_vars.md section 8.4.
+ */
+#define FF_MW_ID_FZW     2192u        /* field 1, formula 0x21, A = 100      */
+#define FF_MW_ID_DZW     2193u        /* field 2, formula 0x22, A = 0x4B     */
+#define FF_MW_ID_DWKRZ   2194u        /* field 3, formula 0x22, A = 0x4B     */
+#define FF_MW_ID_ZWLATCH 2195u        /* field 4, formula 0x36 (a count)     */
+#define FF_MW_GROUP_ZW   108u         /* 0x6C; its 0x7F echo 235 is empty    */
+
+/*
+ * Formula 0x22 is `0.01 * A * (B - 128)`.  With A = 0x4B (75) that is
+ * 0.75 degCA per count -- and it is not a guess: the six stock knock-retard
+ * handlers at 0x039CD0-0x039D48 emit exactly (0x22, 0x4B, byte + 0x80) for
+ * the same array this block's field 3 reports (re/findings/ignition.md 6).
+ */
+#define FF_FMT_ZW        0x22u
+#define FF_FMT_A_ZW      0x4Bu        /* 75 -> 0.75 degCA per count          */
+#define FF_ZW_BIAS       128u         /* B of formula 0x22 at 0 degCA        */
+#define FF_ZW_LATCH_MASK 3u           /* bits 0/1 of 0x7FD31B                */
+
+#endif /* __ASSEMBLER__ */
 #endif /* FF_STATE_H */

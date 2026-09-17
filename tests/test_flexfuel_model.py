@@ -394,19 +394,99 @@ class TestFfcal001(unittest.TestCase):
         self.assertEqual(list(curve), ff.f_curve_from_formula())
 
     def test_the_reserved_tables_are_neutral(self):
-        self.assertEqual(set(self.blk[0x42:0x53]), {0})           # ff_fzw_curve
+        """E1 (2026-09-17) took ff_fzw_curve out of the reserved set: it now
+        carries the docs/05 3.4 shape.  What keeps the shipped file inert is
+        ff_dzw_map being all zero AND ff_zw_enable being 0, which the two tests
+        below assert; the other two tables are still untouched reservations."""
         self.assertEqual(set(self.blk[0x54:0x94]), {0})           # ff_dzw_map
         self.assertEqual(set(struct.unpack_from(">36H", self.blk, 0x94)), {1024})
         self.assertEqual(set(self.blk[0xDC:0xE4]), {0})           # ff_prail_add
+
+    def test_the_shipped_file_cannot_move_the_ignition_angle(self):
+        """Two independent reasons, either one on its own is enough."""
+        self.assertEqual(self.blk[0xE6], 0, "ff_zw_enable must ship 0")
+        self.assertEqual(set(self.blk[0x54:0x94]), {0},
+                         "ff_dzw_map must ship all zero, so enable = 1 is inert")
+
+    def test_the_fzw_curve_is_the_model_curve_and_starts_at_zero(self):
+        curve = list(self.blk[0x42:0x42 + 17])
+        self.assertEqual(curve, ff.fzw_curve_default())
+        self.assertEqual(curve[0], 0, "f_zw(E0) = 0 is the ignition E0 proof")
+        self.assertTrue(all(b >= a for a, b in zip(curve, curve[1:])))
+        self.assertEqual(curve[ff.FZW_PLATEAU], ff.FZW_MAX, "plateau at E50")
+        self.assertEqual(curve[-1], ff.FZW_MAX)
+
+    def test_a_curve_that_does_not_start_at_zero_is_refused(self):
+        with self.assertRaises(ffcal001.CalError):
+            ffcal001.build(dict(self.params, ff_fzw_curve=[4] * 17))
+
+    def test_a_non_monotonic_fzw_curve_is_refused(self):
+        curve = ff.fzw_curve_default()
+        curve[5], curve[6] = curve[6], curve[5]
+        with self.assertRaises(ffcal001.CalError):
+            ffcal001.build(dict(self.params, ff_fzw_curve=curve))
+
+    def test_the_dzw_axes_come_from_the_stock_kfzw_axes(self):
+        """A cell of ff_dzw_map has to line up with a KFZW row/column, or the
+        `KFZWOP - KFZW` budget table cannot be read against it."""
+        from emu.zw_model import Ignition
+        ign = Ignition(REPO / "data" / "passat_azx_ori.bin")
+        nmot = struct.unpack_from(">8H", self.blk, 0xE8)
+        rl = struct.unpack_from(">8H", self.blk, 0xF8)
+        self.assertEqual(list(nmot), list(ff.DZW_NMOT_AXIS))
+        self.assertEqual(list(rl), list(ff.DZW_RL_AXIS))
+        for v in nmot:
+            self.assertIn(v, ign.kfzw_nmot_axis, f"{v} is not a KFZW nmot row")
+        for v in rl:
+            self.assertIn(v, ign.kfzw_rl_axis, f"{v} is not a KFZW rl column")
+        self.assertEqual(nmot[0], ign.kfzw_nmot_axis[0], "cover the bottom")
+        self.assertEqual(nmot[-1], ign.kfzw_nmot_axis[-1], "and the top")
+        self.assertEqual(rl[0], ign.kfzw_rl_axis[0])
+        self.assertEqual(rl[-1], ign.kfzw_rl_axis[-1])
+
+    def test_a_non_monotonic_axis_is_refused(self):
+        for name in ("ff_dzw_nmot_axis", "ff_dzw_rl_axis"):
+            axis = list(ff.DZW_NMOT_AXIS if "nmot" in name else ff.DZW_RL_AXIS)
+            axis[3], axis[4] = axis[4], axis[3]
+            with self.subTest(axis=name):
+                with self.assertRaises(ffcal001.CalError):
+                    ffcal001.build(dict(self.params, **{name: axis}))
+
+    def test_a_dzw_max_above_the_code_ceiling_is_refused(self):
+        ffcal001.build(dict(self.params, ff_dzw_max=ff.DZW_HARD_MAX))
+        with self.assertRaises(ffcal001.CalError):
+            ffcal001.build(dict(self.params, ff_dzw_max=ff.DZW_HARD_MAX + 1))
+
+    def test_the_block_is_version_2_and_a_v1_block_is_refused(self):
+        self.assertEqual(struct.unpack_from(">H", self.blk, 0x08)[0], 2)
+        self.assertEqual(ffcal001.LENGTH, 0x010A)
+        v1 = bytearray(self.blk)
+        struct.pack_into(">H", v1, 0x08, 1)
+        struct.pack_into(">H", v1, ffcal001.CRC_OFF,
+                         (~sum(v1[:ffcal001.CRC_OFF])) & 0xFFFF)
+        with self.assertRaises(ffcal001.CalError):
+            ffcal001.check(bytes(v1))
+
+    def test_v2_appended_and_moved_nothing(self):
+        """Every v1 offset still holds what v1 put there (brief E1)."""
+        v1_offsets = (0x0C, 0x0E, 0x10, 0x12, 0x14, 0x16, 0x18, 0x19, 0x1A,
+                      0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x42, 0x54, 0x94,
+                      0xDC)
+        by_name = {n: off for off, n, *_ in ffcal001.SCALARS}
+        by_name.update({n: off for off, n, *_ in ffcal001.TABLES})
+        for off in v1_offsets:
+            self.assertIn(off, set(by_name.values()), f"{off:#x} disappeared")
+        self.assertGreater(0xE6, 0xDC + 8, "v2 starts after the last v1 table")
+        self.assertEqual(struct.unpack_from(">17H", self.blk, 0x20)[0], 1024)
 
     def test_the_layout_matches_ff_state_h(self):
         """The C header and the generator are two copies of one layout."""
         text = STATE_H.read_text()
 
         def macro(name: str) -> int:
-            mo = re.search(rf"#define\s+{name}\s+(0x[0-9A-Fa-f]+)u?", text)
+            mo = re.search(rf"#define\s+{name}\s+(0x[0-9A-Fa-f]+|\d+)u?\b", text)
             self.assertIsNotNone(mo, f"{name} missing from ff_state.h")
-            return int(mo.group(1), 16)
+            return int(mo.group(1), 0)
 
         self.assertEqual(macro("FF_CAL_BASE"), ffcal001.CAL_BASE)
         self.assertEqual(macro("FF_CAL_LENGTH"), ffcal001.LENGTH)
@@ -427,13 +507,23 @@ class TestFfcal001(unittest.TestCase):
                              ("FF_CAL_O_P_OFFSET", "ff_persist_offset"),
                              ("FF_CAL_O_P_RATE_S", "ff_persist_rate_s")):
             self.assertEqual(macro(cname), by_name[pname], cname)
+        for cname, pname in (("FF_CAL_O_ZW_ENABLE", "ff_zw_enable"),
+                             ("FF_CAL_O_DZW_MAX", "ff_dzw_max")):
+            self.assertEqual(macro(cname), by_name[pname], cname)
         by_table = {n: off for off, n, *_ in ffcal001.TABLES}
         for cname, pname in (("FF_CAL_O_F_CURVE", "ff_F_curve"),
                              ("FF_CAL_O_FZW_CURVE", "ff_fzw_curve"),
                              ("FF_CAL_O_DZW_MAP", "ff_dzw_map"),
                              ("FF_CAL_O_FST_MAP", "ff_fst_map"),
-                             ("FF_CAL_O_PRAIL_ADD", "ff_prail_add")):
+                             ("FF_CAL_O_PRAIL_ADD", "ff_prail_add"),
+                             ("FF_CAL_O_DZW_NMOT", "ff_dzw_nmot_axis"),
+                             ("FF_CAL_O_DZW_RL", "ff_dzw_rl_axis")):
             self.assertEqual(macro(cname), by_table[pname], cname)
+        self.assertEqual(macro("FF_CAL_VERSION"), ffcal001.VERSION)
+        self.assertEqual(macro("FF_DZW_N"), ff.DZW_N)
+        self.assertEqual(macro("FF_FZW_MAX"), ff.FZW_MAX)
+        self.assertEqual(macro("FF_FZW_ONE"), ff.FZW_ONE)
+        self.assertEqual(macro("FF_DZW_HARD_MAX"), ff.DZW_HARD_MAX)
 
     def test_every_d2_parameter_of_docs_05_section_4_is_reserved(self):
         names = {n for _o, n, *_ in ffcal001.SCALARS}

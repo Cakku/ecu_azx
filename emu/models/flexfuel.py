@@ -70,6 +70,23 @@ FRAC = 1024        # sub-count resolution of e_frac
 CURVE_N = 17       # ff_F_curve points, one every 6.25 % = 100 counts
 CURVE_STEP = 100
 
+# --- E1 (#34): the ignition blend -------------------------------------------
+DZW_N = 8              # ff_dzw_map is DZW_N rows (nmot) x DZW_N columns (rl)
+FZW_MAX = 255          # the u8 ceiling of ff_fzw_curve; 255/256 = 0.996
+FZW_ONE = 256          # the divisor, so f_zw = ff_fzw_curve[..] / 256
+FZW_PLATEAU = 8        # curve index where f_zw reaches its plateau: E50
+DZW_HARD_MAX = 16      # |dzw_e| ceiling in CODE, 12.00 degCA, whatever the cal
+
+#: ff_dzw_map's nmot breakpoints: every other breakpoint of the stock KFZW
+#: nmot axis 0x5C7736 (indices 0,3,5,7,9,11,13,15), u16 in nmot_w units of
+#: 0.25 rpm -- 520, 1000, 2000, 2920, 3720, 4520, 5520, 6520 rpm.
+DZW_NMOT_AXIS = (2080, 4000, 8000, 11680, 14880, 18080, 22080, 26080)
+
+#: ff_dzw_map's rl breakpoints: eight of the twelve breakpoints of the stock
+#: KFZW rl axis 0x5C7758 (indices 0,2,4,5,6,8,10,11), u16 in rl_w units of
+#: 100/4096 % -- 10.16, 21.09, 31.25, 41.41, 52.34, 72.66, 93.75, 103.91 %.
+DZW_RL_AXIS = (416, 864, 1280, 1696, 2144, 2976, 3840, 4256)
+
 CORE_OFF = 0x08    # first checksummed byte of the state block
 CORE_LEN = 0x24    # +0x08..+0x2B; the annex above it has other writers
 STATE_LEN = 0x40   # sizeof(struct ff_state)
@@ -105,6 +122,17 @@ def f_curve_from_formula(n: int = CURVE_N) -> list[int]:
     return out
 
 
+def fzw_curve_default(n: int = CURVE_N, plateau: int = FZW_PLATEAU) -> list[int]:
+    """The shipped `ff_fzw_curve`, 1/256, docs/05 section 3.4 (brief E1).
+
+    "0 at E0, 1 at about E40-50 where MBT is usually reached": a straight ramp
+    from 0 at E0 to the u8 maximum at E50 (`plateau` = index 8), flat above it.
+    `fzw[0] == 0` is the ignition counterpart of `F(0) == 1024`; it is what
+    makes E0 bit-identical no matter what `ff_dzw_map` contains.
+    """
+    return [min(round(i * FZW_MAX / plateau), FZW_MAX) for i in range(n)]
+
+
 # ------------------------------------------------------------- calibration ---
 @dataclass
 class Cal:
@@ -125,6 +153,13 @@ class Cal:
     persist_rate_s: int = 60
     f_curve: list[int] = field(default_factory=f_curve_from_formula)
     valid: bool = True
+    # --- E1 (#34): the ignition blend, appended by FFCAL001 v2 -------------
+    zw_enable: int = 0
+    dzw_max: int = 8
+    fzw_curve: list[int] = field(default_factory=fzw_curve_default)
+    dzw_map: list[int] = field(default_factory=lambda: [0] * (DZW_N * DZW_N))
+    dzw_nmot_axis: list[int] = field(default_factory=lambda: list(DZW_NMOT_AXIS))
+    dzw_rl_axis: list[int] = field(default_factory=lambda: list(DZW_RL_AXIS))
 
     # The clamps the patch applies to whatever the calibration says.
     def tick(self) -> int:
@@ -146,6 +181,10 @@ class Cal:
 
     def override(self) -> int:
         return min(self.e_override, 100)
+
+    def dzw_ceiling(self) -> int:
+        """|dzw_e| ceiling, clamped in CODE to DZW_HARD_MAX (brief E1)."""
+        return min(self.dzw_max, DZW_HARD_MAX)
 
 
 # ------------------------------------------------------------ the RAM state --
@@ -179,8 +218,10 @@ class State:
     e_key: int = 0
     e_frac: int = 0
     frame_bad: int = 0
-    reserved_core0: int = 0
-    reserved_core1: int = 0
+    # +0x29 / +0x2A: D1 reserved them inside the checksummed core; E1 (#34)
+    # gave them names.  No offset moved and the block is still 0x40 bytes.
+    dzw_e: int = 0        # s8, 0.75 degCA per count, positive = advance
+    fzw_q8: int = 0       # u16, 1/256, the blend factor the offset was scaled by
     # annex (not checksummed; D2 owns most of it)
     rk_calls: int = 0
     e_persist: int = 0
@@ -206,6 +247,52 @@ def _sat16(v: int) -> int:
 
 def _sat8(v: int) -> int:
     return 0xFF if v > 0xFF else v
+
+
+def _s8(v: int) -> int:
+    v &= 0xFF
+    return v - 0x100 if v & 0x80 else v
+
+
+def axis_key8(axis, value: int) -> int:
+    """`(index << 16) | frac` for a strictly increasing u16 breakpoint list.
+
+    The stock `axis_search_u16_hint` (0x40C9CC) with the hint fixed at 0 --
+    `emu/zw_model.py` models it and `tests/test_zw_model.py` proves that model
+    against the real function for every breakpoint and every hint.  Below the
+    first breakpoint and on or above the last one the fraction is 0, which is
+    what keeps `interp8_s8` from ever reading past the end of the map.
+
+    `src/ff_ign.c`'s `ff_axis8()` is a fixed-length rewrite of exactly this,
+    because patch code may not contain a loop whose trip count is data.
+    """
+    n = len(axis)
+    if value <= axis[0]:
+        return 0
+    if value >= axis[n - 1]:
+        return (n - 1) << 16
+    for i in range(n - 1):
+        if axis[i] <= value < axis[i + 1]:
+            span = axis[i + 1] - axis[i]
+            frac = ((value - axis[i]) << 16) // span if span > 0 else 0
+            return (i << 16) | frac
+    return 0                      # a non-monotonic axis: the safe cell
+
+
+def interp8_s8(values, key_y: int, key_x: int, nx: int = DZW_N) -> int:
+    """`interp_2d_s8` (0x40C3B4) over an nx-wide s8 map: `values[iy*nx + ix]`."""
+    fx, ix = key_x & 0xFFFF, key_x >> 16
+    fy, iy = key_y & 0xFFFF, key_y >> 16
+    p = ix + nx * iy
+    v = _s8(values[p])
+    if fx:
+        v = v + ((fx * (_s8(values[p + 1]) - v)) >> 16)
+    if fy:
+        v2 = _s8(values[p + nx])
+        if fx:
+            v2 = v2 + ((fx * (_s8(values[p + nx + 1]) - v2)) >> 16)
+        v = v + ((fy * (v2 - v)) >> 16)
+    return _s8(v)
 
 
 class FlexFuelModel:
@@ -263,8 +350,8 @@ class FlexFuelModel:
         out += st.ticks.to_bytes(4, "big")
         out += st.e_key.to_bytes(2, "big")
         out += st.e_frac.to_bytes(2, "big")
-        out += bytes((st.frame_bad, st.reserved_core0))
-        out += st.reserved_core1.to_bytes(2, "big")
+        out += bytes((st.frame_bad, st.dzw_e & 0xFF))
+        out += st.fzw_q8.to_bytes(2, "big")
         assert len(out) == CORE_LEN
         return bytes(out)
 
@@ -293,6 +380,61 @@ class FlexFuelModel:
             f = a + _tdiv((b - a) * fr, CURVE_STEP)
         return min(max(f, F_MIN), F_MAX)
 
+    # -- E1 (#34): the ignition blend -------------------------------------
+    def fzw_of(self, e_filt: int) -> int:
+        """`f_zw(E)` from `ff_fzw_curve`, 1/256 -- the same shape as `f_of`."""
+        curve = self.cal.fzw_curve
+        if e_filt >= E_FILT_MAX:
+            f = curve[CURVE_N - 1]
+        else:
+            i = e_filt // CURVE_STEP
+            fr = e_filt % CURVE_STEP
+            a, b = curve[i], curve[i + 1]
+            f = a + _tdiv((b - a) * fr, CURVE_STEP)
+        return min(max(f, 0), FZW_MAX)
+
+    def dzw_of(self, nmot_w: int, rl_w: int) -> int:
+        """`ff_dzw_map(nmot_w, rl_w)` in s8 counts of 0.75 degCA.
+
+        Bit for bit what `ff_axis8` + `ff_interp8` do in `src/ff_ign.c`, which
+        is in turn the arithmetic of the stock `axis_search_u16_hint`
+        (0x40C9CC) and `interp_2d_s8` (0x40C3B4) that `emu/zw_model.py` models
+        and `tests/test_zw_model.py` proves against the real functions.
+        `interp_2d_s8` indexes `val[iy * nx + ix]`, so y is nmot and x is rl.
+        """
+        ky = axis_key8(self.cal.dzw_nmot_axis, nmot_w)
+        kx = axis_key8(self.cal.dzw_rl_axis, rl_w)
+        return interp8_s8(self.cal.dzw_map, ky, kx)
+
+    def zw_update(self, nmot_w: int, rl_w: int) -> None:
+        """Recompute `dzw_e` and `fzw_q8`; called at the end of every activation.
+
+        `dzw_e` is **0** whenever the feature is disabled, the calibration is
+        not usable, the mode is not one that has a believable ethanol estimate,
+        or the estimate is E0.  There is no hold and no ramp on the way out:
+        the activation on which the mode leaves OK/HOLD/OVERRIDE is already the
+        activation on which the offset is 0 (the #37 ignition rule).
+        """
+        st, c = self.state, self.cal
+        if (not c.zw_enable or not st.cal_ok or st.e_filt == 0
+                or st.mode not in (MODE_OK, MODE_HOLD, MODE_OVERRIDE)):
+            st.fzw_q8 = 0
+            st.dzw_e = 0
+            return
+        st.fzw_q8 = self.fzw_of(st.e_filt)
+        p = st.fzw_q8 * self.dzw_of(nmot_w, rl_w)
+        q = (p + FZW_ONE // 2) // FZW_ONE if p >= 0 else -((-p + FZW_ONE // 2)
+                                                           // FZW_ONE)
+        ceil_ = c.dzw_ceiling()
+        st.dzw_e = min(max(q, -ceil_), ceil_)
+
+    def zwgru_offset(self) -> int:
+        """What the 0x41D40C trampoline adds, given the block as it stands."""
+        st = self.state
+        if st.magic != self.MAGIC:
+            return 0                               # no valid state -> stock
+        return st.dzw_e
+
     # -- the filter and the slew limiter ----------------------------------
     def _move(self, target_e16: int, *, filtered: bool) -> None:
         """Move E towards `target_e16` (1/16 %) by one activation."""
@@ -317,12 +459,21 @@ class FlexFuelModel:
         st.e_frac = now % FRAC
 
     # -- one activation ---------------------------------------------------
+    def _finish(self, nmot_w: int, rl_w: int) -> None:
+        """`ff_finish()`: the tail of every activation, on every path."""
+        self.zw_update(nmot_w, rl_w)
+        self.diag_publish()
+        self.seal()
+
     def tick(self, rx: bytes | None = None, *, src: int = SRC_B,
-             can_id_echo: int | None = None) -> State:
+             can_id_echo: int | None = None,
+             nmot_w: int = 0, rl_w: int = 0) -> State:
         """One periodic-hook activation.
 
         `rx` is the frame `can_rx_poll(15)` would report as fresh (DLC 8), or
-        None for "nothing new since the last call".
+        None for "nothing new since the last call".  `nmot_w` (0x7FEE74) and
+        `rl_w` (0x7FEFB2) are the two RAM words the ignition blend reads; they
+        default to 0, which selects the bottom-left cell of `ff_dzw_map`.
         """
         st = self.state
         if not self.state_valid():
@@ -336,7 +487,7 @@ class FlexFuelModel:
         if st.src_owner != src:
             st.src_foreign = _sat8(st.src_foreign + 1)
             if st.src_foreign < OWNER_SWITCH:
-                self.seal()
+                self._finish(nmot_w, rl_w)
                 return st
             st.src_owner, st.src_foreign = src, 0
         else:
@@ -351,7 +502,7 @@ class FlexFuelModel:
         if not st.cal_ok or st.cal_mode == 0:
             st.mode = MODE_OFF
             st.f_q10 = F_MIN
-            self.seal()
+            self._finish(nmot_w, rl_w)
             return st
 
         if st.cal_mode == 2:                       # bench override
@@ -359,7 +510,7 @@ class FlexFuelModel:
             st.age_ticks = 0
             self._move(c.override() * 16, filtered=True)
             st.f_q10 = self.f_of(st.e_filt)
-            self.seal()
+            self._finish(nmot_w, rl_w)
             return st
 
         # --- normal operation --------------------------------------------
@@ -404,8 +555,7 @@ class FlexFuelModel:
         # HOLD: E is frozen, so F is frozen too
 
         st.f_q10 = self.f_of(st.e_filt)
-        self.diag_publish()
-        self.seal()
+        self._finish(nmot_w, rl_w)
         return st
 
     # -- the measuring block (brief D2, issue #39) ------------------------
@@ -437,6 +587,32 @@ class FlexFuelModel:
                 (0x21, 100, clamp(st.diag_f_pct)),
                 t,
                 (0x36, clamp(st.persist_state), clamp(st.mode))]
+
+    def triples_zw(self, dwkrz=(0,) * 6, zw_latch: int = 0) -> list[tuple]:
+        """The four `(formula, A, B)` triples of measuring block 108 (brief E1).
+
+        `dwkrz` is the six-byte stock array at 0x7FCE57 and `zw_latch` the
+        stock byte 0x7FD31B: fields 3 and 4 read them live in the handler, so
+        they are arguments here rather than state.  Those two fields do NOT
+        depend on our block header -- they are stock values, and a tester
+        chasing knock must still see them when our block is invalid.
+
+        Fields 2 and 3 use **formula 0x22 with A = 0x4B**, which is byte for
+        byte what the six stock knock-retard handlers at 0x039CD0-0x039D48 emit
+        (`li r3,0x22; lbz r5,dwkrz; li r4,0x4B; addi r5,r5,0x80`): the reading
+        is `0.01 * 75 * (B - 128)` = 0.75 degCA per count, the ignition
+        resolution of `re/findings/ignition.md` section 6.
+        """
+        st = self.state
+        clamp = lambda v: min(max(v, 0), 0xFF)              # noqa: E731
+        ours = st.magic == self.MAGIC and st.length == STATE_LEN
+        fzw_pct = min((st.fzw_q8 * 100 + 128) >> 8, 100)
+        return [
+            (0x21, 100, fzw_pct) if ours else (0x25, 0, 0),
+            (0x22, 0x4B, clamp(st.dzw_e + 128)) if ours else (0x25, 0, 0),
+            (0x22, 0x4B, clamp(max(_s8(b) for b in dwkrz) + 128)),
+            (0x36, 0, zw_latch & 3),
+        ]
 
     def full_bytes(self) -> bytes:
         """All 64 bytes at PATCH_RAM, annex included."""

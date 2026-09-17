@@ -42,6 +42,12 @@ WANTED: tuple[tuple[str, str | None], ...] = (
     # RAM
     ("rk_fuel_mass", "RK"),            # the FR calls it `rk`
     ("can_rx_buf_spare0", None),
+    # RAM -- E1 (issue #34): the inputs of the ignition blend and its two
+    # acceptance signals.  ff_ign.c reads all four and writes none.
+    ("nmot_w", None),                  # KFZW row-axis input
+    ("rl_w", None),                    # KFZW column-axis input
+    ("cand_mw_percyl_block", "DWKRZ"), # the six per-cylinder knock retards
+    ("zwgru_low_octane_latch", "ZW_LOW_OCT_LATCH"),
 )
 
 CONFIDENCE_TAG = {
@@ -117,7 +123,7 @@ def render(symbols: dict[str, dict], wanted=WANTED) -> str:
         raise SystemExit(f"re/symbols.csv has no row for: {', '.join(missing)}")
 
     for kind_label, kinds in (("Stock functions", ("func",)),
-                              ("Stock RAM cells", ("var",))):
+                              ("Stock RAM cells", ("var", "table"))):
         rows = [(n, s) for n, s in wanted if symbols[n]["kind"] in kinds]
         if not rows:
             continue

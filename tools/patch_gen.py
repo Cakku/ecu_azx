@@ -37,6 +37,14 @@ Branch encoding, I-form (docs/06, PowerPC UISA):
 
 reach +-32 MB, LI always a multiple of 4.  Both are checked here.
 
+A hook site does **not** have to hold a branch.  Technique 1 replaces a
+`bl target`, technique 3 (docs/06 section 4) replaces an ordinary instruction
+with a `bl` to a trampoline that re-does it -- `patches/ff_fuel`'s ignition
+hook displaces `add r3,r3,r10` at 0x41D40C.  The site is pinned either way,
+because the `old` bytes are compared with the stock image before anything is
+written; only the human-readable description of the old word differs
+(2026-09-17, brief E1).
+
 The blob is added as one change whose `old` is all 0xFF, and the stock image is
 read to prove that those bytes really are 0xFF before anything is written.
 
@@ -211,9 +219,17 @@ def generate(patch_dir: Path, stock_path: Path = DEFAULT_STOCK) -> tuple[dict, l
                              f"{old.hex()}, patch.json says {want_old.hex()}")
         if word == int.from_bytes(old, "big"):
             raise PatchError(f"hook #{i} at {site:#08x}: the new word equals the old one")
-        old_kind, old_target = decode_branch(int.from_bytes(old, "big"), site)
+        # Hook technique 1/2 displaces a branch, technique 3 displaces an
+        # ordinary instruction (docs/06_patch_pipeline.md section 4).  Both are
+        # allowed: `old` has already been compared with the stock word above,
+        # so the site is pinned either way; only the *description* differs.
+        try:
+            old_kind, old_target = decode_branch(int.from_bytes(old, "big"), site)
+            old_desc = f"{old_kind} {old_target:#08x}"
+        except PatchError:
+            old_desc = f"the instruction {old.hex()}"
         resolved[target_name] = f"{target:#08x}"
-        notes.append(f"hook {site:#08x}: {old_kind} {old_target:#08x} -> "
+        notes.append(f"hook {site:#08x}: {old_desc} -> "
                      f"{kind} {target:#08x} ({target_name}), word "
                      f"{old.hex()} -> {word:08x}")
         change = {
@@ -222,7 +238,7 @@ def generate(patch_dir: Path, stock_path: Path = DEFAULT_STOCK) -> tuple[dict, l
             "old": old.hex(),
             "new": f"{word:08x}",
             "why": hook.get("why") or
-                   f"{old_kind} {old_target:#08x} -> {target_name} trampoline",
+                   f"{old_desc} -> {target_name} trampoline",
         }
         for flag in UNLOCK_FLAGS:
             if hook.get(flag):

@@ -12,12 +12,20 @@
     "persistence values their real defaults: EEP_CONF block 8, payload",
     "offset 0, 5 % hysteresis, one commit per 60 s (eeprom.md section 5).",
     "",
+    "E1 (issue #34) bumped the block to VERSION 2 and APPENDED the ignition",
+    "blend: ff_zw_enable (0 - the feature ships disabled), ff_dzw_max, and the",
+    "two 8-point axes of ff_dzw_map.  Nothing moved; the checksum followed the",
+    "length from +0xE6 to +0x108.  ff_fzw_curve now carries the docs/05 3.4",
+    "shape and ff_dzw_map is still all zero, so the shipped file adds no",
+    "advance even if ff_zw_enable is set to 1.",
+    "",
     "null means 'use the built-in default': the F curve from the docs/05",
-    "section 3.3 formula, and the neutral values for the four tables the MVP",
-    "reserves but does not read yet."
+    "section 3.3 formula, the f_zw ramp, the two axes taken from the stock",
+    "KFZW axis blocks, and the neutral values for the tables that are still",
+    "reserved."
   ],
 
-  "version": 1,
+  "version": 2,
 
   "ff_can_id": 236,
   "ff_timeout_ms": 1000,
@@ -36,9 +44,14 @@
   "ff_persist_offset": 0,
   "ff_persist_rate_s": 60,
 
+  "ff_zw_enable": 0,
+  "ff_dzw_max": 8,
+
   "ff_F_curve": null,
   "ff_fzw_curve": null,
   "ff_dzw_map": null,
   "ff_fst_map": null,
-  "ff_prail_add": null
+  "ff_prail_add": null,
+  "ff_dzw_nmot_axis": null,
+  "ff_dzw_rl_axis": null
 }
