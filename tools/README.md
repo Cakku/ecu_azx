@@ -28,6 +28,7 @@ document and `med9lib.py` together.
 | `ram_survey.py` | Per-byte static usage survey of the two SRAMs (0x7F8000-0x807FFF): r13 D-form accesses, absolute `lis`+D-form pairs, pointer words in both flash regions, measuring-variable cells, the cold-start fills and a table of known structures. Emits `re/ram_map.csv`, a 256-byte page map and the longest reference-free runs. `--indexed` bounds the arrays those runs usually belong to; `--stack` walks the deepest `stwu` chain from each task entry. `re/findings/ram.md`. |
 | `ercosek_tasks.py` | Brief C4 (#44). Decodes the whole ERCOSEK activation chain: the 37 task descriptors behind the ActivateTask thunk table (0x0B091C), both cyclic time tables (0x478EE4 / 0x478F80) and both raster divider chains (0x40BEF0 / 0x40C064), and prints every raster period in Time Base ticks and milliseconds. `--tasks`, `--timetable`, `--dividers`, `--periods`, `--json`. `re/findings/scheduler.md` section 11. |
 | `ram_snapshot_diff.py` | Compares the RAM snapshots taken over KWP RequestUpload and classifies every byte `changed` / `constant` / `blank`. The dynamic half of issue #23; ranges in `logging/sessions/ram_snapshot.json`, format in the module docstring, `--self-test` runs it on synthetic snapshots. |
+| `flash_segments.py` | Brief E6. Dumps the firmware's flash-programming tables: the three-entry flash device table (0x082980), the erase geometry and the UC3F block map (0x0825E4 / 0x082684), the programming-mode KWP dispatch table (0x088174) with the download/erase whitelist, and the 0x480000 mode-4 EEPROM window; `--all`, `--json`. `re/findings/flash_programming.md`. |
 
 Quick checks:
 
@@ -36,11 +37,12 @@ python3 tools/checksum.py verify -q data/passat_azx_ori.bin      # expect: ALL O
 python3 tools/layout_report.py data/passat_azx_ori.bin
 python3 tools/find_abs_refs.py data/passat_azx_ori.bin --target 0x6FC100   # BR0 writers
 python3 tools/ethanol_frame_decode.py "0EC#322A320500000100"   # -> E 50 %, 2 C, OK
-python3 tools/measuring_vars.py data/passat_azx_ori.bin --csv re/measuring_vars.csv
+python3 tools/measuring_vars.py data/passat_azx_ori.bin --csv work/mv.csv   # NOT over re/
 python3 tools/measuring_vars.py data/passat_azx_ori.bin --groups
-python3 tools/draft_to_xdf.py re/calibration_draft.csv -o re/med9_draft.xdf \
-        --min-confidence hypothesis            # 1,066 tables
-python3 tools/draft_to_xdf.py --validate re/med9_draft.xdf
+python3 tools/measuring_vars.py data/passat_azx_ori.bin --free   # spare ids and groups
+python3 tools/draft_to_xdf.py re/calibration_draft.csv -o work/med9_draft.xdf \
+        --min-confidence hypothesis            # 1,068 tables, 151 constants
+python3 tools/draft_to_xdf.py --validate re/med9_draft.xdf    # 1,079 / 179
 python3 tools/callgraph.py data/passat_azx_ori.bin \
         --reach 0x1004 0x12328 --stop 0x986AC 0x9E3E0 0x405588   # the boot module
 python3 tools/r2_context.py data/passat_azx_ori.bin --compare --violations
@@ -54,6 +56,26 @@ python3 tools/ercosek_tasks.py data/passat_azx_ori.bin --periods   # every raste
 python3 -m emu.ext_sram_probe                # 0x7F8012 = 0x44 / 0x41 per CS1 model
 python3 -m emu.os_clock --set a --seconds 5  # the same periods, emulated
 ```
+
+> **Do not point `--csv` at `re/measuring_vars.csv` (2026-09-17, E7).** The
+> checked-in file has **four rows the tool cannot produce**: ids 2196-2199, the
+> `patches/ff_fuel` diagnostic handlers added by hand in brief D2, whose
+> handlers live in the patch blob and not in the stock image. Regenerating over
+> it silently drops them (666 rows out, 670 in the file). Write to `work/` and
+> merge by hand, as `re/README.md` says for `calibration_names.csv`. The same
+> is *not* true of `re/ram_map.csv`, which reproduces byte-identically.
+>
+> Related, and still open: E1's ids 2192-2195, E2's 2188-2191 and E5's
+> 2184-2187 have **no** rows in `re/measuring_vars.csv` at all, though their
+> groups (108, 69, 109) are in the patch. Only D2's four were ever added.
+
+Two notes on the `draft_to_xdf.py` pair (2026-09-17, E7). The counts differ
+because the **checked-in** `re/med9_draft.xdf` is built with
+`--extra-rows patches/ff_fuel/ffcal001_rows.csv` as well (`re/README.md`); the
+plain build above leaves FFCAL001 out. And the build writes to `work/`, not to
+`re/`: **regenerating `re/med9_draft.xdf` is the integrator's job at merge
+time**, not a step any agent or reader takes
+(`docs/agent_briefs/00_common_rules.md`).
 
 Building and applying a patch (`docs/06_patch_pipeline.md`, issue #25). The
 Makefile in each patch directory wraps all of it; these are the raw commands:
@@ -84,35 +106,61 @@ python3 tools/bindiff.py stock.bin patched.bin -p patch.json --json work/diff.js
 python3 tools/logcmp.py base.csv cand.csv -t patches/ff_counter/test/tolerance.json
 ```
 
-`checksum.py fix` rewrites descriptors in place semantics-preserving; running
-it on the original dump changes nothing (this is part of the test).
+`checksum.py fix` is semantics-preserving, and running it on the original dump
+changes nothing (this is part of the test). **Corrected 2026-09-17 (E7): it
+does not rewrite in place.** `checksum.py fix FILE` writes `FILE.fixed.bin`
+(gitignored) and leaves `FILE` alone; `-o OUT` names the output instead. So the
+verify that follows a fix must name the *output* file, not the input.
 
 ## Tests
 
-Everything in `tools/` and `emu/` is covered by one suite:
+Everything in `tools/`, `emu/`, `logging/` and `patches/` is covered by one
+suite:
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python3 -m unittest discover -s tests -v      # 107 tests, needs data/passat_azx_ori.bin
+python3 -m unittest discover -s tests -v   # 591 tests, needs data/passat_azx_ori.bin
 ```
 
-`tests/` contains `test_draft_to_xdf.py` (the XDF skeleton, the file-offset
-mapping and the `val[iy*nx+ix]` layout), `test_bindiff.py` (builds a patched copy in a temp directory
-and checks that only the edits and their descriptors moved), `test_logcmp.py`
-(the synthetic logs in `logging/samples/`), `test_emu.py` (the Unicorn
-harness, `emu/README.md`) and `test_patch_framework.py` (the patch framework,
-`patches/common/` + `patch_gen` + `patch_apply` + the ff_counter hook under the
-emulator; the build layer skips itself with a clear message when `LLVM_DIR` is
-not installed). Every test that loads the dump asserts its SHA-256
-is unchanged afterwards; none of them writes to `data/`.
+**591 tests in 21 files, about two minutes** (2026-09-17, E7, on
+`integration/wave-E`; it was 107 when this section was written and 365 after
+wave D, so treat the number as a date-stamped observation rather than a
+constant):
+
+| File | What it covers |
+|---|---|
+| `test_bindiff.py` | builds a patched copy in a temp directory and checks that only the edits and their descriptors moved |
+| `test_draft_to_xdf.py` | the XDF skeleton, the file-offset mapping, the `val[iy*nx+ix]` layout, and `re/calibration_names.csv` against the draft |
+| `test_ecu_sim_patch.py` | `logging/ecu_sim.py --sim-patch`: the patch's hooks driven on a simulated raster |
+| `test_emu.py` | the Unicorn harness (`emu/README.md`) |
+| `test_ercosek_tasks.py` | `tools/ercosek_tasks.py` and `emu/os_clock.py`: the raster periods |
+| `test_ethanol_frame_send.py` | the simulated Pico node |
+| `test_ff_diag_patch.py`, `test_ff_fuel_patch.py`, `test_ff_ign_patch.py`, `test_ff_rail_patch.py`, `test_ff_start_patch.py` | the five `patches/ff_fuel` features under the emulator, including the two bit-identity proofs each (disabled, and enabled at neutral calibration) |
+| `test_flexfuel_model.py` | `emu/models/flexfuel.py`, the reference model the patch and FFCAL001 are both checked against |
+| `test_injection_model.py`, `test_start_model.py`, `test_window_model.py`, `test_zw_model.py` | the bit-exact models of the injection, start, injection-window and base-ignition paths |
+| `test_logcmp.py` | the synthetic logs in `logging/samples/` |
+| `test_med9kwp.py` | the TP2.0 + KWP2000 stack against `logging/ecu_sim.py` (49 tests, no hardware) |
+| `test_patch_framework.py` | `patches/common/` + `patch_gen` + `patch_apply` + the `ff_counter` hook under the emulator; the build layer skips itself with a clear message when `LLVM_DIR` is not installed |
+| `test_qspi_eeprom.py` | the QSMCM QSPI queue and the M95160 device model |
+| `test_ram_survey.py` | `tools/ram_survey.py` and `emu/ext_sram_probe.py` |
+
+`tests/common.py` has the dump-unchanged base class. Every test that loads the
+dump asserts its SHA-256 is unchanged afterwards; none of them writes to
+`data/`.
+
 `blobdis.py` disassembles a raw big-endian PowerPC blob at a chosen CPU
 address (capstone). `llvm-objdump` cannot do this — it has no `-b binary` —
 and looking at the ELF instead of the bytes the CPU will fetch is exactly the
 mistake the pre-flash checklist exists to prevent.
 
 ```bash
+cd patches/examples/hello_patch && make          # build/ is gitignored: build it first
 python3 tools/blobdis.py patches/examples/hello_patch/build/hello.bin \
     --addr 0x145000 --check-sda      # non-zero exit if r2 or r13 are touched
 python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x20004 --len 0x20
 ```
+
+The end-to-end walkthrough that ties all of this together — a calibration-only
+change, a code change, flashing, logging, log review and roll-back — is
+[`../docs/07_workflow.md`](../docs/07_workflow.md) (2026-09-17, E7).

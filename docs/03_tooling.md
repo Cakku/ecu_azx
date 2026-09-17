@@ -428,6 +428,25 @@ Exact commands, the sensor pull-up/level-shift network and the host test
 - Procedure and checklist: `04_re_guidelines.md` section 6.
 - EEPROM tools for backup analysis only: E2PA (Windows), EliasTuning/MED9-EEPROM-Tool (Python).
 
+> **Added 2026-09-17 (brief E7, issue #42).** The operating procedure that uses
+> all of the above — what to run before a write, what the read-back must show,
+> what a failed flash looks like and what never to flash — is
+> **[`07_workflow.md`](07_workflow.md) chapters 3 and 6**. It is the only place
+> the KESSv2 steps are written as a checklist, and every step whose behaviour
+> is still a prediction is marked `[unverified]` there, because no ECU has been
+> written by this project yet.
+>
+> Two facts from brief **E6** (`re/findings/flash_programming.md`, 2026-09-17,
+> VERIFIED-STATIC from the dump) belong next to the KESSv2 row above:
+> the ECU's **own** OBD programming route (session `10 85`, SID 0x34) can erase
+> and program **0x404000-0x47FFFF**, the on-chip flash, so the patch's seven
+> on-chip hook words are reachable over OBD in principle; and there is **no
+> boot-time integrity gate on flash content** — the 65 block sums are never
+> recomputed at boot and the published CRC-32 is compared with nothing. Whether
+> KESSv2 protocol 179 *drives* that route for that range is a property of the
+> tool, not the firmware, and it is still open: the read-back after Flash 0 is
+> the proof (`07_workflow.md` §3.3, docs/06 §6).
+
 ## 8. Reference documents to obtain
 
 - Bosch **MED9.1 Funktionsrahmen** (TFSI edition, ~55 MB PDF on s4wiki:

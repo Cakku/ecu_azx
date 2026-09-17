@@ -12,6 +12,10 @@ Bosch 0261S02226, software 1037382557).
 | [04_re_guidelines.md](04_re_guidelines.md) | How we work: evidence levels, naming, address conventions, knowledge base, safety rules, checklists. |
 | [05_flexfuel_design.md](05_flexfuel_design.md) | Architecture of the flex-fuel feature, CAN frame spec, ECU-side design, fail-safe rules, RE targets, test plan. |
 | [06_patch_pipeline.md](06_patch_pipeline.md) | How a C patch becomes bytes in flash: build, hook, checksum, verify, flash, roll back. |
+| [07_workflow.md](07_workflow.md) | The end-to-end walkthrough, for someone who built none of it: a calibration-only change, a code change, flashing, logging, log review, roll back. Every command outside the flashing chapter has been run and its output quoted. |
+
+01-06 are reference; **07 is the one you follow**. Read 07 first if you have a
+change to make and 01-06 when it tells you to.
 
 Supporting material lives next to the docs:
 
