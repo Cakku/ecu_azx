@@ -37,11 +37,12 @@ python3 tools/checksum.py verify -q data/passat_azx_ori.bin      # expect: ALL O
 python3 tools/layout_report.py data/passat_azx_ori.bin
 python3 tools/find_abs_refs.py data/passat_azx_ori.bin --target 0x6FC100   # BR0 writers
 python3 tools/ethanol_frame_decode.py "0EC#322A320500000100"   # -> E 50 %, 2 C, OK
-python3 tools/measuring_vars.py data/passat_azx_ori.bin --csv re/measuring_vars.csv
+python3 tools/measuring_vars.py data/passat_azx_ori.bin --csv work/mv.csv   # NOT over re/
 python3 tools/measuring_vars.py data/passat_azx_ori.bin --groups
-python3 tools/draft_to_xdf.py re/calibration_draft.csv -o re/med9_draft.xdf \
-        --min-confidence hypothesis            # 1,066 tables
-python3 tools/draft_to_xdf.py --validate re/med9_draft.xdf
+python3 tools/measuring_vars.py data/passat_azx_ori.bin --free   # spare ids and groups
+python3 tools/draft_to_xdf.py re/calibration_draft.csv -o work/med9_draft.xdf \
+        --min-confidence hypothesis            # 1,068 tables, 151 constants
+python3 tools/draft_to_xdf.py --validate re/med9_draft.xdf    # 1,079 / 179
 python3 tools/callgraph.py data/passat_azx_ori.bin \
         --reach 0x1004 0x12328 --stop 0x986AC 0x9E3E0 0x405588   # the boot module
 python3 tools/r2_context.py data/passat_azx_ori.bin --compare --violations
@@ -55,6 +56,26 @@ python3 tools/ercosek_tasks.py data/passat_azx_ori.bin --periods   # every raste
 python3 -m emu.ext_sram_probe                # 0x7F8012 = 0x44 / 0x41 per CS1 model
 python3 -m emu.os_clock --set a --seconds 5  # the same periods, emulated
 ```
+
+> **Do not point `--csv` at `re/measuring_vars.csv` (2026-09-17, E7).** The
+> checked-in file has **four rows the tool cannot produce**: ids 2196-2199, the
+> `patches/ff_fuel` diagnostic handlers added by hand in brief D2, whose
+> handlers live in the patch blob and not in the stock image. Regenerating over
+> it silently drops them (666 rows out, 670 in the file). Write to `work/` and
+> merge by hand, as `re/README.md` says for `calibration_names.csv`. The same
+> is *not* true of `re/ram_map.csv`, which reproduces byte-identically.
+>
+> Related, and still open: E1's ids 2192-2195, E2's 2188-2191 and E5's
+> 2184-2187 have **no** rows in `re/measuring_vars.csv` at all, though their
+> groups (108, 69, 109) are in the patch. Only D2's four were ever added.
+
+Two notes on the `draft_to_xdf.py` pair (2026-09-17, E7). The counts differ
+because the **checked-in** `re/med9_draft.xdf` is built with
+`--extra-rows patches/ff_fuel/ffcal001_rows.csv` as well (`re/README.md`); the
+plain build above leaves FFCAL001 out. And the build writes to `work/`, not to
+`re/`: **regenerating `re/med9_draft.xdf` is the integrator's job at merge
+time**, not a step any agent or reader takes
+(`docs/agent_briefs/00_common_rules.md`).
 
 Building and applying a patch (`docs/06_patch_pipeline.md`, issue #25). The
 Makefile in each patch directory wraps all of it; these are the raw commands:
