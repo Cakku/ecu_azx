@@ -341,6 +341,60 @@ no-op. Read back after writing and compare; if the read-back differs from
 what we wrote outside the descriptors, stop and investigate (that would mean
 a check we do not know about). Roll back by writing the original read.
 
+> **2026-09-17 (E6, blocker of #26 #27 #28 #32) — what the ECU's own route
+> can write, and what to check on the first flash. VERIFIED-STATIC from
+> `data/passat_azx_ori.bin`; see `re/findings/flash_programming.md`.**
+>
+> KESS flashes over OBD, so it drives *this firmware's* programming service.
+> That service hard-codes the address ranges it accepts
+> (`kwp_download_range_allowed`, 0x0889C8 — an **exact** start/end match, else
+> NRC 0x42):
+>
+> | start | end | what |
+> |---|---|---|
+> | 0x020000 | 0x07FFFF | application code, part 1 |
+> | 0x0A0000 | 0x1BFFFF | application code, part 2 |
+> | **0x404000** | **0x47FFFF** | **on-chip flash — the whole array except small block 0** |
+> | 0x080000 | 0x09FFFF | alias; the handler rewrites it to 0x1C0000-0x1DFFFF |
+> | 0x1C0000 / 0x1E0000 | 0x1DFFFF / 0x1FFFFF / 0x1FFFFF | calibration, variant-gated |
+>
+> **So the on-chip hook words `patches/ff_fuel` uses (0x42247C, 0x432940,
+> 0x41D40C, 0x41A680, 0x41A808, 0x431384) are inside a range the ECU itself
+> can erase and program.** `"onchip_edit": true` stays a loud warning in
+> `patch_apply.py`, but the open question is now only whether KESSv2 *offers*
+> that range, not whether the ECU can take it — and the read-back below
+> answers it.
+>
+> Two ranges the firmware refuses outright, so no tool driving the OBD route
+> can touch them: **0x000000-0x01FFFF** (vectors, boot, the RAM loader image)
+> and **0x080000-0x09FFFF** (the resident programming module: the code
+> directory, the flash driver, `app_entry_crt0`). `patch_apply.py` already
+> refuses 0x000000-0x00FFFF and 0x400000-0x403FFF; **0x010000-0x01FFFF and
+> 0x080000-0x09FFFF deserve the same treatment** and are a follow-up.
+>
+> Read-back checklist for Flash 0, in addition to the bindiff above:
+>
+> 1. **Read back 0x404000-0x47FFFF** and `bindiff` it. This is the single
+>    measurement that settles #32. Stock bytes there = KESS skipped the array.
+> 2. **Check the halfword at file 0x1E2500 is `5A 5A`.** It is the one
+>    integrity marker the firmware acts on: without it the ECU reboots into
+>    its flash loader instead of starting the application (recoverable, but it
+>    looks like a brick if you do not expect it).
+> 3. **Read EEP_CONF block 10** (EEPROM offset 0x260, 0x20 B) before and
+>    after: the ECU stamps its identification string and a status word there on
+>    every programming session, so a changed block 10 proves the ECU's own
+>    route ran. It is inside the 1 KB that `35`/`36` expose at 0x480000
+>    (`tools/flash_segments.py --segments`), so no EEPROM clip is needed.
+> 4. Erase granularity, if a partial write is ever attempted: **48 KB / 16 KB
+>    / 64 KB** on the on-chip array, 8 KB parameter blocks plus 64 KB main
+>    blocks on the CS0 part. There is no smaller unit; programming is per
+>    32-bit word.
+>
+> There is **no signature and no boot-time checksum verdict**: the runtime
+> CRC-32 over 0x020000-0x1BFFFF / 0x404000-0x47FFFF / 0x5C2E00-0x5FFFFF is
+> computed and *reported* (RAM 0x7F9178), never compared. The 65 block sums
+> still have to be correct because the *tool* checks them, not the ECU.
+
 ## 7. Regression
 
 Each patch keeps a baseline log (stock) and a patched log over the same bench

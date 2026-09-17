@@ -299,5 +299,332 @@ in Ghidra is correct. **VERIFIED-STATIC.**
 |---|---|
 | What is in the live ETR table at 0x400000-0x4000FF (the real external-interrupt handler)? | needs the BDM read of the missing 16 KB |
 | What writes 0x11223344 to 0x005FB0, and what are the five addresses at 0x5FB4-0x5FC0 for? | open; 0x5FB0 is blank in this dump |
-| What is the routine relocated to 0x804800 (entry 0x806EA0, flash 0x840A0)? It is reached from 0x861A8 and is almost certainly the external-flash programming driver. | open, note for the patch pipeline |
-| The word at 0x1C0120 read by the indirect call at 0x12F8C is blank; is it a reprogramming hook? | open |
+| What is the routine relocated to 0x804800 (entry 0x806EA0, flash 0x840A0)? It is reached from 0x861A8 and is almost certainly the external-flash programming driver. | **SETTLED (2026-09-17, E6, `re/findings/flash_programming.md` §3 and §4).** It is the flash programming driver for **both** devices: a three-entry device table (0x082980) whose device 1 is the on-chip UC3F 0x404000-0x47FFFF, five command sets selected by `flash_dev_probe` (0x081C18), a block-geometry table (0x0825E4) and the full UC3F interlock sequence in `flash_erase_block_start` (0x081F78) / `flash_program` (0x082208) / `flash_poll_uc3f` (0x081BB4). |
+| The word at 0x1C0120 read by the indirect call at 0x12F8C is blank; is it a reprogramming hook? | **partly settled (2026-09-17, E6).** It is the third arm of `boot_mode_select` (0x012ED4), reached only when the test at 0x012894 says yes, and the two instructions in front of it are the third DECRAM copy and `bl 0x011CE0` = `uc3f_unprotect` — so yes, it is a reprogramming hook. What would write 0x1C0120 is still open. `flash_programming.md` §5.1 |
+
+> **2026-09-17 (E6, blocker of #26 #27 #28 #32) — the boot has a second exit,
+> and §3.2's "zero r2-relative references" is wrong. VERIFIED-STATIC.**
+>
+> **(a) `boot_mode_select` (0x012ED4).** §2.3 above follows the path that ends
+> at the `blrl` at 0x01307C. That `blrl` is only reached when **three** mode
+> tests all say no. `boot_mode_select` writes 0x5A78AA23 to RAM 0x7F8004,
+> calls `boot_select_code_directory` (0x012D4C) and then tries, in order,
+> 0x01270C (the byte at RAM 0x7F8010 plus the two CS2 pointers in DECRAM
+> 0x6F8404/0x6F8408), `boot_check_reprog_magic` (0x012780: the word at RAM
+> **0x7F8000** against **0xBB44E169**, 0xA5BCD193, 0xBD5593F3, 0xE45CD91A,
+> 0x356BD372) and 0x012894 (the 0x1C0120 arm). On a hit it calls
+> `boot_enter_prog_mode` (0x012658) — which runs the third DECRAM routine and
+> **tail-calls `uc3f_unprotect` (0x011CE0)**, clearing
+> `UC3FMCR[PROTECT]`/`UC3FMCRE[SBPROTECT]` and the CS0 write-protect — stores
+> 0xDEADBEEF to DECRAM 0x6F840C and branches to **`bl 0x7F8728`**.
+>
+> **(b) 0x7F8728 is a RAM-resident flash loader, and it is where the "100
+> further function entries between 0x019948 and 0x01E848" of §1.1 really
+> live.** The boot copies flash **0x019798-0x02A827 (0x5090 B) to 0x7F8728**
+> (loop 0x0126DC-0x0126F8) and `boot_swsr_service` (0x0110D0, 0x48 B) to
+> **0x7FD7B8** (loop 0x0126AC-0x0126C8); the two tile exactly into
+> 0x7F8728-0x7FD7FF. So that block is not ordinary application code that
+> happens to want `r2 = 0x5C9FF0` — it executes at `0x7F8728 + (addr -
+> 0x019798)` and carries its own flash-device table at flash 0x01E71C.
+> `r2_context.py`'s clean result for it should be re-read with that in mind.
+>
+> **(c) §3.2 is wrong about r2.** "The relocated block (flash
+> 0x081A00-0x085400) contains **zero** r2-relative references" — it contains
+> four, all in the two-instruction form `addis rX,r2,-0x54` + a D-form
+> displacement, which `tools/r2_context.py` does not classify as an r2 access
+> because the base register is not r2: 0x082D1C, 0x082D64, 0x082D90 (the flash
+> device table at 0x082980) and 0x082130 (the UC3F block-select table at
+> 0x082684). Under `r2 = 0xD4CDF0` they resolve to the RAM copy at 0x804800,
+> which is exactly what that base is for. The *conclusion* of §3.2 still
+> stands — the block also runs in place from flash with `r2 = 0x5C9FF0`, and
+> then the same instructions resolve to the flash originals — but the reason
+> given ("nothing executed while r2 = 0xD4CDF0 dereferences r2") is not true.
+> Detail: `re/findings/flash_programming.md` §3.1.
+
+---
+
+## 6. The one-shot init table (E6, 2026-09-17, follow-up to E4 #38)
+
+Brief E6 was asked to sweep "the one-shot init table at 0x0B1A80-0x0B1C00".
+It exists, it is bigger than that window, and this section says exactly what
+it is, what it does and what the simulator misses by not running it.
+
+Reproduce with the scratch script quoted in §6.4; the addresses below come
+from `tools/callgraph.py --entries`, `tools/find_branch_refs.py`,
+`tools/find_abs_refs.py` and `tools/blobdis.py`.
+
+### 6.1 It is one flat, NULL-terminated array of 1,028 function pointers
+
+**VERIFIED-STATIC.** The table starts at **0x0B1A68** (the word after the
+`blr` at 0x0B1A64) and runs to **0x0B2A74**; the word at **0x0B2A78 is
+0x00000000**, and the next words (`00000004 00001FEE 00000002 000802A8 …`)
+are an unrelated structure. So:
+
+| | |
+|---|---|
+| base | **0x0B1A68** (`tbl_module_init`) |
+| entries | **1,028** (994 distinct targets; 16 targets appear twice) |
+| terminator | the NULL word at **0x0B2A78** |
+| targets | 1,011 in external flash, 17 in on-chip flash |
+| 64 of them | a bare `blr` — empty init stubs, which is what makes this an init list rather than a dispatch table |
+
+The whole table has **exactly two** references in the image: the pointer word
+at **0x47901C** (found with `tools/find_branch_refs.py … 0x0B1A68`), and
+nothing else — no `lis`/`addi` pair anywhere resolves into
+0x0B1A00-0x0B2B00 except two unrelated sites (0x04D064 → 0x0B2AD0 and
+0x0B4E14 → 0x0B2678). That is why `eeprom.md` §9 and `kwp.md` §4.1 could say
+of `nvm_set_sync_mode`, `nvm_set_normal_mode` and `ddli_init` that they "have
+no caller": their only caller is this walk.
+
+### 6.2 Who walks it
+
+0x47901C is the **ERCOSEK application descriptor**: `app_init`'s tail does
+
+```
+0004D09C  lis  r3,0x48 ; lwz r3,-0x6FD8(r3)     ; r3 = [0x479028] = 0x47901C
+0004D0A4  bl   0x477990                          ; os_start(desc)
+0004D0E4  b    0x0BA444                          ; must never return (index 0xC9)
+```
+
+and `os_start` (0x477990) reads `lwz r12,8(r30)` = `[0x479024]` = 0x478E20,
+the on-chip kernel configuration block `re/symbols.csv` already knows. The
+descriptor's fields are
+
+```
+0x47901C +0x00  0x000B1A68   tbl_module_init      <- this table
+         +0x04  0x00478F74   time-table A descriptor (scheduler.md 11)
+         +0x08  0x00478E20   tbl_os_kernel_config_int
+         +0x0C  0x0047901C   self
+```
+
+and the walk itself is eight instructions inside `os_start`:
+
+```
+00477A2C  lwz   r11,-0x1A64(r13)      ; the OS object pointer
+00477A34  lwz   r11,0x64(r11)         ; -> tbl_module_init
+00477A38  lwz   r30,0(r11)
+00477A3C  cmpwi r30,0 ; beq done
+00477A44  mtlr  r30 ; blrl            ; call entry[i]()
+00477A50  addi  r31,r31,1
+00477A58  slwi  r10,r31,2 ; lwzx r30,r11,r10
+00477A64  bne   0x477A44               ; until the NULL entry
+```
+
+so **every entry is called once, in order, with no arguments, before the
+first task ever runs**. The only word in the whole image whose value is
+0x0B1A68 is the one at 0x47901C, which is what `[OS object + 0x64]` resolves
+to; that last link is the one runtime pointer in the chain, so the walk itself
+is **VERIFIED-STATIC** and its identification with *this* table is
+VERIFIED-STATIC + one-pointer inference.
+
+### 6.3 What the 1,028 entries actually do
+
+Walking each target linearly to its first `blr`/`b` (24,766 instructions in
+total) and tracking `lis`/`addi`/`ori` register values:
+
+| effect | entries |
+|---|---|
+| seed RAM cells with small constants | 320 |
+| store a **data** pointer into RAM | 43 |
+| call a sub-routine | 374 |
+| **store a function-entry address into RAM** | **0** |
+| **pass a function-entry address to a call** | **0** |
+
+> **The init table binds no function pointers at all.** This is the answer to
+> the question E4 raised: the NVM device function pointers **0x7FAB70 /
+> 0x7FAB74** are *not* filled by it, which is consistent with `eeprom.md`
+> §10.3's "no instruction in the image stores to them". Whatever installs the
+> real QSPI driver is not in this table and is still open — the candidates left
+> are the flash-loader path, a variant-specific module the linker dropped, or
+> a write through a computed pointer this linear scan cannot see.
+
+### 6.4 The window the brief named, 0x0B1A80-0x0B1C00 (indices 6-101)
+
+`idx` is the array index from 0x0B1A68; `n` is the instruction count to the
+first `blr`; the effect column lists the first four RAM constants, data
+pointers and calls.
+
+| idx | slot | init function | n | effect (first four of each) |
+|---|---|---|---|---|
+| 6 | 0x0B1A80 | `0x063C68` | 18 | 0x7FAD60=0x0 |
+| 7 | 0x0B1A84 | `0x063AE4` | 72 | - |
+| 8 | 0x0B1A88 | `0x05DA9C` | 137 | calls 0x0B8224 |
+| 9 | 0x0B1A8C | `0x064BEC` | 87 | 0x7FCCC0=0x0 / calls 0x0B8218, 0x063D4C, 0x0B819C |
+| 10 | 0x0B1A90 | `0x063FF8` | 34 | - |
+| 11 | 0x0B1A94 | `0x065518` | 104 | 0x7FCCD8=0x1 / calls 0x0B88CC |
+| 12 | 0x0B1A98 | `0x065B1C` | 118 | calls 0x0B822C |
+| 13 | 0x0B1A9C | `0x0B8FF0` | 82 | - |
+| 14 | 0x0B1AA0 | `0x0660FC` | 153 | calls 0x0B8214 |
+| 15 | 0x0B1AA4 | `0x0659E4` | 58 | calls 0x0B8A64, 0x0B88CC, 0x0B8B00 |
+| 16 | 0x0B1AA8 | `0x065288` | 66 | calls 0x0B8224, 0x063C3C, 0x063C3C |
+| 17 | 0x0B1AAC | `0x12DDFC` | 14 | 0x7FCFED=0x34 |
+| 18 | 0x0B1AB0 | `0x0BA0F4` | 4 | 0x7FCD68=0x2 |
+| 19 | 0x0B1AB4 | `0x063094` | 11 | - |
+| 20 | 0x0B1AB8 | `0x0618EC` | 11 | - |
+| 21 | 0x0B1ABC | `0x061F7C` | 51 | calls 0x0B8228 |
+| 22 | 0x0B1AC0 | `0x061918` | 11 | - |
+| 23 | 0x0B1AC4 | `0x061B1C` | 4 | 0x7FCC9C=0x0 |
+| 24 | 0x0B1AC8 | `0x0BA104` | 4 | 0x7FCD68=0x1 |
+| 25 | 0x0B1ACC | `0x134678` | 18 | calls 0x0B4D2C |
+| 26 | 0x0B1AD0 | `0x0B4BA0` | 10 | 0x7FD898=0x0, 0x7FC964=0x0, 0x7FC978=0x0, 0x7FC968=0x0 |
+| 27 | 0x0B1AD4 | `0x0A2248` | 1 | - |
+| 28 | 0x0B1AD8 | `0x134614` | 1 | - |
+| 29 | 0x0B1ADC | `0x1341F8` | 12 | 0x7F9BE6=0x0 |
+| 30 | 0x0B1AE0 | `0x134124` | 46 | 0x7FEB62=0x0, 0x7FEB5C=0x0, 0x7FEB60=0x0, 0x7FEB5F=0x0 / calls 0x46C080, 0x46C080, 0x46C080, 0x46C080 |
+| 31 | 0x0B1AE4 | `0x132384` | 26 | 0x7FCE12=0x3f, 0x7FADD3=0x0, 0x7FADD5=0x1 / calls 0x06BE28, 0x06B5FC, 0x06B744, 0x4743E8 |
+| 32 | 0x0B1AE8 | `0x134250` | 35 | 0x7FEB68=0x1, 0x7FC290=0x7 / calls 0x0B0810, 0x0B0790, 0x0B0790, 0x0B2AE0 |
+| 33 | 0x0B1AEC | `0x1344A4` | 7 | 0x7FD414=0x2a, 0x7FD412=0x48, 0x7FD411=0x3c |
+| 34 | 0x0B1AF0 | `0x12F10C` | 7 | - |
+| 35 | 0x0B1AF4 | `0x12F49C` | 48 | calls 0x0B822C |
+| 36 | 0x0B1AF8 | `0x12F578` | 35 | 0x7FBA70=0x0, 0x7FBA71=0x0, 0x7FEBE8=0x1 |
+| 37 | 0x0B1AFC | `0x12F604` | 1 | - |
+| 38 | 0x0B1B00 | `0x12F138` | 33 | ptr 0x8037E4<-0x7F8892, 0x8037E8<-0x7F8893, 0x8037EC<-0x7F889A, 0x8038D4<-0x7F88AC |
+| 39 | 0x0B1B04 | `0x12EC00` | 75 | 0x7FBA50=0x0, 0x7F91D4=0x1, 0x7F91CC=0x0, 0x7F91D6=0x0 / calls 0x0B8234, 0x12F1BC, 0x0AA614 |
+| 40 | 0x0B1B08 | `0x132C30` | 13 | - |
+| 41 | 0x0B1B0C | `0x133D8C` | 25 | - |
+| 42 | 0x0B1B10 | `0x12F2C8` | 80 | calls 0x0B8238 |
+| 43 | 0x0B1B14 | `0x135F48` | 21 | - |
+| 44 | 0x0B1B18 | `0x12E570` | 24 | calls 0x12E5D0, 0x12E794, 0x12E710, 0x12E928 |
+| 45 | 0x0B1B1C | `0x12E8CC` | 7 | - |
+| 46 | 0x0B1B20 | `0x133C80` | 10 | - |
+| 47 | 0x0B1B24 | `0x1330A8` | 11 | - |
+| 48 | 0x0B1B28 | `0x133220` | 16 | calls 0x133C18 |
+| 49 | 0x0B1B2C | `0x132E98` | 3 | 0x7FEAD2=0x1 |
+| 50 | 0x0B1B30 | `0x132E8C` | 3 | 0x7FC170=0xa00 |
+| 51 | 0x0B1B34 | `0x133010` | 8 | 0x7FEE78=0x1 |
+| 52 | 0x0B1B38 | `0x132EA4` | 11 | 0x7FEAD3=0x1, 0x7F9439=0x0 |
+| 53 | 0x0B1B3C | `0x133260` | 18 | 0x7FEADF=0x1, 0x7F9446=0x0, 0x7F9444=0x0, 0x7F9442=0x0 |
+| 54 | 0x0B1B40 | `0x132D78` | 28 | 0x7FCE89=0x0, 0x7FCE8B=0x0, 0x7FCE8C=0x0, 0x7FCE8F=0x0 / calls 0x0675E0 |
+| 55 | 0x0B1B44 | `0x1332A8` | 17 | 0x7FC1D7=0x1 / calls 0x0B8228, 0x0675E0 |
+| 56 | 0x0B1B48 | `0x1334CC` | 3 | 0x7FCED3=0x2 |
+| 57 | 0x0B1B4C | `0x1334D8` | 32 | - |
+| 58 | 0x0B1B50 | `0x132FD4` | 8 | - |
+| 59 | 0x0B1B54 | `0x131274` | 24 | calls 0x40D7FC |
+| 60 | 0x0B1B58 | `0x1321FC` | 9 | 0x801FAC=0x0, 0x80317C=0x0 |
+| 61 | 0x0B1B5C | `0x13230C` | 4 | - |
+| 62 | 0x0B1B60 | `0x132220` | 6 | - |
+| 63 | 0x0B1B64 | `0x12E2E8` | 38 | 0x7F917C=0x67 |
+| 64 | 0x0B1B68 | `0x12F2A0` | 10 | 0x7FD1B0=0x0, 0x7FD1AE=0x0, 0x7F91D9=0x0, 0x7F91D8=0x0 |
+| 65 | 0x0B1B6C | `0x12F088` | 5 | - |
+| 66 | 0x0B1B70 | `0x12EAE8` | 16 | 0x801325=0x1 / calls 0x05599C, 0x055A98 |
+| 67 | 0x0B1B74 | `0x133D80` | 3 | 0x7FEB56=0x1 |
+| 68 | 0x0B1B78 | `0x130B18` | 8 | 0x8019A6=0x80 |
+| 69 | 0x0B1B7C | `0x130B38` | 7 | 0x801A59=0x1 |
+| 70 | 0x0B1B80 | `0x12D6E8` | 9 | 0x800EF4=0x0, 0x800EF5=0x0, 0x800EF6=0x1, 0x800EF7=0x0 |
+| 71 | 0x0B1B84 | `0x036AB8` | 8 | 0x7FB781=0x0, 0x7FB780=0x0, 0x7FB770=0x0 |
+| 72 | 0x0B1B88 | `0x12E39C` | 19 | ptr 0x80403C<-0x80366C |
+| 73 | 0x0B1B8C | `0x0358EC` | 10 | - |
+| 74 | 0x0B1B90 | `0x12E3E8` | 3 | 0x80123D=0x0 |
+| 75 | 0x0B1B94 | `0x12E2D8` | 4 | 0x801200=0x0, 0x7FB6F4=0x0 |
+| 76 | 0x0B1B98 | `0x12E4C0` | 9 | 0x7F917F=0x1 |
+| 77 | 0x0B1B9C | `0x12E3F4` | 60 | 0x7F917F=0x1 / calls 0x0B8238, 0x0B81DC |
+| 78 | 0x0B1BA0 | `0x1314B0` | 16 | 0x801D83=0x7e, 0x7FBF74=0x30, 0x7FEA51=0x0 / calls 0x0660FC, 0x05E03C |
+| 79 | 0x0B1BA4 | `0x132D5C` | 7 | - |
+| 80 | 0x0B1BA8 | `0x132CD0` | 15 | 0x8000EE=0x3, 0x8000EF=0x3, 0x8000F0=0x3 |
+| 81 | 0x0B1BAC | `0x1311E0` | 5 | 0x7FEA44=0x1, 0x7FD28D=0xff |
+| 82 | 0x0B1BB0 | `0x134F5C` | 18 | - |
+| 83 | 0x0B1BB4 | `0x12F638` | 11 | ptr 0x7FB078<-0x802C0C, 0x7FB07C<-0x802C1E, 0x7FB074<-0x802C1E, 0x7FB088<-0x802BF8 |
+| 84 | 0x0B1BB8 | `0x12F664` | 72 | 0x802CFA=0x444, 0x802CF8=0x444 / ptr 0x7FB098<-0x802C52, 0x7FB094<-0x802C5E, 0x7FB09C<-0x802C5E, 0x7FB0A8<-0x802C94 |
+| 85 | 0x0B1BBC | `0x131158` | 8 | 0x7FEA38=0x1 |
+| 86 | 0x0B1BC0 | `0x12FDA4` | 19 | ptr 0x7FBC09<-0x7FBC0A, 0x7FBC0B<-0x7FBC0C / calls 0x4104C4, 0x4104C4 |
+| 87 | 0x0B1BC4 | `0x12E170` | 3 | 0x7FE919=0x0 |
+| 88 | 0x0B1BC8 | `0x134E50` | 3 | 0x8025D8=0x3 |
+| 89 | 0x0B1BCC | `0x134E5C` | 12 | ptr 0x7FCBA8<-0x7FCBA9 / calls 0x4104C4 |
+| 90 | 0x0B1BD0 | `0x1346D4` | 10 | - |
+| 91 | 0x0B1BD4 | `0x12D03C` | 31 | 0x7FAD4C=0x2, 0x7FCDFC=0x1, 0x7FE87C=0x1, 0x7FED08=0x0 / calls 0x064384 |
+| 92 | 0x0B1BD8 | `0x134C68` | 13 | - |
+| 93 | 0x0B1BDC | `0x13106C` | 6 | 0x7FEA1E=0x0 |
+| 94 | 0x0B1BE0 | `0x131084` | 3 | 0x801CF2=0x80 |
+| 95 | 0x0B1BE4 | `0x1350B0` | 4 | - |
+| 96 | 0x0B1BE8 | `0x13248C` | 4 | 0x7FD334=0xff, 0x7FD335=0xff |
+| 97 | 0x0B1BEC | `0x131148` | 4 | - |
+| 98 | 0x0B1BF0 | `0x13111C` | 7 | 0x7FD271=0x80 |
+| 99 | 0x0B1BF4 | `0x131138` | 4 | - |
+| 100 | 0x0B1BF8 | `0x132BA8` | 20 | 0x803280=0x0, 0x80327C=0x0, 0x80327E=0x0 / ptr 0x7FC138<-0x7FC132, 0x7FC13C<-0x7FC124, 0x7FC140<-0x7FC132 |
+| 101 | 0x0B1BFC | `0x13503C` | 9 | - |
+
+Named in `re/symbols.csv` from this window: index 17 `psg_ident_init`
+(0x12DDFC), 18 `nvm_set_sync_mode`, 24 `nvm_set_normal_mode`, 26
+`imo_state_init` (0x0B4BA0), 30 `dtc_freeze_init` (0x134124), 31
+`dtc_mem_init` (0x132384), 32 `dtc_readiness_init` (0x134250), 38
+`kwp_tp_buf_init` (0x12F138), 39 `kwp_chan_init` (0x12EC00), 71
+`kwp_sec_init` (0x036AB8), 72 `ddli_init` (already named by E4), 75
+`flash_crc_init` (0x12E2D8), 76/77 `prog_state_init` (0x12E4C0 / 0x12E3F4).
+The remaining entries are anonymous per-module `init` functions of the
+ASCET/COSYM generated code; naming all 1,028 would add noise, not knowledge.
+The names above are **HYPOTHESIS** as names — they come from the RAM cells
+each one writes, not from a string — while the address, the index and the
+effect are VERIFIED-STATIC.
+
+### 6.5 What `logging/ecu_sim.py` still skips — for the simulator's owner
+
+`Med9Handlers.power_on` today writes `kwp_session_current`,
+`kwp_security_state`, `kwp_sec_seed`, `kwp_sec_level_flags` = 3,
+`kwp_sec_lfsr_rounds` = 5, the retry flag, and calls `ddli_init`; the NVM
+device is bound by `emu.qspi_eeprom`. Measured against the real walk, that is
+right in spirit and wrong in three details, all **VERIFIED-STATIC**:
+
+1. **`kwp_sec_init` (0x036AB8) is init-table index 71, and it does the
+   opposite of the hand-seeding.** It writes `kwp_sec_level_flags` (0x7FB781)
+   **= 0**, 0x7FB780 = 0 and `kwp_sec_lfsr_rounds` (0x7FB770) **= 0**, then
+   loads `kwp_sec_delay_timer` (0x7FB748) from the **EEPROM mirror halfword at
+   0x7FA02C** (`lis r11,0x80; lhz r11,-0x5FD4(r11)`), i.e. the SecurityAccess
+   lockout survives a power cycle through the EEPROM. The round count **5**
+   is written later, by the seed path itself (`li r10,5; stb r10,-0x4880(r13)`
+   at **0x03635C**, inside `kwp_sid_27_h1`'s level-1 arm, together with
+   `0x7FB781 |= 1`). So the simulator can either call 0x036AB8 and let the
+   real `27 01` arm the LFSR, or keep the shortcut and record that it emulates
+   a post-`27 01` state, not a post-power-on one. `kwp.md` §12.6 assumed "the
+   application sets them"; it is the *seed handler* that does.
+2. **`nvm_mode` (0x7FCD68) is 1 after start-up, not 0.** Index 18
+   (`nvm_set_sync_mode`, writes 2) and index 24 (`nvm_set_normal_mode`,
+   writes 1) are *both* called, in that order, so the manager comes up in
+   **normal (asynchronous) mode**. `eeprom.md` §9 item 3 left the trigger of
+   the synchronous mode as HYPOTHESIS; this shows both setters do run once at
+   start-up and that nothing else in the image calls either, so the
+   synchronous shutdown mode is never entered in a stock image.
+3. **`flash_crc_init` (0x12E2D8, index 75) clears the CRC state byte
+   0x7FB6F4 and 0x801200.** A simulator that wants `flash_crc_task`
+   (0x011CB10) to run at all has to start from state 0; on a cold emulator the
+   cell is already 0, so this one is free — but it is the reason the CRC is a
+   *task*, not a boot-time check (`flash_programming.md` §5.3a).
+
+Three more that matter for anything that drives the KWP stack from a cold
+emulator: index 38 (0x12F138) installs four RAM buffer pointers at
+0x8037E4/E8/EC and 0x8038D4; indices 83 and 84 (0x12F638, 0x12F664) install
+eight more at 0x7FB074-0x7FB0A8 and seed 0x802CF8/0x802CFA = 0x444; indices 86
+and 89 (0x12FDA4, 0x134E5C) install self-referential list heads
+(0x7FBC09 -> 0x7FBC0A, 0x7FCBA8 -> 0x7FCBA9) through 0x4104C4. **None of the
+1,028 entries writes 0x7FAB70/0x7FAB74**, so `NvmDeviceBinding` stays
+necessary exactly as E4 built it.
+
+**The cheapest correct fix** is not to call the whole table (1,028 calls, many
+of which touch peripherals the emulator does not model) but to call the
+handful of entries a session needs — 71, 72, 38, 83, 84 — and to keep the rest
+of the hand-seeding, documented as such. That decision is the simulator
+owner's; this section is the input, and `logging/` was not touched by this
+brief.
+
+### 6.6 Reproduction
+
+```bash
+# the table, its extent and the NULL terminator
+./.venv/bin/python3 -c "import struct;d=open('data/passat_azx_ori.bin','rb').read();print([hex(struct.unpack('>I',d[a:a+4])[0]) for a in (0x0B1A64,0x0B1A68,0x0B2A74,0x0B2A78)])"
+# its only reference
+./.venv/bin/python3 tools/find_branch_refs.py data/passat_azx_ori.bin 0x0B1A68
+./.venv/bin/python3 tools/find_abs_refs.py data/passat_azx_ori.bin --range 0x0B1A00 0x0B2B00
+# the walker, the descriptor and os_start's hand-over
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x277990 --addr 0x477990 --len 0xE0
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x4D090 --addr 0x4D090 --len 0x20
+# the two init functions the simulator's power_on contradicts
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x36AB8 --addr 0x36AB8 --len 0x20
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x36330 --addr 0x36330 --len 0x34
+```
+
+The per-entry classification of §6.3 and §6.4 was produced by a scratch script
+that walks each target linearly to its first `blr`/`b` with capstone, tracking
+`lis`/`addi`/`ori` register values and recording every `stw`/`sth`/`stb` whose
+destination lands in 0x7F8000-0x807FFF. The method is stated here in full
+rather than kept as a tool, because it is a one-off sweep and `tools/` already
+carries the reusable half (`callgraph.py --entries` supplies the function-entry
+set the "is this a function pointer?" test uses).
