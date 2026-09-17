@@ -298,7 +298,7 @@ Three things about this layout:
 * **The header is mandatory, not decoration.** Brief C2 proved the cold start
   does not fill 0x7FF770-0x7FFFEB, so the contents are undefined at power-on.
   `ff_state_init()` runs whenever magic, length or checksum do not describe our
-  block, zeroes all 64 bytes and re-seeds them.
+  block, zeroes all 68 bytes and re-seeds them.
 * **The checksum covers the core (+08..+2B) only.** It is recomputed at the end
   of every periodic activation, so it may only cover fields that activation
   owns. `ff_rk_calls` is written by the engine-synchronous segment task, and

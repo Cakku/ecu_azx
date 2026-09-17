@@ -826,8 +826,8 @@ read by `ff_ign.c` — it stays **all zero**, which is what keeps the shipped
 file inert even if `ff_zw_enable` is set to 1. `ff_fst_map` and `ff_prail_add`
 are still reservations, for briefs E2 and E5.
 
-**The version is now checked strictly.** `ff_cal_ok()` accepts **version 2
-only**, so a v1 block flashed under a v2 blob reads as corrupt and forces
+**The version is now checked strictly.** `ff_cal_ok()` accepted **version 2
+only** at the time of writing (E2 made it 3), so a v1 block flashed under a v2 blob reads as corrupt and forces
 mode 0: `F = 1024`, no CAN, `dzw_e = 0`. That is the safe direction and it is
 the rule every later version bump follows — E2 will make it 3, E5 4.
 
