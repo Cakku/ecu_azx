@@ -349,7 +349,11 @@ python3 logging/med9log.py groups --sim 231     # prints "reading group 104"
 Id 2 emits `(0x21, A=0x85, B = the raw byte of 0x7FEF74)`, so `100 x B / A`
 reads 100 % when the byte is 0x85 = 133 — consistent with "0x21 is the
 percentage formula", but there is no second chain for 0x7FEF74's own scaling,
-so 0x21 stays **COMMUNITY**. The other 41 formula ids this dataset emits stay
+so 0x21 stays **COMMUNITY**.
+**SETTLED 2026-09-17 (E3, #41) — see §7.5: the handler passes the raw byte
+through unchanged, so `A = 133` is a tester-side normalisation and says
+nothing about the ECU's own LSB, which is `100/128 %`. The two readings never
+were in conflict.** The other 41 formula ids this dataset emits stay
 COMMUNITY or unknown; `logging/med9kwp/vag_formulas.py` carries the table with
 a per-entry tag and prints the raw `(formula, A, B)` triple for everything it
 does not claim to know. The ids actually used by this dataset, by frequency:
@@ -364,6 +368,71 @@ does not claim to know. The ids actually used by this dataset, by frequency:
 Reproduce with
 `python3 -c "import csv,re,collections; ..."` over `re/measuring_vars.csv`, or
 `python3 logging/med9log.py groups --formula-table`.
+
+### 7.5 The u8 `rl` scaling, settled (E3, 2026-09-17, #41)
+
+D3 read the u8 `rl` (0x7FEF74) as **100/128 %/LSB** (`calibration_names.md`
+§2.1) from the breakpoint identity `SRL11OPUW = SRL12ZUUW / 32`; §7.4 above
+read display formula 0x21 with `A = 133` as "133 counts = 100 %", i.e.
+100/133 %/LSB. Brief E3 was asked to decide it with the ECU's own measuring
+handler. Two chains, both run on this dump:
+
+**1. The conversion instruction (VERIFIED-STATIC, decisive).** The u8 is
+written at three sites, each one right after the `sth` of `rl_w` (0x7FEFB2):
+
+```
+00419268  rlwinm r12,r5,0x0,0x10,0x1f   ; r12 = rl_w & 0xFFFF
+0041926c  cmplwi r12,0x1fe0             ; 0x1FE0 = 8160 = 255 * 32
+00419270  sth    r5,-0x103e(r13)        ; rl_w   = r5
+00419274  ble    0x00419280
+00419278  li     r6,0xff                ; clamp
+00419280  rlwinm r6,r5,0x1b,0x15,0x1f   ; r6 = (rl_w >> 5) & 0x7FF
+00419284  stb    r6,-0x107c(r13)        ; u8 rl = rl_w >> 5
+```
+
+and the two initialisation sites 0x11BC38 / 0x12D8B4 write the pair as
+`rl_w = 0x10AB = 4267` and `u8 rl = 0x85 = 133` in the same breath
+(4267 >> 5 = 133). So **the u8 `rl` is `rl_w >> 5`** and 1 LSB is
+`32 x 100/4096 = 100/128 % = 0.78125 %`. D3 is right, and this is now an
+instruction, not an inference from a breakpoint grid.
+
+**2. The measuring handler in the emulator (VERIFIED-DYNAMIC).** Running the
+real handler for id 2 over a sweep of 0x7FEF74 (`logging/ecu_sim.py`'s
+`Med9Handlers`, exactly as §7.1 did for formula 0x05) shows the handler
+emits **B = the raw byte, unchanged**, with a constant `A = 0x85`:
+
+| 0x7FEF74 | emitted `(fmt, A, B)` | tester reads `100 B / A` | internal `100/128 x raw` |
+|---|---|---|---|
+| 13 | (0x21, 0x85, 13) | 9.77 % | 10.16 % |
+| 67 | (0x21, 0x85, 67) | 50.38 % | 52.34 % |
+| 128 | (0x21, 0x85, 128) | 96.24 % | 100.00 % |
+| 133 | (0x21, 0x85, 133) | 100.00 % | 103.91 % |
+| 255 | (0x21, 0x85, 255) | 191.73 % | 199.22 % |
+
+**So there is no contradiction.** The handler does no arithmetic at all; `A`
+is a normalisation the ECU hands the tester, and VCDS therefore shows 100 %
+where the ECU's own maps see 103.9 %. Formula 0x21 stays COMMUNITY as a
+*formula*, but "133 counts = 100 %" was never a statement about the firmware.
+**Use 100/128 %/LSB for every map axis; expect a VCDS log of group 002 field
+2 to read about 3.8 % low against it.**
+
+Reproduce (the script is four lines; `Med9Handlers` is the same class §7.1
+used):
+
+```python
+import sys; sys.path.insert(0, "logging")
+from ecu_sim import Med9Handlers
+h = Med9Handlers("data/passat_azx_ori.bin", seed=1, animate=False)
+h.handle(b"\x10\x89")
+for raw in (13, 67, 128, 133, 255):
+    h.emu.write(0x7FEF74, bytes([raw]))
+    body = h.handle(b"\x21\x02")[0][2:]
+    print(raw, tuple(body[3:6]))        # group 002 field 2 = id 2
+```
+
+and, for the static half,
+`./.venv/bin/python tools/sda_xref.py data/passat_azx_ori.bin --var 0x7FEF74`
+plus `ghidra_scripts/decompile.py --asm 0x00419258 --count 14`.
 
 ---
 

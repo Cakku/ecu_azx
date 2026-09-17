@@ -400,6 +400,19 @@ adaptation `frm_w` per bank — **VERIFIED-STATIC** that they multiply `rk` in
 Q15 at those instructions, **COMMUNITY** for the names. That closes the
 `fra`/`frm` item of `docs/05_flexfuel_design.md` §7 on the fuel side.
 
+> **Added 2026-09-17 (E3, #41): where the *lambda setpoint* enters this chain
+> — and that it is not a map.** The "base" row above, `(0x801CF2 × 0x80302C)
+> >> 7`, carries it: 0x801CF2 is `fgru_trim`, the Q7 base-mixture factor, and
+> its only producer is the four-line `FUN_000E8D9C`:
+> `fgru_trim = mul_shr15_sat(cand_KFGRUTRIM 0x5D350C = 128, 0x7FD066 × 64 +
+> 0x6000)`, clipped at 255 — no table, no breakpoint search. The request
+> therefore arrives as the single byte **0x7FD066**, whose only reader is
+> 0x0E8DA8 and for which neither `tools/sda_xref.py --var` nor
+> `tools/find_abs_refs.py --target` finds a writer, i.e. it is written
+> through a pointer. Tracing that store is the cheapest remaining route to
+> `%LAMSOLL` / `lamsbg_w`; `re/findings/calibration_names.md` §9.5 lists the
+> other two.
+
 ## 10. Verification: the Python model
 
 `emu/models/injection.py` is a bit-exact model of `rk2ti` (0x0AC370),

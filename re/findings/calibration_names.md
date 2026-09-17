@@ -95,6 +95,19 @@ identity above is evidence about the ECU's own scaling; the display formula is
 still COMMUNITY and may well carry a different normalisation for the tester.
 Do not use the one to correct the other without a log.
 
+> **SETTLED 2026-09-17 (E3, #41), and D3 was right.** The u8 is not merely
+> *consistent with* `rl_w >> 5`, it **is** `rl_w >> 5`: at 0x419280
+> `rlwinm r6,r5,0x1b,0x15,0x1f` shifts `rl_w` right by five and 0x419284
+> stores it to 0x7FEF74, with the clamp `cmplwi r12,0x1fe0` (= 255 × 32) two
+> instructions earlier; the two initialisation sites 0x11BC38 / 0x12D8B4 write
+> the pair `rl_w = 4267` / `u8 rl = 133` together. So 1 LSB = 32 × 100/4096 =
+> **100/128 %**, VERIFIED-STATIC from the instruction, not from a grid.
+> The display side is settled too, in the emulator: the real handler for id 2
+> emits **B = the raw byte with no arithmetic** and a constant `A = 0x85`, so
+> `A` is a tester-side normalisation and never was a claim about the ECU's
+> LSB. There is no contradiction to resolve — both notes describe different
+> things, and `measuring_vars.md` §7.5 has the sweep and the reproduction.
+
 ## 3. The shared nmot × rl breakpoint blocks (VERIFIED-STATIC)
 
 `FUN_000BDB58` (0x0BDB58-0x0BDC4B) is the central axis-key process. It
@@ -246,14 +259,14 @@ address of its consumer.
 
 | Objects | Consumer | Why it looks important |
 |---|---|---|
-| 0x5C91F2, 0x5C9372, 0x5C94F2 — three 16 × 12 u16 maps over (load 0…65535, `nmot` 400…7000 rpm) | `FUN_00434C14` | it blends two of them with `0x7FD448` and rate-limits the result into 0x803522 — the shape of the FR's torque ↔ load pair (`MDBAS` `KFMIRL` / `KFMIOP`) |
-| 0x5CA252 — 16 × 11 u16 on the `KFZWOP` grid, 4313…58841 | `FUN_000C8204`, `FUN_000E0A0C`, `FUN_00436838`, `FUN_0044C044` | four consumers in the torque structure; a second candidate for the torque ↔ load pair |
-| 0x5C9938 — 16 × 12 u16, f(`nmot_w`, 0x8034FA) | `FUN_000E069C` | the result 0x8015D0 is computed twice, once with a 200/`0x8015AF` scaled input — an inverse-map shape |
-| 0x5C8FAE — 8 × 8 u16 over `rl_w` × `nmot_w`, 29…983 | `FUN_004336E0` | the function that produces 0x803508, the charge request the rail setpoint maps are indexed by |
-| nine 14 × 14 u8 maps 0x5C430D…0x5C4A1D, values around 128 = 1.0 | `FUN_00424CD0` | one is selected by a three-bit state built from three temperature thresholds, then multiplied by a base map over (`nmot`, `rl`) into 0x802856 |
-| 0x5D863C — 16 × 12 u16, 0…65277 | `FUN_0045FAA8` | — |
-| the lambda path (`LAMSOLL` `lamsbg_w`, `LAMBTS` `KFLBTS`, WOT enrichment) | not located | **not found in this brief.** The fuel path of `gk_rk` (`injection.md` §9, `start.md` §4.2) has no lambda-target map in it; the request comes from the torque/efficiency cascade, so `LAMSOLL` has to be entered from the measuring variables or from the exhaust-temperature model, not from `rk` |
-| the charge limiters 0x80234C / 0x803358 / 0x803360 feeding the min-chain at 0x0C7CF8 | `FUN_000FBE74` and friends | `rail.md` §10 and §12.3 name the chain but not the maps behind each limit |
+| 0x5C91F2, 0x5C9372, 0x5C94F2 — three 16 × 12 u16 maps over (load 0…65535, `nmot` 400…7000 rpm) | `FUN_00434C14` | **SETTLED (2026-09-17, E3, §9.1):** `%MDFUE`, the charge setpoint from the torque setpoint — `cand_KFMIRLUM` / `cand_KFMIRL` / `cand_KFMIRLS`, 100/32768 %/LSB over `nmot` × `misol_w` |
+| 0x5CA252 — 16 × 11 u16 on the `KFZWOP` grid, 4313…58841 | `FUN_000C8204`, `FUN_000E0A0C`, `FUN_00436838`, `FUN_0044C044` | **SETTLED (2026-09-17, E3, §9.1):** `cand_KFMIOP`, the inverse of `KFMIRL` — torque from `rl_w` × `nmot_w`, 100/65536 %/LSB |
+| 0x5C9938 — 16 × 12 u16, f(`nmot_w`, 0x8034FA) | `FUN_000E069C` | **PARTLY SETTLED (2026-09-17, E3, §9.6):** `cand_KFMIRLINV`; both axes proven, the value still has no unit |
+| 0x5C8FAE — 8 × 8 u16 over `rl_w` × `nmot_w`, 29…983 | `FUN_004336E0` | **SETTLED and CORRECTED (2026-09-17, E3, §9.6):** it is `cand_KFRLSOLDY`, the step size of the charge-setpoint approach, over (Δcharge, `nmot_w`); it does **not** produce 0x803508 |
+| nine 14 × 14 u8 maps 0x5C430D…0x5C4A1D, values around 128 = 1.0 | `FUN_00424CD0` | **SETTLED and CORRECTED (2026-09-17, E3, §9.4):** `%GGHFM`'s air-mass correction — `KFKHFM` plus the eight `KFPU*` pulsation maps; the three states are adjusters, not temperatures |
+| 0x5D863C — 16 × 12 u16, 0…65277 | `FUN_0045FAA8` | **SETTLED (2026-09-17, E3, §9.1):** `cand_KFMIOPRL`, torque from the alternative charge request 0x8034B8 |
+| the lambda path (`LAMSOLL` `lamsbg_w`, `LAMBTS` `KFLBTS`, WOT enrichment) | not located | **STILL OPEN after E3 (2026-09-17, §9.5).** E3 narrowed it: the fuel path's lambda entry is the Q7 scalar `fgru_trim` 0x801CF2, built without any map from `cand_KFGRUTRIM` and the unwritten-by-any-visible-store variable 0x7FD066, and the knock→enrichment route of ignition.md §13.3 turns out to be a knock-control *window*, not the exhaust-temperature model |
+| the charge limiters 0x80234C / 0x802358 / 0x802360 / 0x80235E feeding the min-chain at 0x0C7CF8 | `FUN_000FBE74`, `FUN_000FC250` | **SETTLED (2026-09-17, E3, §9.3):** all four sources named and read out of the image; only `cand_KLRLMXNRED` (0x5D7EAE) is calibrated to anything but "off". (The 0x803358 / 0x803360 of the original lead were typos for 0x802358 / 0x802360.) |
 
 ## 8. Reproducing
 
@@ -285,3 +298,203 @@ The FR page index of `re/findings/fr_index.md` was used with
 `pdftotext -layout -f N -l N documents/MED9.1_TFSI_Funktionsrahmen.pdf -`;
 FR page = PDF page. Pages read for this brief: **484-487** (`NMAXMD`),
 **3085-3094** (`ZWGRU`), **3095-3109** (`ZWMIN`), **736** (`KFZWOP`).
+
+---
+
+## 9. Pass 2 (brief E3, 2026-09-17, issue #41)
+
+Method unchanged from §7's recipe and D3's: take a consumer that reads several
+objects, decompile it once, read the axes out of the image and fix the fixed
+point from the ECU's own arithmetic — with one addition that turned out to be
+the most productive tool of this pass:
+
+> **The measuring handlers are a scaling oracle.** Every charge- and
+> torque-domain variable of the torque structure is a VCDS measuring variable,
+> and the handler's own code says what full scale is. Measuring id 375
+> (0x803510, handler 0x03C348) emits formula 0x21 with `A = 0x80` and
+> `B = v >> 8`, so **32768 counts = 100 %** in that domain; id 8 (0x8035E6,
+> handler 0x0391A8) emits `B = (v * 255) >> 16` with `A = 0xFF`, so
+> **65536 counts = 100 %** in that one. Both were then confirmed by the
+> breakpoint grids falling on round percentages, never the other way round.
+
+### 9.0 Counts
+
+| | before (D3) | after (E3) |
+|---|---|---|
+| objects with a name | 157 | **259** |
+| … tagged `static` (the *label*) | 24 | **57** |
+| … tagged `hypothesis` | 133 | 202 |
+| objects with a unit | 146 | **244** |
+| scaling tagged `static` | 118 | **197** |
+| tables/curves/axes still `cand_*` | 991 of 1,066 | 958 of 1,066 |
+
+The 102 new rows are 69 scalars, 16 `map_2d`, 4 `map_2d_shared`, 3
+`map_2d_data`, 4 `curve_1d`, 4 `curve_1d_shared` and 2 axes; 98 of them carry
+a unit and 79 a `static` scaling.
+
+### 9.1 The torque ↔ charge pair (§7 lead 1, closed)
+
+`FUN_00434C14` is **`%MDFUE`**, "Sollwertvorgabe für Luftmasse aus Sollmoment"
+(FR p724). It is the charge setpoint from the torque setpoint:
+
+```
+key_y = axis_search_u16(0x5C968C, misol_w 0x8035E6)     ; 0x434C2C -> 0x7FD8C8
+key_x = axis_search_u16(0x5C9672, nmot_w)               ; 0x434C3C -> 0x7FD8C4
+if (0x80223B == 7)  r = interp_2d_u16(cand_KFMIRLS 0x5C94F2, 12, key_y, key_x)
+else                r = (1-t) * cand_KFMIRL   0x5C9372
+                       + t    * cand_KFMIRLUM 0x5C91F2,  t = 0x7FD448 / 128
+0x803522 = clamp(r, -inf, prev + cand_DRLSOLMX 0x5C91F0 = 1.00 %/step)
+```
+
+and `mdkol_charge_request` 0x4336E0 continues
+`0x803510 = max(0x8034B8, 0x803522)` → `rlsol_w 0x803508 = min(2 x that,
+cand_RLSOLMX 0x5C8C0C << 8 = 99.2 %)`, which is **the x input of every
+`KFPRSOL*` rail-pressure map** (rail.md §3.1).
+
+Units, all VERIFIED-STATIC: the KFMIRL maps are **100/32768 %/LSB** (0 …
+111.1 %) over `nmot` 400…7000 rpm (axis 0x5C9674, 0.25 rpm/LSB) and
+`misol_w` 0…100 % (axis 0x5C968E, 100/65536 %/LSB, breakpoints 0, 0.5, 4, 8,
+9.8, 12, 16, 20, 25, 32, 40, 50, 60, 72.5, 92, 100 %).
+
+The inverse direction is **`cand_KFMIOP` 0x5CA252** (FR p724 §APP: "Das
+Kennfeld KFMIRL ist invers zum Kennfeld KFMIOP in der Sektion %MDBAS"): 11
+`rl_w` columns (10.4…104.2 %) × 16 `nmot_w` rows (560…6520 rpm) → torque in
+100/65536 %/LSB, 6.6…89.8 %. Numerically the two agree to about 1 % of charge
+(KFMIOP(2000 rpm, 104.2 %) = 86.5 %; KFMIRL(2000 rpm, 86.5 %) = 102.8 %); the
+residue is the efficiency chain the FR puts between them. A second, coarser
+charge→torque map, **`cand_KFMIOPRL` 0x5D863C** with its 1-D twin
+`cand_KLMIOPRL` 0x5D87DE, lives in `mi_from_rl_alt` 0x45FAA8 and converts the
+*alternative* charge request 0x8034B8 (100/32768 %/LSB, axis 0…120 %).
+
+The RAM names are HYPOTHESIS as labels and VERIFIED-STATIC as facts:
+`misol_w` 0x8035E6 (one writer, 0x4359D0), `rlsol_mdfue` 0x803522,
+`rlsol_req` 0x803510, `rlsol_w` 0x803508, `cand_rlsol_alt` 0x8034B8,
+`cand_rlmin_w` 0x803598.
+
+### 9.2 What 0x7FD448 actually is
+
+The blend weight is **a counter, not a position**: `mdfue_blend_counter`
+0x465BD4 reloads it with `cand_ZRLMIRLUM` 0x5D8FB0 = 100 while 0x7FE95B is
+set and decrements it by one per activation afterwards, so `t` runs from
+100/128 = 0.78 down to 0 and the steady-state map is `cand_KFMIRL`. Which
+event 0x7FE95B marks is **open**.
+
+### 9.3 The charge-limit chain — almost all of it is switched off
+
+rail.md §10 and §12.3 named the min-chain `rl_limit_min_awea` 0x0C7CF8 but not
+the maps behind its five inputs. Two functions hold them:
+`rl_limit_charge_protect` 0x0FBE74 (0x80234C, 0x80234E) and the previously
+unidentified **`rl_limit_rail_and_speed` 0x0FC250** (0x802358, 0x802360,
+0x80235E). Reading their calibration out of the image:
+
+| Input of the min-chain | Source | State in this dataset |
+|---|---|---|
+| 0x803070 | the injection-window limit (rail.md §10) | inactive unless the rail-pressure fault bit 0x80201E.5 is set |
+| 0x80234C | `cand_KLRLMXMI` 0x5D7E3A over `misol_w` | **all 0xFFFF**, and `cand_CWRLMXBTS` 0x5D7E5E = 0 disables every alternative |
+| 0x802358 | `cand_KLRLMXNRED` 0x5D7EAE over `nmot8` | **the only calibrated limiter**: 100 % to 3520 rpm, then 71, 60, 55, 52, 50 % at 4000…6520 rpm — armed only by the debounced flag 0x7FEA84 |
+| 0x802360 | `cand_KLFRLMXT` 0x5D7EBF × `cand_KFFRLMXN` 0x5D7E76 | 255 and 128 everywhere, and the code forces 0xFFFF as soon as the factor reaches 1.0 |
+| 0x80235E | rail pressure: `(prist_w − cand_PRRLMX) × cand_KVRLMXPR1/2 (84/512)` | **enabled only below `cand_TMRLMXPR` = −20.25 °C** |
+
+**For flex fuel this is good news and one warning.** Good news: nothing in the
+stock charge-limit chain will cut charge because the fuel system is working
+harder. Warning: `cand_KLRLMXNRED` is real and severe (down to 50 % above
+6000 rpm), so if a flex-fuel calibration ever provokes the fault that arms
+0x7FEA84 the engine loses half its charge at the top end. Log 0x802358
+(and the arbitrated 0x80235A, **VCDS measuring id 2051**) on any E85 run.
+
+### 9.4 The nine 14 × 14 maps are the air-mass correction, not temperatures
+
+§7's last-but-one lead guessed "a three-temperature-threshold state". It is
+`%GGHFM`. `FUN_00424CD0` (now `gghfm_correction`) writes 0x802856, which is
+read **exactly once**, at 0x418CD0, as
+`cand_mw_ml = (raw HFM 0x7FEF9E × 0x802856) >> 15`. The three states are the
+three *adjusters* (`Verstellelemente`) that the FR's `CWHFMPUKL1..3` select,
+with the switch points `LSPPUKL1..3` / `RSPPUKL1..3`, and the ECU builds the
+map index as `1 + 2·e1 + 2·e2 + 4·e3` — the same numbering as the FR's eight
+labels, so the assignment is forced:
+
+| index | map | FR label | index | map | FR label |
+|---|---|---|---|---|---|
+| 1 | 0x5C43EF | `KFPU` | 5 | 0x5C4A1D | `KFPUKL3` |
+| 2 | 0x5C44D1 | `KFPUKL1` | 6 | 0x5C4777 | `KFPUKL13` |
+| 3 | 0x5C4859 | `KFPUKL2` | 7 | 0x5C493B | `KFPUKL23` |
+| 4 | 0x5C45B3 | `KFPUKL12` | 8 | 0x5C4695 | `KFPUKL123` |
+
+and the base map 0x5C430D over (`nmot8`, u8 `rl`) is **`KFKHFM`**, all 128 =
+1.0 in this dataset. The pulsation maps run 124…134, i.e. −3 %…+5 %.
+`gghfm_air_mass` 0x418B68 adds `cand_NPULSHFMMN`, `cand_MLDKFHFM` and
+`cand_MLMIN`.
+
+### 9.5 The lambda path — NOT found, and what was excluded
+
+§7 listed it as "not located"; it still is. What this pass rules out:
+
+* **It is not in the fuel path.** `gk_rk` 0x41AA48 multiplies by `fgru_trim`
+  0x801CF2 (Q7), and `fgru_trim`'s only producer is the four-line
+  `FUN_000E8D9C`: `fgru = mul_shr15_sat(cand_KFGRUTRIM 0x5D350C = 128,
+  0x7FD066 × 64 + 0x6000)`, clipped at 255. There is no map. The variable
+  0x7FD066 has **no writer that `tools/sda_xref.py --var` or
+  `tools/find_abs_refs.py --target` can see**, so whatever sets the lambda
+  request writes it through a pointer; that is the thread to pull next.
+* **It is not reachable from the knock retard either.** ignition.md §13.3 read
+  the 0x4594E8 reference to `wkrm` as "the exhaust-gas temperature model:
+  `if (0x5D396C & 8) tabgm += 0x7FCE76`". It is not: 0x4594E8 sits in
+  `FUN_0045943C`, a *comparison* — `cand_WKRMKR` 0x5D6123 < `wkrm` — inside
+  the knock-control load window that produces 0x7FEA80, whose only reader is
+  0x103044. **ignition.md §13.3 needs that dated correction; brief E1 owns
+  that file while E3 runs, so it is not made here.**
+
+So `LAMSOLL` / `lamsbg_w`, `KFLBTS` and the WOT enrichment remain open. The
+cheapest next entries are (a) the writer of 0x7FD066, (b) `%LAMBTS` through
+the exhaust-temperature model proper (`ATM`, FR p2259), and (c) the lambda
+controller outputs `fr_w` 0x802DF8 / 0x802E00 traced backwards.
+
+### 9.6 The other §7 leads
+
+* **0x5C9938 (`cand_KFMIRLINV`)** — `FUN_000E069C` evaluates the same map
+  twice, once at the real charge 0x8034FA and once at
+  `0x8034FA × 200 / u8@0x8015AF`, the shape of a normalisation to standard
+  conditions. Both **axes are proven** (`nmot_w` 560…6520 rpm; charge 0, 10,
+  15, 20, 25, 30, 40, 50, 60, 70, 80, 100 % at 100/65536 %/LSB) and the
+  values (0…5103, almost independent of speed) have **no unit yet**. Its
+  output 0x8015D0 keys `cand_KFPSSRM` 0x5D1CBA in `FUN_000E06F8`, the
+  intake-manifold/residual-gas chain; that block is the natural follow-up.
+* **0x5D863C (`cand_KFMIOPRL`)** — closed, see §9.1.
+* **0x5C8FAE** — closed, but the §7 lead was wrong about it: it does **not**
+  produce 0x803508. It is the *step size* of the charge-setpoint approach,
+  `0x8034F4 += (cand_KFRLSOLDY(Δcharge, nmot) × 0x7FD43E) >> 6`, clipped to
+  0x803504; 0x803508 is written at 0x433884 from 0x803510. Its twin
+  `cand_KFRLSOLDYS` 0x5C904A is 4 × 8, not 8 × 8, and the weight 0x7FD43E is
+  a constant 0x40 here because the mode array 0x5C8DFD is all zero.
+* **0x5CA252** — closed, it is `cand_KFMIOP` (§9.1).
+
+### 9.7 Verification and reproduction
+
+```bash
+mkdir -p /tmp/ghidra_E3 && cp -R ghidra_projects/med9.gpr ghidra_projects/med9.rep /tmp/ghidra_E3/
+export GHIDRA_INSTALL_DIR=/usr/local/Cellar/ghidra/12.1.3/libexec
+./.venv/bin/python -m pyghidra.ghidra_launch --install-dir "$GHIDRA_INSTALL_DIR" \
+    ghidra.app.util.headless.AnalyzeHeadless /tmp/ghidra_E3 med9 \
+    -process passat_azx_ori.bin -noanalysis \
+    -scriptPath ghidra_scripts -postScript import_symbols.py "$PWD"
+
+# the functions this brief decompiled
+./.venv/bin/python ghidra_scripts/decompile.py --project-dir /tmp/ghidra_E3 \
+    --project-name med9 0x00434C14 0x004336E0 0x00465BD4 0x000E069C 0x000E06F8 \
+    0x00424CD0 0x00418B68 0x0045FAA8 0x000FBE74 0x000FC250 0x000C7CF8 \
+    0x0045943C 0x000E8DD4 0x0041AA48
+
+# the measuring handlers that fixed the charge and torque scaling
+./.venv/bin/python ghidra_scripts/decompile.py --project-dir /tmp/ghidra_E3 \
+    --project-name med9 --asm 0x0003C348 --count 6 --asm 0x000391A8 --count 7
+
+# the definition (the integrator builds the committed one)
+./.venv/bin/python tools/draft_to_xdf.py re/calibration_draft.csv -o work/x.xdf \
+    --min-confidence hypothesis --extra-rows patches/ff_fuel/ffcal001_rows.csv
+./.venv/bin/python tools/draft_to_xdf.py --validate work/x.xdf
+./.venv/bin/python -m unittest tests.test_draft_to_xdf
+```
+
+FR pages read for this brief: **724-728** (`MDFUE`), **729-745** (`MDBAS` /
+`MDIST`), **813-823** (`GGHFM`), **1037-1047** (`BGRLMIN`, `BGRLMXS`) and the
+table of contents **2-29**.
