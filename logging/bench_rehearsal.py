@@ -37,6 +37,12 @@ for _p in (str(REPO), str(REPO / "logging"), str(REPO / "tools")):
 
 import logcmp  # noqa: E402
 import med9log  # noqa: E402
+from emu.models import flexfuel as _ff  # noqa: E402
+
+#: read from the reference model rather than restated, so the check survives a
+#: later wave appending to `struct ff_state` (E2 took it from 64 to 68)
+FF_MAGIC = _ff.FlexFuelModel.MAGIC
+FF_LENGTH = _ff.FlexFuelModel.LENGTH
 
 SAMPLES = REPO / "logging" / "samples"
 SESSION = REPO / "logging" / "sessions" / "ff_fuel.json"
@@ -190,7 +196,8 @@ def checks_for(name: str, s: dict) -> list[tuple[str, bool, str]]:
         return out
 
     magic = last(s, "ff_magic")
-    chk("1 ff_magic/ff_length", magic == 0x46463031 and last(s, "ff_length") == 64,
+    chk("1 ff_magic/ff_length",
+        magic == FF_MAGIC and last(s, "ff_length") == FF_LENGTH,
         f"magic={magic} len={last(s, 'ff_length')}")
     chk("2 ff_src_seen names one task set",
         last(s, "ff_src_seen") in (1.0, 2.0)

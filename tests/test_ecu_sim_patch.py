@@ -27,6 +27,9 @@ FF_FUEL = REPO / "patches" / "ff_fuel"
 SESSION = REPO / "logging" / "sessions" / "ff_fuel.json"
 PATCH_JSON = FF_FUEL / "patch.json"
 PATCH_RAM = 0x7FFB00
+#: taken from the reference model, not restated, so these tests keep working
+#: when a later wave appends to `struct ff_state` (E2 took the length from
+#: 64 to 68; nothing in the annex moved).
 MAGIC = 0x46463031
 
 try:
@@ -34,6 +37,8 @@ try:
     from ecu_sim import AnimatedRam, DEFAULT_STATICS, Med9Handlers, PatchRunner
     from emu.models import flexfuel as ff
     from emu import qspi_eeprom as qe
+    MAGIC = ff.FlexFuelModel.MAGIC
+    STATE_LEN = ff.FlexFuelModel.LENGTH
     from med9kwp.can_transport import have_can
     available = True
 except Exception:                                            # pragma: no cover
@@ -69,7 +74,8 @@ class TestPatchRunner(DumpUnchanged):
         drive(h.runner, 5.0)
         st = h.emu.read(PATCH_RAM, 0x40)
         self.assertEqual(struct.unpack_from(">I", st, 0)[0], MAGIC, "check 1")
-        self.assertEqual(struct.unpack_from(">H", st, 4)[0], 64, "check 1")
+        self.assertEqual(struct.unpack_from(">H", st, 4)[0], STATE_LEN,
+                         "check 1")
         self.assertEqual(st[0x1E], 1, "check 2: only the set-A hook fires")
         self.assertEqual(st[0x1D], 1, "check 2: and it owns the tick")
         ticks = struct.unpack_from(">I", st, 0x20)[0]
@@ -231,7 +237,7 @@ class TestLoggerEndToEnd(DumpUnchanged):
 
     def test_checks_1_to_5_of_the_session_file(self):
         self.assertEqual(self.last("ff_magic"), MAGIC, "check 1")
-        self.assertEqual(self.last("ff_length"), 64, "check 1")
+        self.assertEqual(self.last("ff_length"), STATE_LEN, "check 1")
         self.assertEqual(self.last("ff_src_seen"), 1, "check 2")
         self.assertEqual(self.last("ff_src_owner"), 1, "check 2")
         self.assertLessEqual(
