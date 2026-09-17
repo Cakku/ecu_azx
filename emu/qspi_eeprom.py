@@ -303,14 +303,32 @@ class QspiEeprom:
 # ---------------------------------------------------------------------------
 # a synthetic device image the block manager accepts
 # ---------------------------------------------------------------------------
+def _overlay(raw: bytearray, at: int, limit: int, want) -> None:
+    """Apply one `payloads` entry: bytes at payload +0, or {offset: bytes}."""
+    if want is None:
+        return
+    items = want.items() if isinstance(want, dict) else ((0, want),)
+    for off, blob in items:
+        blob = bytes(blob) if not isinstance(blob, int) else bytes([blob])
+        n = max(min(len(blob), limit - off), 0)
+        raw[at + off:at + off + n] = blob[:n]
+
+
 def blank_image(dump_path="data/passat_azx_ori.bin", fill: int = 0xFF,
-                payloads: dict[int, bytes] | None = None) -> bytes:
+                payloads: dict[int, bytes] | None = None,
+                header: bool = False) -> bytes:
     """A 2 KB image whose every block copy carries a valid EEP_CONF checksum.
 
     `payloads` overrides single blocks' payloads (`{8: b"\\x55"}` writes 0x55
     at block 8 payload +0).  `tools/eeprom_map.py --check` on the result
-    prints ALL OK, which is what makes it usable as the start-up image for
-    `nvm_read_all_blocks` (0x62280).
+    prints ALL OK.
+
+    A valid checksum is **not enough** for the manager to accept a block:
+    with `header=True` the first two payload bytes of every block are seeded
+    from that block's flash default record, which is the `{block id, version}`
+    stamp `nvm_read_all_blocks` compares against (section 10 of eeprom.md).
+    :func:`factory_image` is the whole default record, which is what a
+    factory-programmed device holds.
     """
     import eeprom_map as em
     import med9lib as ml
@@ -323,14 +341,48 @@ def blank_image(dump_path="data/passat_azx_ori.bin", fill: int = 0xFF,
         end = order[k + 1].addr if k + 1 < len(order) else em.DEVICE_SIZE
         copies = max((end - b.addr) // (b.pages * em.PAGE), 1)
         want = (payloads or {}).get(b.idx)
+        dflt = bytes(data[em.DEFAULTS + b.dflt:em.DEFAULTS + b.dflt + b.length])
         for n in range(copies):
             a = b.copy_addr(n)
-            if want is not None:
-                raw[a:a + len(want)] = want[:b.payload]
+            if header and b.idx != 0:
+                raw[a:a + 2] = dflt[:2]
+            _overlay(raw, a, b.payload, want)
             if b.idx == 0:
                 continue                     # exempt (FUN_000619AC)
             payload = bytes(raw[a:a + b.payload])
             struct.pack_into(">H", raw, a + b.payload, em.block_checksum(payload))
+    return bytes(raw)
+
+
+def factory_image(dump_path="data/passat_azx_ori.bin",
+                  payloads: dict[int, bytes] | None = None) -> bytes:
+    """What a factory-programmed M95160 looks like: every block = its default.
+
+    The manager's own default table (file 0xB3238, reached through the pointer
+    at 0xB318C) holds one record per block, starting with `{block id,
+    version}`.  An image built from it is accepted by `nvm_read_all_blocks`
+    for every block; an image of 0xFF is not (section 10).
+    """
+    import eeprom_map as em
+    import med9lib as ml
+
+    data = ml.load_dump(str(dump_path))
+    blocks = em.read_blocks(data)
+    raw = bytearray(b"\xFF" * em.DEVICE_SIZE)
+    order = sorted(blocks, key=lambda b: b.addr)
+    for k, b in enumerate(order):
+        end = order[k + 1].addr if k + 1 < len(order) else em.DEVICE_SIZE
+        copies = max((end - b.addr) // (b.pages * em.PAGE), 1)
+        dflt = bytes(data[em.DEFAULTS + b.dflt:em.DEFAULTS + b.dflt + b.length])
+        want = (payloads or {}).get(b.idx)
+        for n in range(copies):
+            a = b.copy_addr(n)
+            raw[a:a + b.payload] = dflt[:b.payload]
+            _overlay(raw, a, b.payload, want)
+            if b.idx == 0:
+                continue
+            struct.pack_into(">H", raw, a + b.payload,
+                             em.block_checksum(bytes(raw[a:a + b.payload])))
     return bytes(raw)
 
 
@@ -421,6 +473,38 @@ def install_eeprom(emu, *, image=None, device: M95160 | None = None,
     return qspi, binding
 
 
+#: the two per-block device sub-states.  `nvm_dev_block_read` (0x05FCC8) and
+#: `nvm_dev_block_write` (0x060524) reset them to 0x40 / 0x50 *after* they
+#: finish a block (0x060510, 0x0609D4), so on a cold emulator -- where all of
+#: RAM is zero -- the very first block read and the very first block write
+#: fall into the default branch and report "failed".  Whatever start-up code
+#: seeds them on the real ECU has not been found (eeprom.md section 10).
+NVM_DEV_READ_STATE = 0x7FADAC
+NVM_DEV_WRITE_STATE = 0x7FADAD
+NVM_QUEUE_STATE = 0x7FADAB
+NVM_QUEUE_IDLE = 0x20
+NVM_PUMP_WRAPPER = 0x061944      # what both 10 ms background tasks call
+
+
+def cold_start(emu, *, max_calls: int = 400) -> bool:
+    """Run the start-up block read the way a powered ECU does.
+
+    Seeds the two device sub-states, then pumps `nvm_read_all_blocks`
+    (0x06227C) until it parks the request queue at 0x20 -- which is also what
+    arms the queue, so nothing that `nvm_block_request` queues can complete
+    before this has run.  Returns True if the queue reached idle.
+    """
+    emu.write(NVM_DEV_READ_STATE, 0x40, 1)
+    emu.write(NVM_DEV_WRITE_STATE, 0x50, 1)
+    for _ in range(max_calls):
+        res = emu.call(NVM_READ_ALL_BLOCKS, reset=False, max_insns=4_000_000)
+        if not res.ok:
+            return False
+        if emu.read(NVM_QUEUE_STATE, 1)[0] == NVM_QUEUE_IDLE:
+            return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # the firmware's own proof that the model behaves like the part
 # ---------------------------------------------------------------------------
@@ -476,19 +560,24 @@ def main(argv=None) -> int:
     ap.add_argument("--dump", default="data/passat_azx_ori.bin")
     ap.add_argument("--blank", metavar="OUT",
                     help="write a synthetic 2 KB image with valid checksums")
+    ap.add_argument("--factory", action="store_true",
+                    help="with --blank: seed every block from the firmware's "
+                         "own default table instead of 0xFF, which is what "
+                         "nvm_read_all_blocks accepts (eeprom.md section 10)")
     ap.add_argument("--set", action="append", default=[], metavar="BLK:OFF=HEX",
-                    help="seed a block payload, e.g. 8:0=55")
+                    help="seed a block payload, e.g. 8:2=55")
     ap.add_argument("--self-test", action="store_true",
                     help="run the boot loopback and WEL tests against the model")
     a = ap.parse_args(argv)
 
     if a.blank:
-        payloads: dict[int, bytes] = {}
+        payloads: dict = {}
         for spec in a.set:
             where, hexed = spec.split("=", 1)
             blk, off = (int(x, 0) for x in where.split(":"))
-            payloads[blk] = (b"\xFF" * off) + bytes.fromhex(hexed)
-        Path(a.blank).write_bytes(blank_image(a.dump, payloads=payloads))
+            payloads.setdefault(blk, {})[off] = bytes.fromhex(hexed)
+        build = factory_image if a.factory else blank_image
+        Path(a.blank).write_bytes(build(a.dump, payloads=payloads))
         print(f"wrote {a.blank}")
         return 0
 
