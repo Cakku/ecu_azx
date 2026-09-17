@@ -183,6 +183,8 @@ stock addresses from the generated `patches/common/med9_stock.h`, integer types
 from `patches/common/types.h`. `patches/examples/hello_patch/` is the template
 to copy.
 
+> **2026-09-17 (integration, wave E pair 2).** `patches/common/patch.mk` now makes every object depend on every header, `hooks.S`, `patch.mk` and `patch.json`. Before that, a worktree whose `build/` held objects from an earlier `ff_state.h` produced a blob that disagreed with the committed `patch.json` in six `cmplwi` words (the state-block length check in handlers whose `.c` files had not changed). `make clean` was the workaround; the dependency is the fix. `tests/test_patch_framework.py::test_patch_json_still_matches_a_fresh_build` is the test that caught it.
+
 ## 3. Placement policy
 
 | Resource | Where | Notes |
