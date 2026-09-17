@@ -142,6 +142,13 @@ map (CPU 0x5C75FE = file 0x1C75FE, 16 rows × 12 columns of s8, 0.75 degCA/LSB,
 `re/findings/ignition.md` §2): one cell taken from 40 counts (30.00 degCA) to
 36 (27.00 degCA), which lands at file 0x1C7663.
 
+That example is not arbitrary — it is the last step of issue **#45**, the list
+of bench edits that would turn the wave-B map addresses from VERIFIED-STATIC
+into VERIFIED-DYNAMIC. The other four (`KFZW`'s bank offset 0x5C753A, `KFKSTT`
+0x5C6E24, `KFPRSOLOFF` 0x5D5424, `KRKATE` 0x5D3DBC) each name the map, the
+change and the logged variable that must move; #45 is the natural first use of
+this chapter once a bench ECU exists.
+
 ### 1.3 Fix the block checksums
 
 A saved file always fails, because the edit is inside one of the 65 Bosch
@@ -563,7 +570,14 @@ Then the three checks E6's `flash_programming.md` §7.2 adds, in order:
 ### 3.4 Then, in this order
 
 1. Clear DTCs.
-2. **Flash 1 first if this is the first ever write**:
+2. **Flash 0 is the first write of all** (issue **#26**): the *unmodified* dump
+   re-saved through our tools. It changes nothing and proves everything the
+   later flashes assume — that the write route works, that KESS's own checksum
+   correction is a no-op on a file that already verifies, that the read-back
+   equals what was written, and that no unknown signature exists. Its exit
+   criterion is in #26; #28 repeats Flash 0 and Flash 1 on the *car's* ECU
+   afterwards, with the BDM backup in hand.
+3. **Flash 1 next**:
    `patches/ff_counter/test/procedure.md`. One flash word
    (0x12067C, `4B FF E9 B1` → `48 02 F9 85`), 96 bytes of blob, a counter at
    `PATCH_RAM+0x00` that must rise by **100/s** — not 10/s; C4 corrected every
