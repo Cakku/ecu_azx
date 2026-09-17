@@ -93,10 +93,16 @@ def cal_from_block(blk: bytes) -> ff.Cal:
     """A model `Cal` describing an FFCAL001 image, so the two cannot drift."""
     can_id, timeout, hold, tau, slew, tick = struct.unpack_from(">6H", blk, 0x0C)
     mode, e_ovr, stall = struct.unpack_from(">3B", blk, 0x18)
+    zw_enable, dzw_max = struct.unpack_from(">2B", blk, 0xE6)       # E1 (#34)
     return ff.Cal(can_id=can_id, timeout_ms=timeout, hold_s=hold,
                   filter_tau_ms=tau, slew_pct_s=slew, tick_ms=tick,
                   mode=mode, e_override=e_ovr, stall_max=stall,
-                  f_curve=list(struct.unpack_from(">17H", blk, 0x20)))
+                  f_curve=list(struct.unpack_from(">17H", blk, 0x20)),
+                  zw_enable=zw_enable, dzw_max=dzw_max,
+                  fzw_curve=list(blk[0x42:0x42 + 17]),
+                  dzw_map=list(blk[0x54:0x54 + 64]),
+                  dzw_nmot_axis=list(struct.unpack_from(">8H", blk, 0xE8)),
+                  dzw_rl_axis=list(struct.unpack_from(">8H", blk, 0xF8)))
 
 
 @requires_dump
