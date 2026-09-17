@@ -403,7 +403,7 @@ reads as corrupt, which means mode 0 — `F = 1024`, no CAN, `dzw_e = 0`,
 | +1B | u8 | `ff_persist_enable` | **1** | **D2**, 0 makes the patch behave exactly like D1's |
 | +1C | u8 | `ff_persist_hyst_pct` | 5 | **D2**, % |
 | +1D | u8 | `ff_persist_block` | 8 | **D2**, EEP_CONF block |
-| +1E | u8 | `ff_persist_offset` | 0 | **D2**, payload offset |
+| +1E | u8 | `ff_persist_offset` | **2** | **D2**, payload offset — 0 until the E4 correction below |
 | +1F | u8 | `ff_persist_rate_s` | 60 | **D2**, s |
 | +20 | 17×u16 | `ff_F_curve` | formula | 1/1024 over E 0..100 step 6.25 % |
 | +42 | 17×u8 | `ff_fzw_curve` | **ramp** | **E1**, 1/256: 0 at E0 rising to 255 at E50, flat above |
@@ -1041,7 +1041,7 @@ and `::TestProducer::test_the_cost_of_one_activation`, plus D1's
 $ make apply
 ff_fuel: 159 patch range(s) (7977 B), 18 descriptor range(s) (54 B), 0 unexpected
 checksums: ALL OK (65 blocks); identification block unchanged
-sha256: c7e82058629c94feb2716d0f518fbc93bfccb8ba0841f71630d645da82035160
+sha256: 193223e2ea47c8274f97d961683466b168cf75f484adcaf0b92d4d856e94a817
 WARNING: ff_fuel: "ram_status": "static" - ... Do not flash this image.
 WARNING: change at 0x42247c+0x4 writes the MPC561 on-chip flash ...
 WARNING: change at 0x432940+0x4 writes the MPC561 on-chip flash ...
@@ -1266,8 +1266,28 @@ stock has to show.
 
 ## E% across power loss (#38)
 
-The estimate is kept in **EEP_CONF block 8, payload +0, one byte**, through
-`nvm_block_request` (0x6131C) and nothing else. The raw SPI primitives are
+The estimate is kept in **EEP_CONF block 8, payload +2, one byte**, through
+`nvm_block_request` (0x6131C) and nothing else.
+
+> **Corrected 2026-09-17 (brief E4, `re/findings/eeprom.md` §10.5): the offset
+> was 0, and that was a bug.** Payload **+0 and +1 are a
+> `{block id, version}` stamp**. `nvm_read_all_blocks` (0x06227C) compares the
+> first halfword of every block against the flash default table at
+> 0x060458-0x060470 and, on a mismatch, **discards the block and reloads the
+> defaults**. Storing the ethanol percent at +0 therefore overwrote the block
+> id: the value never survived a key cycle, and the byte the patch read back
+> was `0x08` — a perfectly plausible **8 %**, not the `0xFF` that means
+> "nothing known". The failure was silent and no test caught it, because
+> nothing in the D2 test set ran `nvm_read_all_blocks`. The fix is one
+> calibration byte, `ff_persist_offset` = **2**;
+> `tests/test_ff_diag_patch.py::test_the_block_id_and_version_stamp_are_never_written`
+> now asserts the two stamp bytes survive a whole commit cycle.
+>
+> Two consequences for the bench: the free payload offsets for block 8 are
+> **+2..+13**, not +0..+13; and payload **+29 does move** on the first commit
+> (0xFF → 0x00 → 0x01) because it is the manager's own ReplV byte — the rule
+> is "never write it", not "it never changes". `test/procedure_d2.md` §B1/§B2
+> and `logging/sessions/ff_fuel.json` check 7 are corrected to match. The raw SPI primitives are
 never touched: they would race the manager's mirror and the patch would have to
 maintain the block checksum itself.
 

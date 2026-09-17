@@ -86,7 +86,8 @@ moves. The DDLI recipe itself is `patches/ff_counter/test/procedure.md` §2 with
 
 **Checks, in this order. Stop at the first one that fails.**
 
-1. `ff_magic == 1179599921` (0x46463031) and `ff_length == 64`.
+1. `ff_magic == 1179004977` (0x46463031) and `ff_length == 76`
+   (0x4C since brief E5; it was 68 after E2 and 64 before that).
    If both are 0, no periodic hook has run — go to check 2 before blaming the
    flash.
 2. **`ff_src_seen` answers `re/findings/scheduler.md` §11.7 in one sample:**
@@ -168,7 +169,7 @@ Expected log lines on the patched run (prediction, not a recording):
 # dump_sha256: <from work/ff_fuel.sha256>
 # transport: KWP2000 0x2C/0x21 over TP2.0
 time_s,var,value,unit
-0.000,ff_magic,1179599921,-
+0.000,ff_magic,1179004977,-
 0.000,ff_length,64,B
 0.000,ff_src_seen,2,-
 0.000,ff_mode,3,-

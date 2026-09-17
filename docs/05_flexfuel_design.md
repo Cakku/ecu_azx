@@ -723,7 +723,7 @@ fuel.
 > Evidence and full derivation: `re/findings/eeprom.md`. Reproduce the layout
 > with `python3 tools/eeprom_map.py data/passat_azx_ori.bin --clients`.
 >
-> **Primary route — EEP_CONF block 8, payload offset +0, one byte.
+> **Primary route — EEP_CONF block 8, payload offset +2, one byte.
 > VERIFIED-STATIC for everything except the factory contents of that byte.**
 >
 > * The SPI EEPROM is a 2 KB **M95160-class** part on **PCS0** of the QSMCM
@@ -827,6 +827,36 @@ fuel.
 > proves the factory leaves block 8 payload +0 at 0xFF.** `ff_persist_offset`
 > and `ff_persist_block` are calibration bytes precisely so that a bench read
 > can move the store without a rebuild.
+
+#### Correction 2026-09-17 (brief E4, issue #38) — the offset was wrong, and silently so
+
+`ff_persist_offset` shipped as **0** and has been changed to **2**.
+
+Payload **+0 and +1 of every EEP_CONF block are a `{block id, version}`
+stamp**. `nvm_read_all_blocks` (**0x06227C** — the entry is four bytes below
+the 0x062280 this document and `eeprom.md` §3.5 quoted) compares the first
+halfword of each block against that block's record in the flash default table
+at 0x060458-0x060470, and on a mismatch it **discards the block and reloads
+the defaults**. Block 8's default record is
+`08 01 00 80 80 80 80 00 00 80 00 80 80 FF`.
+
+So the ethanol percent was being written on top of the block id. Every cold
+start threw the block away, the mirror byte the patch read back was `0x08`,
+and `ff_persist_init()` accepted it as a perfectly plausible **8 %** — not the
+`0xFF` that would have meant "nothing known". **#38 did not work, and nothing
+said so.** It took a QSPI device model and a run of the real
+`nvm_read_all_blocks` to see it (`re/findings/eeprom.md` §10.5, §10.6).
+
+Three things follow:
+
+* the free payload offsets for block 8 are **+2..+13**, not +0..+13, and the
+  same correction applies to blocks 1, 3, 7, 11 and 12 in `eeprom.md` §5;
+* payload **+29 moves** on the first commit (0xFF → 0x00 → 0x01): it is the
+  manager's ReplV byte. The rule is "the patch never writes it", not "it never
+  changes";
+* the fix needed no code — one calibration byte — which is the argument for
+  having put the block, the offset and the rate limit in FFCAL001 in the first
+  place.
 
 ## 4. New calibration data
 

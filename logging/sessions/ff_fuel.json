@@ -40,13 +40,24 @@
     "     the fuel temperature and 256*ff_persist_state + ff_mode.  Rehearse it",
     "     with  python3 logging/med9log.py groups --sim",
     "         --sim-dump work/ff_fuel.bin 111",
-    "  7. (D2, #38) eep_blk8_mirror_b0 IS the stored ethanol percent: it is the",
-    "     block manager's RAM mirror of EEP_CONF block 8 payload +0.  It must",
-    "     equal ff_e_persist whenever ff_persist_state is 2, 3 or 4, and the",
-    "     block checksum eep_blk8_mirror_csum must satisfy",
-    "     sum(bytes +0..+29) + csum == 0xFFFF at every sample.  Read them over",
-    "     DDLI (21 F0); RequestUpload (0x35) refuses that window, DDLI does not",
+    "  7. (D2, #38; CORRECTED by E4 2026-09-17) eep_blk8_mirror_b2 IS the",
+    "     stored ethanol percent: it is the block manager's RAM mirror of",
+    "     EEP_CONF block 8 payload +2.  It must equal ff_e_persist whenever",
+    "     ff_persist_state is 2, 3 or 4, and the block checksum",
+    "     eep_blk8_mirror_csum must satisfy sum(bytes +0..+29) + csum ==",
+    "     0xFFFF at every sample.  Read them over DDLI (21 F0);",
+    "     RequestUpload (0x35) refuses that window, DDLI does not",
     "     (kwp.md 4.3 and 5).",
+    "     +0 and +1 are a {block id, version} stamp (08 01) that",
+    "     nvm_read_all_blocks 0x06227C validates against the flash defaults",
+    "     at 0x060458; a mismatch DISCARDS the block and reloads the",
+    "     defaults, so they must never change - which is why",
+    "     ff_persist_offset is 2 and not the 0 D2 shipped, and why the",
+    "     stored E% never used to survive a key cycle (it read back as 8 %,",
+    "     the block id).  re/findings/eeprom.md section 10.5.",
+    "     +29 is the manager's own ReplV byte: NEVER WRITE IT, but do expect",
+    "     it to MOVE on the first commit (0xFF -> 0x00 -> 0x01).  The earlier",
+    "     wording here said it never changes; that was wrong (eeprom.md 10.6).",
     "  8a. (E1, #34) The ignition blend. `21 6C` = VCDS measuring block 108 is",
     "     f_zw in %, dzw_e in degCA, the worst of the six dwkrz bytes in degCA",
     "     and 0x7FD31B & 3. With the shipped calibration (ff_zw_enable = 0) the",
@@ -117,7 +128,7 @@
       "unit": "-",
       "patch_offset": 0,
       "source": "patches/ff_fuel/src/ff_state.h +0x00",
-      "notes": "0x46463031 = 1179599921 once ff_state_init() has run"
+      "notes": "0x46463031 = 1179004977 once ff_state_init() has run"
     },
     {
       "name": "ff_length",
@@ -560,7 +571,29 @@
       "offset": 0,
       "unit": "%",
       "source": "re/findings/eeprom.md sections 3.3 and 5",
-      "notes": "EEP_CONF block 8 payload +0 in the block manager's RAM mirror - the stored ethanol percent itself. This is the variable issue #38 is about: it must survive a battery disconnect. DDLI reads it; RequestUpload refuses the window"
+      "notes": "EEP_CONF block 8 payload +0: the BLOCK ID byte of the {block id, version} stamp nvm_read_all_blocks validates (eeprom.md 10.5). Expect 0x08 and never anything else; if it moves, the block is discarded on the next key cycle and the stored E% is silently lost. NOT where the patch stores - that is eep_blk8_mirror_b2"
+    },
+    {
+      "name": "eep_blk8_mirror_b1",
+      "addr": "0x7F9F81",
+      "size": 1,
+      "signed": false,
+      "scale": 1,
+      "offset": 0,
+      "unit": "%",
+      "source": "re/findings/eeprom.md sections 3.3 and 5",
+      "notes": "EEP_CONF block 8 payload +1: the VERSION byte of the stamp. Expect 0x01. Same rule as +0: if it moves the block is discarded (eeprom.md 10.5)"
+    },
+    {
+      "name": "eep_blk8_mirror_b2",
+      "addr": "0x7F9F82",
+      "size": 1,
+      "signed": false,
+      "scale": 1,
+      "offset": 0,
+      "unit": "%",
+      "source": "re/findings/eeprom.md sections 3.3 and 5",
+      "notes": "EEP_CONF block 8 payload +2: WHERE THE PATCH STORES the ethanol percent since the E4 correction of 2026-09-17 (ff_persist_offset = 2). It must equal ff_e_persist whenever ff_persist_state is 2, 3 or 4"
     },
     {
       "name": "eep_blk8_mirror_b14",
@@ -582,7 +615,7 @@
       "offset": 0,
       "unit": "-",
       "source": "re/findings/eeprom.md section 5 (flags & 3 != 0: the manager owns payload len-3)",
-      "notes": "the manager's own byte; the patch must never write it"
+      "notes": "EEP_CONF block 8 payload +29: the block manager's own ReplV byte. The patch must NEVER write it - but it does MOVE on the first commit (0xFF -> 0x00 -> 0x01), which E4 reproduced end to end (eeprom.md 10.6). The earlier note here said it never changes; that was wrong"
     },
     {
       "name": "eep_blk8_mirror_csum",
