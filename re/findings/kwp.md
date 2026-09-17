@@ -500,10 +500,48 @@ so no single range crosses that window (read up to 0x7F9E3B, skip to 0x7FA480).
   command/response state machine at 0x4149CC, likely the on-chip
   crypto/immobiliser helper). Not needed for logging; not reversed further.
 * Exact P3/keep-alive timeout value (used the conventional figure).
-* `kwp_transfer_mode4` (0x480000 window) internal segment semantics — mapped
-  enough to know it is not the RAM route; not fully decoded.
+* `kwp_transfer_mode4` (0x480000 window) internal segment semantics —
+  **SETTLED (2026-09-17, E6, `re/findings/flash_programming.md` §6.2).** The
+  32-entry table at 0x0B2FF2 is **EEP_CONF**, the SPI-EEPROM block table at
+  0x0B2FF0 that `tools/eeprom_map.py` decodes: `off = addr - 0x480000`, then
+  `+0x02` u16 EEPROM offset, `+0x08` u16 flags whose bit 0 means "two copies"
+  (length doubled), `+0x0A` u8 length. **The window is the EEPROM image, not a
+  flash view**; unmapped sub-ranges read back 0xFF and `kwp_sid_35_h1` rejects
+  an end that reaches 0x480400 (NRC 0x53), so only EEPROM 0x000-0x3FF —
+  blocks 0..21, which includes the programming record in block 10 — is
+  reachable. `./.venv/bin/python3 tools/flash_segments.py
+  data/passat_azx_ori.bin --segments`.
 * The transport-layer framing (who adds `SID+0x40` / `7F`) lives below these
   handlers and was taken as standard KWP2000; not disassembled here.
+
+> **Addition 2026-09-17 (E6, blocker of #26 #27 #28 #32) — `10 85` does not
+> start a session, and there is a second dispatch table. VERIFIED-STATIC.**
+> §2's table row for `10 85` reads "flash-reprogramming session; sets up
+> UC3F". The first half is the intent, the second is not what the code does,
+> and the row should be read with this note:
+>
+> * `kwp_start_session_core`'s 0x85 arm (0x036C60) **never calls
+>   `kwp_session_set`**. After its preconditions (security state 2 = level 1,
+>   plus six flags, §2) it stages a record into EEP_CONF block 10, answers
+>   *response pending* (`kwp_io_struct+0xA = 8`), then writes the magic
+>   **0xAABFFB11 to RAM 0x7F8020**, shuts the IMB peripherals down
+>   (`bl 0x071814`) and **hangs on purpose** (`bl 0x0BA444`, index 0x14B) so
+>   the watchdog resets the ECU. After the reset `app_init` sees the magic and
+>   sets bit 2 of `boot_mode_flags` (0x7FD401).
+> * The programming services then come from a **second, 13-entry dispatch
+>   table at 0x088174** (config struct 0x088280, registered by `prog_kwp_init`
+>   0x08C244), whose entries carry **no session gate at all** (mask
+>   0xFFFFFFFF) and which **does** contain SID **0x34 RequestDownload**
+>   (handler 0x086A28) — the service §1's table does not have. Its security
+>   gate is a separate byte, `prog_security_level` at RAM 0x805A10, read by
+>   `prog_security_check` (0x08C778) and required to be 2 by all twelve
+>   programming services; the seed/key pair is the same level-1 LFSR with mask
+>   0x5FBD5DBD (stored at 0x088170).
+>
+> So no diagnostic session number ever unlocks programming on the application
+> stack, which is why no `session_mask` value in §2.1 covers it. Whole flow,
+> address whitelist and driver: `re/findings/flash_programming.md` §1-§4;
+> `./.venv/bin/python3 tools/flash_segments.py data/passat_azx_ori.bin --kwp`.
 
 ## 10. Reproduction
 

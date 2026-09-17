@@ -299,5 +299,44 @@ in Ghidra is correct. **VERIFIED-STATIC.**
 |---|---|
 | What is in the live ETR table at 0x400000-0x4000FF (the real external-interrupt handler)? | needs the BDM read of the missing 16 KB |
 | What writes 0x11223344 to 0x005FB0, and what are the five addresses at 0x5FB4-0x5FC0 for? | open; 0x5FB0 is blank in this dump |
-| What is the routine relocated to 0x804800 (entry 0x806EA0, flash 0x840A0)? It is reached from 0x861A8 and is almost certainly the external-flash programming driver. | open, note for the patch pipeline |
-| The word at 0x1C0120 read by the indirect call at 0x12F8C is blank; is it a reprogramming hook? | open |
+| What is the routine relocated to 0x804800 (entry 0x806EA0, flash 0x840A0)? It is reached from 0x861A8 and is almost certainly the external-flash programming driver. | **SETTLED (2026-09-17, E6, `re/findings/flash_programming.md` §3 and §4).** It is the flash programming driver for **both** devices: a three-entry device table (0x082980) whose device 1 is the on-chip UC3F 0x404000-0x47FFFF, five command sets selected by `flash_dev_probe` (0x081C18), a block-geometry table (0x0825E4) and the full UC3F interlock sequence in `flash_erase_block_start` (0x081F78) / `flash_program` (0x082208) / `flash_poll_uc3f` (0x081BB4). |
+| The word at 0x1C0120 read by the indirect call at 0x12F8C is blank; is it a reprogramming hook? | **partly settled (2026-09-17, E6).** It is the third arm of `boot_mode_select` (0x012ED4), reached only when the test at 0x012894 says yes, and the two instructions in front of it are the third DECRAM copy and `bl 0x011CE0` = `uc3f_unprotect` — so yes, it is a reprogramming hook. What would write 0x1C0120 is still open. `flash_programming.md` §5.1 |
+
+> **2026-09-17 (E6, blocker of #26 #27 #28 #32) — the boot has a second exit,
+> and §3.2's "zero r2-relative references" is wrong. VERIFIED-STATIC.**
+>
+> **(a) `boot_mode_select` (0x012ED4).** §2.3 above follows the path that ends
+> at the `blrl` at 0x01307C. That `blrl` is only reached when **three** mode
+> tests all say no. `boot_mode_select` writes 0x5A78AA23 to RAM 0x7F8004,
+> calls `boot_select_code_directory` (0x012D4C) and then tries, in order,
+> 0x01270C (the byte at RAM 0x7F8010 plus the two CS2 pointers in DECRAM
+> 0x6F8404/0x6F8408), `boot_check_reprog_magic` (0x012780: the word at RAM
+> **0x7F8000** against **0xBB44E169**, 0xA5BCD193, 0xBD5593F3, 0xE45CD91A,
+> 0x356BD372) and 0x012894 (the 0x1C0120 arm). On a hit it calls
+> `boot_enter_prog_mode` (0x012658) — which runs the third DECRAM routine and
+> **tail-calls `uc3f_unprotect` (0x011CE0)**, clearing
+> `UC3FMCR[PROTECT]`/`UC3FMCRE[SBPROTECT]` and the CS0 write-protect — stores
+> 0xDEADBEEF to DECRAM 0x6F840C and branches to **`bl 0x7F8728`**.
+>
+> **(b) 0x7F8728 is a RAM-resident flash loader, and it is where the "100
+> further function entries between 0x019948 and 0x01E848" of §1.1 really
+> live.** The boot copies flash **0x019798-0x02A827 (0x5090 B) to 0x7F8728**
+> (loop 0x0126DC-0x0126F8) and `boot_swsr_service` (0x0110D0, 0x48 B) to
+> **0x7FD7B8** (loop 0x0126AC-0x0126C8); the two tile exactly into
+> 0x7F8728-0x7FD7FF. So that block is not ordinary application code that
+> happens to want `r2 = 0x5C9FF0` — it executes at `0x7F8728 + (addr -
+> 0x019798)` and carries its own flash-device table at flash 0x01E71C.
+> `r2_context.py`'s clean result for it should be re-read with that in mind.
+>
+> **(c) §3.2 is wrong about r2.** "The relocated block (flash
+> 0x081A00-0x085400) contains **zero** r2-relative references" — it contains
+> four, all in the two-instruction form `addis rX,r2,-0x54` + a D-form
+> displacement, which `tools/r2_context.py` does not classify as an r2 access
+> because the base register is not r2: 0x082D1C, 0x082D64, 0x082D90 (the flash
+> device table at 0x082980) and 0x082130 (the UC3F block-select table at
+> 0x082684). Under `r2 = 0xD4CDF0` they resolve to the RAM copy at 0x804800,
+> which is exactly what that base is for. The *conclusion* of §3.2 still
+> stands — the block also runs in place from flash with `r2 = 0x5C9FF0`, and
+> then the same instructions resolve to the flash originals — but the reason
+> given ("nothing executed while r2 = 0xD4CDF0 dereferences r2") is not true.
+> Detail: `re/findings/flash_programming.md` §3.1.
