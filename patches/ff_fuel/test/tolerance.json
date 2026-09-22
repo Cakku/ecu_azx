@@ -100,32 +100,38 @@
       "_unit": "-, Q15, 0x801E28, measuring id 34, VCDS 032.4"
     },
     "dwkrz_0": {
-      "max_abs": 0.75,
+      "max_abs": 1.5,
+      "_note": "2026-09-22 wave-F integration: max_abs raised from 0.75 (one LSB) to 1.5 (two LSB). dwkrz is an integer staircase; two separately sampled runs interpolated across a step edge differ by exactly one LSB, which failed logcmp stock-vs-E0 in bench_rehearsal.py about 1 run in 3 (brief F3 report). Retighten from two real stock runs with logcmp.py derive.",
       "mean_abs": 0.2,
       "_unit": "degCA, 0.75/LSB, 0x7FCE57; per-cylinder knock retard, ONE ROW EACH because a single cylinder is what knocks. At E0 with ff_zw_enable = 0 the patch adds no advance at all, so any step here is the ECU's own run-to-run knock behaviour - but a systematic move on one cylinder is the first thing to look at (ignition.md section 6)"
     },
     "dwkrz_1": {
-      "max_abs": 0.75,
+      "max_abs": 1.5,
+      "_note": "2026-09-22 wave-F integration: max_abs raised from 0.75 (one LSB) to 1.5 (two LSB). dwkrz is an integer staircase; two separately sampled runs interpolated across a step edge differ by exactly one LSB, which failed logcmp stock-vs-E0 in bench_rehearsal.py about 1 run in 3 (brief F3 report). Retighten from two real stock runs with logcmp.py derive.",
       "mean_abs": 0.2,
       "_unit": "degCA, 0.75/LSB, 0x7FCE58; per-cylinder knock retard, ONE ROW EACH because a single cylinder is what knocks. At E0 with ff_zw_enable = 0 the patch adds no advance at all, so any step here is the ECU's own run-to-run knock behaviour - but a systematic move on one cylinder is the first thing to look at (ignition.md section 6)"
     },
     "dwkrz_2": {
-      "max_abs": 0.75,
+      "max_abs": 1.5,
+      "_note": "2026-09-22 wave-F integration: max_abs raised from 0.75 (one LSB) to 1.5 (two LSB). dwkrz is an integer staircase; two separately sampled runs interpolated across a step edge differ by exactly one LSB, which failed logcmp stock-vs-E0 in bench_rehearsal.py about 1 run in 3 (brief F3 report). Retighten from two real stock runs with logcmp.py derive.",
       "mean_abs": 0.2,
       "_unit": "degCA, 0.75/LSB, 0x7FCE59; per-cylinder knock retard, ONE ROW EACH because a single cylinder is what knocks. At E0 with ff_zw_enable = 0 the patch adds no advance at all, so any step here is the ECU's own run-to-run knock behaviour - but a systematic move on one cylinder is the first thing to look at (ignition.md section 6)"
     },
     "dwkrz_3": {
-      "max_abs": 0.75,
+      "max_abs": 1.5,
+      "_note": "2026-09-22 wave-F integration: max_abs raised from 0.75 (one LSB) to 1.5 (two LSB). dwkrz is an integer staircase; two separately sampled runs interpolated across a step edge differ by exactly one LSB, which failed logcmp stock-vs-E0 in bench_rehearsal.py about 1 run in 3 (brief F3 report). Retighten from two real stock runs with logcmp.py derive.",
       "mean_abs": 0.2,
       "_unit": "degCA, 0.75/LSB, 0x7FCE5A; per-cylinder knock retard, ONE ROW EACH because a single cylinder is what knocks. At E0 with ff_zw_enable = 0 the patch adds no advance at all, so any step here is the ECU's own run-to-run knock behaviour - but a systematic move on one cylinder is the first thing to look at (ignition.md section 6)"
     },
     "dwkrz_4": {
-      "max_abs": 0.75,
+      "max_abs": 1.5,
+      "_note": "2026-09-22 wave-F integration: max_abs raised from 0.75 (one LSB) to 1.5 (two LSB). dwkrz is an integer staircase; two separately sampled runs interpolated across a step edge differ by exactly one LSB, which failed logcmp stock-vs-E0 in bench_rehearsal.py about 1 run in 3 (brief F3 report). Retighten from two real stock runs with logcmp.py derive.",
       "mean_abs": 0.2,
       "_unit": "degCA, 0.75/LSB, 0x7FCE5B; per-cylinder knock retard, ONE ROW EACH because a single cylinder is what knocks. At E0 with ff_zw_enable = 0 the patch adds no advance at all, so any step here is the ECU's own run-to-run knock behaviour - but a systematic move on one cylinder is the first thing to look at (ignition.md section 6)"
     },
     "dwkrz_5": {
-      "max_abs": 0.75,
+      "max_abs": 1.5,
+      "_note": "2026-09-22 wave-F integration: max_abs raised from 0.75 (one LSB) to 1.5 (two LSB). dwkrz is an integer staircase; two separately sampled runs interpolated across a step edge differ by exactly one LSB, which failed logcmp stock-vs-E0 in bench_rehearsal.py about 1 run in 3 (brief F3 report). Retighten from two real stock runs with logcmp.py derive.",
       "mean_abs": 0.2,
       "_unit": "degCA, 0.75/LSB, 0x7FCE5C; per-cylinder knock retard, ONE ROW EACH because a single cylinder is what knocks. At E0 with ff_zw_enable = 0 the patch adds no advance at all, so any step here is the ECU's own run-to-run knock behaviour - but a systematic move on one cylinder is the first thing to look at (ignition.md section 6)"
     },
