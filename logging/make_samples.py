@@ -3,12 +3,26 @@
 
 They are deterministic (a fixed LCG, no `random` seed dependence) and describe
 a 10 s bench idle with a short load step, in the long CSV format defined in
-logging/README.md.  Three files are produced:
+logging/README.md.  Five files are produced:
 
     baseline.csv        the "stock" run
     candidate_ok.csv    a repeat run: sensor noise only, inside tolerance
     candidate_bad.csv   the same run with ti_1_w deliberately +8 %, which
                         tolerance.json must flag (issue #24 exit criterion)
+
+    stock_run1.csv      two runs of the same scenario on the same software,
+    stock_run2.csv      i.e. what `logcmp.py derive` wants -- and two separate
+                        POWER-UPS: each carries the live raster activation
+                        counter (100/s, re/findings/scheduler.md section 11)
+                        starting from its own power-up offset, and run 2's
+                        logger started 0.25 s of ECU time later than run 1's.
+                        Comparing them without `--align-on` fails on the ramp;
+                        with it, only the sensor noise is left (brief F2).
+
+`stock_run2.csv` is *not* run 1 with a time offset added to the CSV: the whole
+scenario is sampled 0.25 s of ECU time later, which is what a second power-up
+actually produces and what makes the unaligned comparison fail on the ramp
+rather than on a constant.
 
 Usage:
     python3 logging/make_samples.py
@@ -72,7 +86,12 @@ SLOW = ("tmot_w", "B_stend")
 NOISE = {"nmot_w": 6.0, "rl_w": 0.4, "ti_1_w": 0.008, "lamsoni_w": 0.004,
          "wkr_w": 0.15, "tmot_w": 0.2, "B_stend": 0.0}
 UNITS = {"nmot_w": "rpm", "rl_w": "%", "ti_1_w": "ms", "lamsoni_w": "-",
-         "wkr_w": "degKW", "tmot_w": "degC", "B_stend": "bit"}
+         "wkr_w": "degKW", "tmot_w": "degC", "B_stend": "bit",
+         "raster_setA_10ms_count": "count"}
+
+#: the live 10 ms raster activation counter, 100 per second of ECU time
+RASTER = "raster_setA_10ms_count"
+RASTER_HZ = 100.0
 
 
 def write(path: Path, seed: int, title: str, gain: dict[str, float] | None = None,
@@ -106,6 +125,46 @@ def write(path: Path, seed: int, title: str, gain: dict[str, float] | None = Non
     print(f"wrote {path} ({len(rows)} rows)")
 
 
+def write_run(path: Path, seed: int, title: str, raster_at_t0: int,
+              ecu_offset: float) -> None:
+    """One power-up: the same scenario, seen from a different logger start.
+
+    `ecu_offset` is how far into the scenario the logger's own `t = 0` falls,
+    and `raster_at_t0` is what the ECU's activation counter reads there -- the
+    two are the same fact, once in seconds and once in counts, which is why
+    the counter can be used to undo the offset
+    (`tools/logcmp.py --align-on raster_setA_10ms_count:100`).
+    """
+    rng = Lcg(seed)
+    rows: list[tuple[float, str, float]] = []
+    n_fast = int(DURATION * FAST_HZ)
+    for i in range(n_fast):
+        t = i / FAST_HZ
+        p = profile(t + ecu_offset)
+        for name in FAST:
+            rows.append((t, name, p[name] + NOISE[name] * rng()))
+        rows.append((t, RASTER, raster_at_t0 + RASTER_HZ * t))
+    n_slow = int(DURATION * SLOW_HZ)
+    for i in range(n_slow):
+        t = i / SLOW_HZ
+        p = profile(t + ecu_offset)
+        for name in SLOW:
+            rows.append((t, name, p[name] + NOISE[name] * rng()))
+    rows.sort(key=lambda r: (r[0], r[1]))
+    with path.open("w") as fh:
+        fh.write(f"# {title}\n")
+        fh.write("# ecu: 03H906032 / 1037382557 (synthetic, not a real recording)\n")
+        fh.write("# dump_sha256: b15590d3f1874ace3125c5d047c09a686db9b8bb498187663539ebab205609b3\n")
+        fh.write("# transport: synthetic\n")
+        fh.write(f"# power_up_offset: {RASTER} = {raster_at_t0} at t = 0, "
+                 f"i.e. {ecu_offset:.3f} s of ECU time into the scenario\n")
+        fh.write("time_s,var,value,unit\n")
+        for t, name, v in rows:
+            fmt = f"{v:.0f}" if name == RASTER else f"{v:.4f}"
+            fh.write(f"{t:.3f},{name},{fmt},{UNITS[name]}\n")
+    print(f"wrote {path} ({len(rows)} rows)")
+
+
 def main() -> None:
     OUT.mkdir(exist_ok=True)
     write(OUT / "baseline.csv", 1, "baseline: stock software, bench idle + load step")
@@ -114,6 +173,13 @@ def main() -> None:
     write(OUT / "candidate_bad.csv", 2,
           "candidate: ti_1_w deliberately +8 % (must be flagged)",
           gain={"ti_1_w": 1.08}, t_offset=0.017)
+    write_run(OUT / "stock_run1.csv", 3,
+              "stock run 1 of 2: same scenario, first power-up",
+              raster_at_t0=14830, ecu_offset=0.0)
+    write_run(OUT / "stock_run2.csv", 4,
+              "stock run 2 of 2: the same scenario one power-up later "
+              "(logger started 0.25 s of ECU time further in)",
+              raster_at_t0=14855, ecu_offset=0.25)
 
 
 if __name__ == "__main__":
