@@ -829,6 +829,9 @@ deviation wherever the signal moves fast — the resampling error is roughly the
 signal's slope times the time skew. Steady-state sections are where the
 comparison has power.
 
+The *systematic* part of that skew — the power-up offset — is measurable and
+the tool now removes it: `--align-on` (§5.4). What is left is jitter.
+
 ### 5.2 A pass and a fail
 
 ```bash
@@ -875,9 +878,7 @@ change. Its 97 rows include a convention worth copying — a variable that is
 than silently falling to the default; and the raster counters are excluded
 explicitly, with the reason, because they exist for the alignment step below.
 
-### 5.4 The alignment step `logcmp` cannot do for you
-
-**This is the one gap in the tooling and it must be done by hand.**
+### 5.4 Aligning the two runs — `--align-on`
 
 Two logs are two separate power-ups, and the tens of milliseconds between "the
 ECU powered on" and "the tester finished the DDLI setup" are not the same twice.
@@ -891,19 +892,35 @@ clock at 100/s, so the offset is **measurable rather than guessable**:
 shift = (raster_cand[0] - raster_base[0]) / 100 - (t_cand[0] - t_base[0])
 ```
 
-**`tools/logcmp.py` cannot express this step.** It has no shift or alignment
-option; the candidate CSV must be shifted on its time axis *before* being
-handed to `logcmp`. The implementation to copy is
-`logging/bench_rehearsal.py::_align_on_raster` (brief E4), and
-`patches/ff_fuel/test/procedure.md` §4 is the procedure. A bench comparison of
-two drives needs exactly the same step. Making `logcmp.py` do it itself is a
-sensible follow-on.
+> **Closed 2026-09-22 (brief F2).** This section used to say "`tools/logcmp.py`
+> cannot express this step" and told you to shift the candidate CSV by hand.
+> The tool does it now:
+>
+> ```bash
+> ./.venv/bin/python3 tools/logcmp.py base.csv cand.csv -t tolerance.json \
+>         --align-on raster_setA_10ms_count:100
+> ```
+>
+> `VAR:RATE` is the counter and its counts per second (100 if left out). The
+> shift is printed in the report header (`ALIGN …  candidate shifted by
+> +250.0 ms at 100/s`) and is in the JSON report as `summary.shift_s`;
+> `--align-shift SECONDS` sets it by hand. **A counter missing from either log
+> is an error, exit 2** — silently comparing two unaligned power-ups is the
+> failure the option exists to stop. Use `raster_setA_10ms_count` or
+> `raster_setB_10ms_count` according to what `ff_src_seen` says is live
+> (`patches/ff_counter/test/procedure.md` §4). `logging/bench_rehearsal.py`
+> calls the same function, so the bench and the rehearsal cannot drift apart.
 
-What it is worth: on the E4 rehearsal, running `logcmp` **without** the
-alignment on two runs that differ only by the power-up offset fails three
-variables (`dwkrz_1`, `rk_fuel_mass`, `ti_sum`); **with** the alignment, only
-`ti_sum` fails — and that one is a defect in the session file, not a real
-deviation:
+What it is worth, on the two synthetic runs of `logging/samples/` that differ
+only by a 0.25 s power-up offset (§5.5's recipe, command 3): **five of seven
+variables fail unaligned** — `nmot_w` by `max|d| 404.7` against a limit of
+16.16 — and all of them pass aligned, `nmot_w` at `max|d| 10.77`, which is the
+sensor noise the pair was built with.
+
+And on the E4 rehearsal: running `logcmp` **without** the alignment on two runs
+that differ only by the power-up offset fails three variables (`dwkrz_1`,
+`rk_fuel_mass`, `ti_sum`); **with** the alignment, only `ti_sum` failed — and
+that one was a defect in the session file, not a real deviation:
 
 > **Drift, found by E7 on 2026-09-17, integration/wave-E.**
 > `logging/sessions/ff_fuel.json` declares three variable **names twice**:
@@ -917,7 +934,131 @@ deviation:
 > four `bench_rehearsal.py` failures. The file belongs to the patch briefs, so
 > E7 did not edit it.
 
-### 5.5 The two standing procedures
+**Settled since (checked 2026-09-22, F2):** `logging/sessions/ff_fuel.json`
+holds **93 variables and no duplicate name**, and the rehearsal is 69/69.
+
+### 5.5 Two stock runs → measured tolerances, and the E0 recipe
+
+Every `tolerance.json` in this repo says the same thing about itself: its
+limits are a **starting point from the signals' idle behaviour, not from two
+recorded runs**. C1 made that a rule for Flash 1 (#27) and docs/05's "E0
+equivalence" repeats it — record the scenario **twice on the stock image**, and
+tighten every line to what the ECU actually repeats. Until 2026-09-22 no
+command did that step. `derive` does:
+
+```bash
+# 1. two stock runs of the same scenario -> limits that are measured
+./.venv/bin/python3 tools/logcmp.py derive \
+        logging/samples/stock_run1.csv logging/samples/stock_run2.csv \
+        --align-on raster_setA_10ms_count:100 --exclude 'raster_*' \
+        -o work/tolerance_measured.json
+```
+
+```
+ALIGN raster_setA_10ms_count   candidate shifted by +250.0 ms at 100/s
+LIMIT B_stend                  max_abs=0          mean_abs=0
+LIMIT lamsoni_w                max_abs=0.0108     mean_abs=0.004071
+LIMIT nmot_w                   max_abs=16.16      mean_abs=5.575
+LIMIT rl_w                     max_abs=1.134      mean_abs=0.4141
+LIMIT ti_1_w                   max_abs=0.02295    mean_abs=0.008332
+LIMIT tmot_w                   max_abs=0.501      mean_abs=0.2096
+LIMIT wkr_w                    max_abs=0.4287     mean_abs=0.1529
+EXCL  raster_setA_10ms_count   not compared
+7 variable(s) measured over 0.25-9.95 s x1.5, 1 excluded -> work/tolerance_measured.json
+```
+
+Each limit is that pair's own spread times `--factor` (1.5 by default):
+`max_abs` = max|d| × factor, `mean_abs` = mean|d| × factor, and the `_note` on
+every row keeps the raw numbers. `--exclude` takes names or globs and writes
+them as explicit `"max_abs": null` **"not compared"** rows — the free-running
+counters belong there, because the alignment is computed *from* them and
+comparing them afterwards is circular. The file keeps the format `logcmp`
+already reads (§5.3), plus a `_derived` block naming the two runs, the factor,
+the alignment and the common time range. Its `default` is deliberately
+`0.0 / 0.0`: a variable the pair never saw is not judged by a guess.
+
+```bash
+# 2. the comparison itself: candidate against baseline, on the ECU's clock
+./.venv/bin/python3 tools/logcmp.py \
+        logging/samples/stock_run1.csv logging/samples/stock_run2.csv \
+        -t work/tolerance_measured.json \
+        --align-on raster_setA_10ms_count:100 --uncovered report
+```
+
+```
+ALIGN raster_setA_10ms_count   candidate shifted by +250.0 ms at 100/s
+PASS  B_stend                  n=19     mean=+0 mean|d|=0 max|d|=0@0.500s (limit 0)
+PASS  lamsoni_w                n=195    mean=-1.744e-05 mean|d|=0.002714 max|d|=0.0072@1.250s (limit 0.0108)
+PASS  nmot_w                   n=195    mean=-0.3212 mean|d|=3.717 max|d|=10.77@9.600s (limit 16.16)
+PASS  raster_setA_10ms_count   n=195    mean=+0 mean|d|=0 max|d|=0@0.250s
+PASS  rl_w                     n=195    mean=-0.009374 mean|d|=0.2761 max|d|=0.7563@9.150s (limit 1.134)
+PASS  ti_1_w                   n=195    mean=-0.0007769 mean|d|=0.005554 max|d|=0.0153@0.650s (limit 0.02295)
+PASS  tmot_w                   n=19     mean=+0.04667 mean|d|=0.1397 max|d|=0.334@1.500s (limit 0.501)
+PASS  wkr_w                    n=195    mean=+0.002795 mean|d|=0.102 max|d|=0.2858@9.150s (limit 0.4287)
+8 common variable(s): 8 pass, 0 fail, 0 skipped; 0 baseline-only, 0 candidate-only; 0 uncovered
+RESULT: OK
+```
+
+`--uncovered report` says what to do with the variables the tolerance file does
+not name: leave them out of the comparison and **list** them, instead of
+judging them against the file's `default` limit (`fail`, still the default) or
+dropping them silently (`ignore`). Here it prints `0 uncovered`, because a
+derived file names every variable of the pair — that is the point of it. On a
+hand-written file it is the mode to use: a session file reads plain RAM, so a
+*stock* log carries the patch's `ff_*` variables reading 0, and they must not
+fall to a default limit of 1.0. `logging/bench_rehearsal.py` runs its E0
+comparison exactly this way.
+
+```bash
+# 3. what the alignment is worth: the same comparison without it
+./.venv/bin/python3 tools/logcmp.py \
+        logging/samples/stock_run1.csv logging/samples/stock_run2.csv \
+        -t work/tolerance_measured.json --uncovered report -q
+```
+
+```
+FAIL  lamsoni_w                n=200    mean=+1.9e-05 mean|d|=0.007951 max|d|=0.0351@4.150s (limit 0.0108)
+      max|d| 0.0351 > 0.0108 at t=4.150s
+      mean|d| 0.007951 > 0.004071
+FAIL  nmot_w                   n=200    mean=-0.9022 mean|d|=88.71 max|d|=404.7@4.100s (limit 16.16)
+      max|d| 404.669 > 16.16 at t=4.100s
+      mean|d| 88.7066 > 5.575
+FAIL  rl_w                     n=200    mean=-0.003474 mean|d|=2.457 max|d|=11.91@7.500s (limit 1.134)
+      max|d| 11.9125 > 1.134 at t=7.500s
+      mean|d| 2.45743 > 0.4141
+FAIL  ti_1_w                   n=200    mean=-0.000707 mean|d|=0.0829 max|d|=0.4087@7.700s (limit 0.02295)
+      max|d| 0.4087 > 0.02295 at t=7.700s
+      mean|d| 0.0829 > 0.008332
+FAIL  wkr_w                    n=200    mean=+0.001677 mean|d|=0.2242 max|d|=1.039@4.350s (limit 0.4287)
+      max|d| 1.0395 > 0.4287 at t=4.350s
+      mean|d| 0.224216 > 0.1529
+8 common variable(s): 3 pass, 5 fail, 0 skipped; 0 baseline-only, 0 candidate-only; 0 uncovered
+RESULT: FAILED
+```
+
+Same two runs, same software, same file: **five variables "fail" on 250 ms of
+power-up offset.** That is what an unaligned comparison reports, and it is why
+command 2 is not optional.
+
+`stock_run1.csv` and `stock_run2.csv` are **synthetic** (`make_samples.py`, ten
+seconds of idle with a load step, the second run's logger started 0.25 s of ECU
+time later); they demonstrate the commands, they are not a measurement. On the
+bench the same three commands read:
+
+```bash
+./.venv/bin/python3 tools/logcmp.py derive work/stock_run1.csv work/stock_run2.csv \
+        --align-on raster_setA_10ms_count:100 \
+        --exclude 'raster_*' ff_ticks 'ff_*' -o patches/ff_fuel/test/tolerance_measured.json
+./.venv/bin/python3 tools/logcmp.py work/stock_run1.csv work/ff_fuel_e0.csv \
+        -t patches/ff_fuel/test/tolerance.json --align-on raster_setA_10ms_count:100 \
+        --uncovered report --json work/logcmp.json
+```
+
+The derived file is **new evidence, not a replacement**: keep the hand-written
+`tolerance.json` — it carries the reasoning, the units and the null rows — and
+retighten its numbers from the derived ones, row by row, as C1 asked.
+
+### 5.6 The two standing procedures
 
 **E0 equivalence** (docs/05 §6, docs/01 §3 principle 3): with the ethanol input
 at E0 — or with every feature disabled — the logged `lambda`, `ti`, `fra` and
@@ -1032,7 +1173,8 @@ yet seen on hardware):
  |
 4.x  log the same scenario again
  |
-5.   align on the raster counter, then logcmp against the baseline
+5.   logcmp --align-on the raster counter, against the baseline
+     (and derive the tolerances from the two stock runs first)
  |
 6.   if anything is unexplained: write data/passat_azx_ori.bin back
 ```

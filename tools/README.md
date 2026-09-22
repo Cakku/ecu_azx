@@ -15,7 +15,7 @@ document and `med9lib.py` together.
 | `ethanol_frame_decode.py` | Decode the Pico flex-fuel node's CAN frame (0x0EC) from candump / candump -L / SavvyCAN CSV lines or a whole log, with plausibility and counter/gap checks. `--live` uses python-can if installed; everything else is dependency-free. Layout also in `data/ethanol_node.dbc`. |
 | `measuring_vars.py` | Measuring-variable (TKMWL) table: find the dispatcher, walk all 2200 handlers, report each variable's RAM address/width and VAG display formula; `--groups` dumps the measuring-block group table. |
 | `bindiff.py` | Diff two dumps and classify every changed byte as *patch* (listed in a `patch.json`), *descriptor* (a checksum sum/~sum word) or **unexpected**. Exit 1 on anything unexpected. |
-| `logcmp.py` | Compare a baseline and a candidate log over their common variables with per-variable tolerances. Format and tolerance file: `logging/README.md`. |
+| `logcmp.py` | Compare a baseline and a candidate log over their common variables with per-variable tolerances. `--align-on VAR[:RATE]` first shifts the candidate so the two ECUs' own clocks agree — two runs are two power-ups — and `--uncovered {fail,report,ignore}` says what happens to variables the tolerance file does not name. `logcmp.py derive run1 run2 -o tolerance.json` turns two runs of the same software into limits that are measured repeatability instead of predictions. Format and tolerance file: `logging/README.md`; the recipe: `docs/07_workflow.md` §§5.4-5.5. |
 | `draft_to_xdf.py` | `re/calibration_draft.csv` -> a TunerPro `.xdf`. Maps CPU addresses to **file offsets** through `med9lib`, emits big-endian row-major tables, and validates the result structurally (`--validate`, `--self-test`). No scaling is applied: every value is raw counts. |
 | `cal_show.py` | Print one object of `re/calibration_draft.csv` — its cells, both axes' breakpoints and the same numbers under a trial scaling — or any raw run of elements with `--raw`. `--guess` reports the physical range the numbers would have under every unit `re/findings/` has proved and marks the ones that fit. Read-only; the naming pass's read-out helper (issue #41). |
 | `blobdis.py` | Disassemble a raw big-endian PowerPC blob at a chosen CPU address; `--check-sda` fails if patch code touches r2/r13. |
@@ -104,7 +104,10 @@ Regression checks before a file goes anywhere near the car
 python3 tools/bindiff.py data/passat_azx_ori.bin work/patched.bin \
         -p patches/ff_counter/patch.json          # exit 0 == only intended bytes moved
 python3 tools/bindiff.py stock.bin patched.bin -p patch.json --json work/diff.json
-python3 tools/logcmp.py base.csv cand.csv -t patches/ff_counter/test/tolerance.json
+python3 tools/logcmp.py base.csv cand.csv -t patches/ff_counter/test/tolerance.json \
+        --align-on raster_setA_10ms_count:100 --uncovered report
+python3 tools/logcmp.py derive stock1.csv stock2.csv -o work/tolerance_measured.json \
+        --align-on raster_setA_10ms_count:100 --exclude 'raster_*' ff_ticks
 ```
 
 `checksum.py fix` is semantics-preserving, and running it on the original dump
@@ -141,7 +144,7 @@ constant):
 | `test_ff_diag_patch.py`, `test_ff_fuel_patch.py`, `test_ff_ign_patch.py`, `test_ff_rail_patch.py`, `test_ff_start_patch.py` | the five `patches/ff_fuel` features under the emulator, including the two bit-identity proofs each (disabled, and enabled at neutral calibration) |
 | `test_flexfuel_model.py` | `emu/models/flexfuel.py`, the reference model the patch and FFCAL001 are both checked against |
 | `test_injection_model.py`, `test_start_model.py`, `test_window_model.py`, `test_zw_model.py` | the bit-exact models of the injection, start, injection-window and base-ignition paths |
-| `test_logcmp.py` | the synthetic logs in `logging/samples/` |
+| `test_logcmp.py` | the synthetic logs in `logging/samples/`, including the alignment on the raster counter, the `--uncovered` modes and `derive` |
 | `test_med9kwp.py` | the TP2.0 + KWP2000 stack against `logging/ecu_sim.py` (49 tests, no hardware) |
 | `test_patch_framework.py` | `patches/common/` + `patch_gen` + `patch_apply` + the `ff_counter` hook under the emulator; the build layer skips itself with a clear message when `LLVM_DIR` is not installed |
 | `test_qspi_eeprom.py` | the QSMCM QSPI queue and the M95160 device model |
