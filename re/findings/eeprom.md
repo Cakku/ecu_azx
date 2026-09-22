@@ -577,6 +577,15 @@ found. This is a **correction to the reading implied in
    now VERIFIED-STATIC (`rc = (*fp)(eepAddr, len, buf, statusPtr)`, non-zero
    rc = started, `*statusPtr = 1` = success), and the fact that the pointers
    are 0 in the emulator is exactly what brief D2 saw as the halt spin.*
+   *2026-09-22 (F3, #38): **still open, and now bounded** — §10.7. It is not
+   two cells but a seven-pointer descriptor at 0x7FAB58-0x7FAB7B that nothing
+   in the image writes: no store of any width or addressing mode reaches it
+   (30,239 resolvable SRAM stores, the highest in the page is 0x7FAB55), no
+   copy loop starts within reach, no flash word hands its address to anyone,
+   nothing branches into the missing 16 KB, and no four-argument function of
+   the required shape exists. Read the question from now on as **which
+   variant module fills the descriptor**, the way `FUN_00017E14` fills the
+   boot's own three device pointers in §1.5.*
 2. The PCS encoding used by the **boot** driver (command bytes 0x20/0x80,
    PCS field = 0b0000, i.e. all four chip selects driven low) contradicts the
    application driver's clean PCS0-only encoding (0x0E/0x8E). Either the boot
@@ -945,3 +954,130 @@ layout, not the device's timing. `M95160(wip_polls=n)` is there to make the
 WIP poll take n rounds when someone wants to rehearse a slow part.
 
 Section 7 open question 1 is therefore **narrowed, not settled**: see §10.3.
+
+### 10.7 Who binds 0x7FAB70 / 0x7FAB74 — the exclusion set
+### (F3, 2026-09-22, #38 — a time-boxed negative result, 4 h)
+
+Brief F3 was asked for either a VERIFIED-STATIC answer to §7 Q1 or the set of
+possibilities it can exclude, with the commands. This is the second.
+**Nothing in this image binds the two pointers**, and the search is now wide
+enough that the interesting question has moved.
+
+The new tool is `tools/store_xref.py`: it carries a constant-propagation model
+over both code regions, seeds r13 = 0x7FFFF0 and r2 = 0x5C9FF0, follows `lwz`
+through pointer words in flash, and reports every store — D-form, indexed,
+`stmw`, `stfd` — whose effective address lands in a window. `--control` proves
+the scan works before it is believed:
+
+```bash
+./.venv/bin/python3 tools/store_xref.py data/passat_azx_ori.bin --control
+#   0x7fb6f4-0x7fb703   24 store site(s)  ok   flash_crc_task's state cells
+#   0x7fcd68-0x7fcd69    2 store site(s)  ok   nvm_mode
+#   0x803d3c-0x803d3f    3 store site(s)  ok   kwp_security_state / session
+#   RESULT: PASS
+./.venv/bin/python3 tools/store_xref.py data/passat_azx_ori.bin \
+    --window 0x7FAB58 0x7FAB80
+#   0 store site(s) into 0x7fab58-0x7fab7f
+```
+
+**(a) It is not two cells, it is a whole descriptor that nobody writes.**
+The scan resolves **30,239 stores into 0x7F8000-0x807FFF**, 3,228 of them
+word-sized. Not one lands anywhere in **0x7FAB58-0x7FAB7F** — and that block is
+*all* pointers the same module reads:
+
+| cell | read at | what it is |
+|---|---|---|
+| 0x7FAB58 | 0x05E964, 0x05EB50, 0x05F260, and `addi` at 0x05F868 | table base, indexed `<<3` |
+| 0x7FAB5C | 0x05EB14, and `addi` at 0x05F820 | table base, indexed `<<2` |
+| 0x7FAB60 / 0x7FAB64 | 0x05ED18 / 0x05EE0C | table bases |
+| 0x7FAB6C | `addi` at 0x07191C, 0x071C90, read as a **byte** count | how many devices |
+| **0x7FAB70** | 0x05FD88, and `addi`+`lwz`+`blrl` at 0x061CF0 | the read entry point |
+| **0x7FAB74** | 0x06068C | the write entry point |
+| 0x7FAB78 | 0x061D40 | a third entry point, same shape |
+
+Two more call sites through the pair turned up on the way — **0x061CF0** and
+**0x061FAC**, both `lis`/`addi` 0x7FAB70, `lwz`, `mtlr`, `blrl`; the second
+calls it with `(0x20, 0x20, r1+8)` and then tests the byte at `r1+8` against 1,
+which is the §10.3 completion convention seen from the caller's side.
+So the highest address in 0x7FAB00-0x7FABFF that any store reaches is
+**0x7FAB55**. VERIFIED-STATIC.
+
+**(b) No copy loop can reach it.** `--loops` lists all 18 `stwu` fill/copy
+loops in the image; the only one that starts below the block and within reach
+is 0x0327D0, and it is `ctr = 4`, two words per turn, from flash 0x03449C to
+**0x7FA480-0x7FA4A4** — 0x6CC bytes short. VERIFIED-STATIC.
+
+**(c) No table in flash hands the address to anyone.** Every aligned word of
+both flash regions and of the calibration was checked for a value inside
+0x7FAB40-0x7FAB90: exactly two, **0x0B45D4 = 0x7FAB88** and
+**0x0B45D8 = 0x7FAB7C**, both *above* the pair and both trailing words of the
+TouCAN module-base array at 0x0B45C0 (records of 0xC bytes, count byte at
+0x0B4468, consumer 0x063D4C, which does `lhz 0x816(r31)` on its argument —
+a CAN module base, not a RAM destination). VERIFIED-STATIC.
+
+**(d) Indexed array walks are excluded for a *word*.** `--near 0x1000` keeps
+every indexed store whose base lies up to 0x1000 below the block: 73 sites,
+**all of them `stbx` or `sthx`** off eight array bases in 0x7FA638-0x7FA990.
+A function pointer the manager reads with one `lwz` cannot plausibly be
+assembled by byte or halfword array walks. There is **no `stwx` anywhere in
+the image whose base lies in 0x7FA000-0x7FAB74**. VERIFIED-STATIC.
+
+**(e) It is not in the 16 KB the dump is missing.** No `b`, `bl`, `ba` or `bc`
+anywhere in either code region targets **0x400000-0x403FFF**, and the only
+words pointing there are calibration constants and three peripheral addresses
+(0x401FF0/F4/F8 at 0x010284). A routine in the missing block could therefore
+only be entered through the live ETR exception table that occupies its first
+0x100 bytes — which is not how a device driver gets bound. VERIFIED-STATIC.
+
+**(f) The RAM bootstrap loader is *not* an untested hiding place.** The boot
+copies flash 0x019798-0x02A827 to 0x7F8728 (`boot.md` §6 note (b)); those bytes
+are inside 0x000000-0x1BFFFF and were scanned as code. Absolute `lis`/`addi`
+stores resolve the same wherever the block executes, so the scan covers it.
+Zero hits.
+
+**(g) Approach (c) of the brief — a function with the right signature — finds
+nothing either.** The callers of the three §2 primitives are
+
+```bash
+./.venv/bin/python3 tools/sda_xref.py data/passat_azx_ori.bin \
+    --code 0x085A8C 0x085B54 0x085BC0
+```
+
+0x085B8C for `eeprom_write_byte`; 0x085CDC, 0x085D68, 0x085E10, 0x085E78,
+0x085F18, 0x085F68, 0x087914, 0x089528 for `eeprom_read_bytes`; and
+0x087740-0x0878D8, 0x087F80-0x087FE4, 0x088120-0x088154, 0x089508 for
+`eeprom_write_bytes` — **all** inside the KWP programming module
+0x085000-0x08A000, all three-argument `(addr, len, buf)` and synchronous.
+0x089508/0x089528 is the closest thing to a pair, and it is a write-then-verify
+of 0x20 bytes at 0x280/0x2A0 with a 0x15 error code, not a device binding.
+**No four-argument `(eepAddr, len, buf, statusPtr)` function exists in the
+image.** VERIFIED-STATIC.
+
+#### What that leaves
+
+The question is no longer "which of the functions in this image is bound" —
+none of them is, and nothing in this image performs the binding. The live
+candidates are now:
+
+1. **A variant module the linker dropped.** The block manager, its three table
+   pointers and its three entry-point pointers are one descriptor; a build that
+   selects a different non-volatile device would fill all seven. The boot's own
+   SPI layer already has exactly that shape — `FUN_00017E14` picks one of six
+   device tables by hardware variant and stores three pointers at
+   0x7F83A0/A4/A8 (§1.5). This is the reading §7 Q1 should carry from now on.
+   **HYPOTHESIS.**
+2. **A write through a pointer held in RAM**, which no static scan can follow.
+   The scan does follow a base loaded out of *flash*; a base loaded out of RAM
+   is where its model stops.
+3. A store the model drops because the base was built before a branch. The
+   model resets at every branch, so this is possible in principle — but it
+   would have to build 0x7FAB70 somewhere, and the only sites in the whole
+   image that form an address inside the block are the six readers in the table
+   of (a).
+
+For the simulator the practical answer is unchanged and now better founded:
+`emu.qspi_eeprom.NvmDeviceBinding` installs the two trampolines because
+**nothing else does**, and it implements the signature the call sites require,
+which is VERIFIED-STATIC. `logging/ecu_sim.py` keeps it, and the residue table
+in its module docstring lists 0x7FAB70/0x7FAB74 as hand-bound with this
+section as the reason.
