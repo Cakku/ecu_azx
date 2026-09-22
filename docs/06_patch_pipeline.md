@@ -280,6 +280,15 @@ ERCOSEK raster task (`re/findings/scheduler.md` §7). Both end by
 tail-branching to the original target, so the stock call still happens and
 exactly one flash word changes.
 
+> **Added 2026-09-22 (integration after brief F1, issue #27).** "Exactly one
+> flash word" holds *per hook*, not per patch. A patch may instantiate one
+> trampoline per ERCOSEK task set: `patches/ff_counter` now hooks the 10 ms
+> raster of both sets (0x432940 in set A, 0x12067C in set B) exactly as
+> `patches/ff_fuel` does, so Flash 1 changes two hook words, and §3's on-chip
+> row (0x404000-0x47FFFF, `"onchip_edit": true`, read-back required) applies
+> to `ff_counter` as well, not only to `ff_fuel`. `make HOOKS=external` still
+> builds the single-word set-B patch (`patches/ff_counter/README.md`).
+
 The tail branch is `ba` (AA=1), not `b`. **VERIFIED-STATIC 2026-09-16:** the
 GNU/LLVM PowerPC assembler reads a *numeric* branch operand as a
 **displacement**, so `b 0x0011F02C` assembles to 0x4811F02C — a branch to
