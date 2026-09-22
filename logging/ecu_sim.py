@@ -24,11 +24,54 @@ What is **not** real, and why (details in `re/findings/kwp.md` section 12):
   of kwp.md section 2 and calls the real one-line setter `kwp_session_set`
   (0x13CEE4), plus the real `kwp_sid_2C_h2` (0x35034) that wipes the dynamic
   ids on every session change.
-* **the security seed.**  It comes from the PowerPC time base, which the
-  Unicorn 603e never advances, so the real handler always stores 0.
-  `--seed` writes a value into `kwp_sec_seed` (0x7FB774) *after* the real
-  seed handler ran; the key is then checked by the real `kwp_sid_27_h1`
-  against that value, exactly as `tools/kwp_seckey_verify.py` does.
+* **the security seed's clock.**  It comes from the PowerPC time base, which
+  the Unicorn 603e never advances.  `emu/time_base.py` gives
+  `read_time_base` (0x478460) a running virtual time base off the simulator's
+  own clock -- without it the level-1 seed loop at 0x36328 never exits and
+  `27 01` cannot be answered at all.  The seed *handler* is the firmware's:
+  `--seed` only writes a value into `kwp_sec_seed` (0x7FB774) *after* the real
+  level-2 seed handler ran, so the number on the wire is predictable; the key
+  is then checked by the real `kwp_sid_27_h1` against that value, exactly as
+  `tools/kwp_seckey_verify.py` does.  `27 01` is not overridden: its seed is
+  the virtual time base and the key follows from it.
+
+**Power-on state (2026-09-22, brief F3, `re/findings/boot.md` section 6.5).**
+`power_on` no longer hand-seeds the KWP security cells.  It calls ten of the
+1,028 entries of the firmware's own one-shot init table (`INIT_ENTRIES`), in
+the table's order, the way `os_start` does -- so `kwp_sec_level_flags`,
+`kwp_sec_lfsr_rounds`, `nvm_mode`, the TP buffer pointers and the DDLI entry
+arrays are written by the ECU's code, not by this file.  What is still seeded
+by hand, and why:
+
+===================================  ====================================
+cell                                 reason
+===================================  ====================================
+`kwp_session_current` 0x803D3E = 0   no init entry writes it (it is BSS,
+`kwp_security_state`  0x803D3C = 0   and zero on a cold emulator); written
+`kwp_sec_seed`        0x7FB774 = 0   so a *repeated* `power_on()` is a real
+                                     power cycle rather than a no-op
+`AnimatedRam.statics` + the ramps    engine values.  On the ECU they are
+                                     produced by tasks, not by an init
+                                     entry; the simulator runs no tasks
+0x7FADAC / 0x7FADAD / 0x7FADAB       the NVM device sub-states and the
+                                     request queue, seeded by
+                                     `emu.qspi_eeprom.cold_start()`; no
+                                     init entry writes them either
+                                     (`eeprom.md` section 10.4)
+0x7FAB70 / 0x7FAB74                  the NVM device function pointers.
+                                     **None of the 1,028 entries writes
+                                     them** (`boot.md` section 6.3), so
+                                     `NvmDeviceBinding` still installs the
+                                     two trampolines (`eeprom.md` 7 Q1)
+===================================  ====================================
+
+One ordering difference from the part, deliberate: the simulator attaches the
+EEPROM and runs `cold_start()` *before* the init entries, so `kwp_sec_init`
+reads a filled mirror at 0x7FA02C.  On the ECU the mirror is still zero then
+-- the start-up block read is driven from a task (0x061BF4, called by
+0x120FB8 and 0x45CD48), i.e. after `os_start` -- and `app_init` has just
+cleared 0x7F8490-0x7FA62F.  Both give `kwp_sec_delay_timer` = 0, because a
+factory-shaped image holds 0x0000 at block 11 payload +0x0C.
 
 A few RAM cells are animated so a log shows movement: an rpm ramp, coolant
 warm-up, the Flash-1 counter of `patches/ff_counter/` and the five raster
@@ -95,16 +138,47 @@ SEC_LFSR_ROUNDS = 0x7FB770
 SEC_RETRY_FLAG = 0x7FB780
 H_SESSION_SET = 0x13CEE4             # kwp_session_set: stb r3,0x803D3E
 H_DDLI_WIPE = 0x35034                # kwp_sid_2C_h2: wipes all 10 dynamic ids
-#: `ddli_init` (kwp.md 4.1, dated note of 2026-09-17).  It fills the ten
-#: entry-array pointers at `ddli_def_table+4`: id 0xF0 -> 0x80366C (0xA0 B =
-#: 20 entries), ids 0xF1..0xF9 -> 0x80370C + (n-1)*0x18 (3 entries each).
-#: Nothing else in the image writes those words, `kwp_sid_2C_h2` clears only
-#: the count byte, and the firmware reaches this routine through the
-#: function-pointer table at 0x0B1B88 -- which the emulator never runs.  Left
-#: unrun, every pointer is 0, so all ten ids share one entry array at address
-#: 0 and the second dynamic id defined silently overwrites the first one's
-#: entries.  The simulator therefore calls the real routine at power-on.
-H_DDLI_INIT = 0x12E39C
+
+#: **The firmware's own start-up, as far as a KWP session needs it.**
+#:
+#: `tbl_module_init` (0x0B1A68) is a flat NULL-terminated array of 1,028
+#: function pointers that `os_start` (0x477990) walks **once, in order, with
+#: no arguments, before the first task ever runs** -- `re/findings/boot.md`
+#: section 6.1 and 6.2.  It is the only caller those functions have, which is
+#: why `ddli_init`, `nvm_set_normal_mode` and the rest looked caller-less.
+#: The emulator has no OS to walk it, so `Med9Handlers.power_on` calls the
+#: handful of entries a session depends on -- the list `boot.md` section 6.5
+#: drew up for exactly this -- rather than hand-seeding the cells they write.
+#: Calling all 1,028 is the wrong trade: most of them touch peripherals the
+#: emulator does not model.
+#:
+#: `idx` is the array index from 0x0B1A68, so a row can be checked straight
+#: against the table in `boot.md` section 6.4.  The names are that section's
+#: (HYPOTHESIS as names, VERIFIED-STATIC as addresses and effects).
+INIT_ENTRIES = (
+    # idx   address     name                    what it leaves behind
+    (18, 0x0BA0F4, "nvm_set_sync_mode"),     # nvm_mode (0x7FCD68) = 2 ...
+    (24, 0x0BA104, "nvm_set_normal_mode"),   # ... then 1: normal, async mode
+    (38, 0x12F138, "kwp_tp_buf_init"),       # RAM buffer pointers 0x8037E4,
+                                             #   0x8037E8, 0x8037EC, 0x8038D4
+    (71, 0x036AB8, "kwp_sec_init"),          # 0x7FB781 = 0x7FB780 = 0x7FB770
+                                             #   = 0; lockout 0x7FB748 from
+                                             #   the EEPROM mirror 0x7FA02C
+    (72, 0x12E39C, "ddli_init"),             # the ten DDLI entry-array
+                                             #   pointers at 0x80403C+8n:
+                                             #   0xF0 -> 0x80366C (20 entries),
+                                             #   0xF1..0xF9 -> 0x80370C+0x18n.
+                                             #   Unrun, all ten are 0 and the
+                                             #   second id defined overwrites
+                                             #   the first (kwp.md 4.1)
+    (75, 0x12E2D8, "flash_crc_init"),        # 0x7FB6F4 = 0, 0x801200 = 0, the
+                                             #   state flash_crc_task starts
+                                             #   from (flash_programming 5.3a)
+    (83, 0x12F638, "kwp_ct_buf_init_a"),     # eight pointers 0x7FB074-0x7FB0A8
+    (84, 0x12F664, "kwp_ct_buf_init_b"),     #   and 0x802CF8/0x802CFA = 0x444
+    (86, 0x12FDA4, "kwp_list_head_init"),    # list heads through 0x4104C4
+    (89, 0x134E5C, "dtc_list_head_init"),    #   (0x7FBC09/0x7FBC0B, 0x7FCBA8)
+)
 
 # scratch inside the external SRAM, above everything the application uses
 IO_STRUCT = 0x807800
@@ -586,12 +660,19 @@ class Med9Handlers:
                  clock=None, session_timeout_s: float | None = None,
                  patch_dir: str | None = None, eeprom: str | None = None,
                  time_scale: float = 1.0, run_patch: bool = True,
-                 stock_tasks: bool = False, wip_polls: int = 0):
+                 stock_tasks: bool = False, wip_polls: int = 0,
+                 time_base: bool = True):
         from emu import Med9Emu
+        from emu.time_base import VirtualTimeBase
         if patch_dir:
             dump_path = apply_patch_to_temp(patch_dir, dump_path)
         self.dump_path = dump_path
         self.emu = Med9Emu(dump_path, r2="app")
+        #: Installed **first**, before anything runs `read_time_base`: the
+        #: level-1 seed loop spins forever on a frozen time base, so `27 01`
+        #: could not be answered at all and `kwp_sec_lfsr_rounds` had to be
+        #: hand-seeded.  See `emu/time_base.py`.
+        self.time_base = VirtualTimeBase(self.emu) if time_base else None
         self.seed_override = seed
         self.animate = animate
         self.ram = ram or AnimatedRam(statics=dict(DEFAULT_STATICS))
@@ -668,24 +749,29 @@ class Med9Handlers:
         return out
 
     def power_on(self) -> None:
-        """Reset RAM to what a freshly powered ECU looks like for our purposes."""
+        """Bring RAM to the state the firmware's own start-up leaves.
+
+        The three KWP state bytes below are the residue documented in the
+        module docstring; everything else is produced by running the real
+        init-table entries of :data:`INIT_ENTRIES`, in the table's own order.
+        `self.init_log` records how each one ended, so a test can assert that
+        the firmware -- not this file -- wrote the cells it checks.
+        """
         self.emu.write(SESSION_CURRENT, b"\x00")
         self.emu.write(SECURITY_STATE, b"\x00")
         self.emu.write(SEC_SEED, b"\x00\x00\x00\x00")
-        # The application arms the security levels and the LFSR round count;
-        # both are BSS in the dump.  tools/kwp_seckey_verify.py seeds the same.
-        self.emu.write(SEC_LEVEL_FLAGS, bytes([0x03]))
-        self.emu.write(SEC_LFSR_ROUNDS, bytes([5]))
-        self.emu.write(SEC_RETRY_FLAG, b"\x00")
-        # The application's start-up runs ddli_init through the function-
-        # pointer table at 0x0B1B88; the emulator has no OS to walk that table,
-        # so run the firmware's own routine here.  Without it every dynamic id
-        # points its entry array at address 0 and the second id defined
-        # overwrites the first one's entries (kwp.md 4.1, 2026-09-17).
-        res = self.emu.call(H_DDLI_INIT, reset=False)
-        if not res.ok:                                       # pragma: no cover
-            self.log.append(f"ddli_init did not return: {res.stop_reason}")
+        self.init_log = []
+        for idx, addr, name in INIT_ENTRIES:
+            res = self.emu.call(addr, regs={"r1": TASK_STACK_TOP},
+                                reset=False, max_insns=4_000_000)
+            self.init_log.append((idx, name, addr, res.ok))
+            if not res.ok:                                   # pragma: no cover
+                self.log.append(
+                    f"init entry {idx} ({name} {addr:#08x}) did not return: "
+                    f"{res.stop_reason} at {res.pc:#08x}")
         self.ram.power_on(self.emu)
+        if self.time_base is not None:
+            self.time_base.advance(0.0)
         self.t0 = self.clock()
 
     # -- state -------------------------------------------------------------
@@ -768,6 +854,10 @@ class Med9Handlers:
         self.step()
         if self.animate:
             self.ram.apply(self.emu, self.sim_time())
+        if self.time_base is not None:
+            # every handler sees a time base that has moved since the last
+            # request, which is what the level-1 seed loop insists on
+            self.time_base.advance(self.sim_time())
         now = self.clock()
         if (self.session_timeout_s is not None and self.session != 0
                 and now - self._last_request > self.session_timeout_s):
