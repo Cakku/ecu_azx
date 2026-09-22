@@ -1,7 +1,9 @@
 {
   "name": "ff_counter",
   "issue": 27,
-  "description": "Flash 1: increment a u32 counter and write an alive pattern in the patch RAM block, once per task_100ms activation. No stock RAM, no calibration, no behaviour change.",
+  "variant": "both",
+  "variant_note": "HOOKS=both, the default and the variant meant for Flash 1: one hook word in each 10 ms raster, so the counter runs whichever task set is live (re/findings/scheduler.md sections 8, 8.1 and 11.8). The set-A word 0x432940 is in the on-chip flash and carries \"onchip_edit\": true. The other variant is patch.external.json (`make HOOKS=external`), which hooks 0x12067C alone and is the pre-F1 patch byte for byte.",
+  "description": "Flash 1: increment a u32 counter, record which task set called (1 = set A, 2 = set B, 3 = both) and write an alive pattern in the patch RAM block, once per 10 ms raster activation. No stock RAM, no calibration, no behaviour change.",
   "base_sha256": "b15590d3f1874ace3125c5d047c09a686db9b8bb498187663539ebab205609b3",
   "requires": [],
   "ram_status": "static",
@@ -10,38 +12,55 @@
     "flash": "0x00150000",
     "ram": "0x007FFB00",
     "ram_size": 256,
-    "blob": "build/ff_counter.bin",
-    "sym": "build/ff_counter.sym",
+    "blob": "build/both/ff_counter.bin",
+    "sym": "build/both/ff_counter.sym",
     "hooks": [
+      {
+        "site": "0x00432940",
+        "kind": "bl",
+        "target": "ff_counter_hook_a",
+        "old": "4bc8b0a5",
+        "onchip_edit": true,
+        "why": "task_100ms_int (0x4328E4, id 19), task set A's 10 ms raster: bl nop_leaf_bd9e4 -> ff_counter_hook_a trampoline, which tail-branches back to 0x0BD9E4 (re/findings/scheduler.md section 8.1). ON-CHIP FLASH 0x404000-0x47FFFF."
+      },
       {
         "site": "0x0012067C",
         "kind": "bl",
-        "target": "ff_counter_hook",
+        "target": "ff_counter_hook_b",
         "old": "4bffe9b1",
-        "why": "task_100ms (0x1205A0, TCB 23): bl clr_ram_7FE889_800E18 -> ff_counter_hook trampoline, which tail-branches back to 0x11F02C (re/findings/scheduler.md section 8)"
+        "why": "task_100ms (0x1205A0, TCB 23), task set B's 10 ms raster: bl clr_ram_7FE889_800E18 -> ff_counter_hook_b trampoline, which tail-branches back to 0x11F02C (re/findings/scheduler.md section 8)"
       }
     ],
-    "blob_size": 96,
-    "blob_sha256": "4645f45b1eeef4795aceab574938abcb51dbef6c70e36b074ca9d0ebfb4d95f5",
+    "blob_size": 224,
+    "blob_sha256": "988390b3a4df382ccb7dfb76c5f10d40cedc7a06590f78c2cb42f63d9a6c20f5",
     "bss_size": 8,
     "symbols": {
-      "ff_counter_hook": "0x150000"
+      "ff_counter_hook_a": "0x150000",
+      "ff_counter_hook_b": "0x150020"
     }
   },
   "changes": [
     {
       "addr": "0x150000",
       "kind": "blob",
-      "old": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-      "new": "9421fff07c0802a69001000c480000158001000c7c0803a6382100104811f02e3c6000803883fb00a08400042804fc0141820020388000003ca000809485fb00b08500063c8000006084fc01b08500048083fb00388400019083fb004e800020",
-      "why": "ff_counter code and constants (96 B of free flash)"
+      "old": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "new": "9421fff07c0802a69001000c480000358001000c7c0803a638210010480bd9e69421fff07c0802a69001000c480000658001000c7c0803a6382100104811f02e3c6000803883fb00a0a400042805fc014182002438a000003cc0008094a6fb0098a6000698a600073ca0000060a5fc01b0a6000488a4000660a5000198a400068083fb00388400019083fb004e8000203c6000803883fb00a0a400042805fc014182002438a000003cc0008094a6fb0098a6000698a600073ca0000060a5fc01b0a6000488a4000660a5000298a400068083fb00388400019083fb004e800020",
+      "why": "ff_counter code and constants (224 B of free flash)"
+    },
+    {
+      "addr": "0x432940",
+      "kind": "hook",
+      "old": "4bc8b0a5",
+      "new": "4bd1d6c1",
+      "why": "task_100ms_int (0x4328E4, id 19), task set A's 10 ms raster: bl nop_leaf_bd9e4 -> ff_counter_hook_a trampoline, which tail-branches back to 0x0BD9E4 (re/findings/scheduler.md section 8.1). ON-CHIP FLASH 0x404000-0x47FFFF.",
+      "onchip_edit": true
     },
     {
       "addr": "0x12067c",
       "kind": "hook",
       "old": "4bffe9b1",
-      "new": "4802f985",
-      "why": "task_100ms (0x1205A0, TCB 23): bl clr_ram_7FE889_800E18 -> ff_counter_hook trampoline, which tail-branches back to 0x11F02C (re/findings/scheduler.md section 8)"
+      "new": "4802f9a5",
+      "why": "task_100ms (0x1205A0, TCB 23), task set B's 10 ms raster: bl clr_ram_7FE889_800E18 -> ff_counter_hook_b trampoline, which tail-branches back to 0x11F02C (re/findings/scheduler.md section 8)"
     }
   ],
   "generated_by": "tools/patch_gen.py"

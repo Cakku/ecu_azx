@@ -195,12 +195,17 @@ check: all
 	@echo "== link addresses =="
 	@cat $(SYM)
 
+# Both tools take "patches/<name>/ or its patch.json", and it must be the
+# LATTER here: a patch with build variants has one descriptor per variant
+# (patches/ff_counter's patch.json / patch.external.json, brief F1 2026-09-22)
+# and passing the directory would silently regenerate and apply the default one
+# whatever PATCH_JSON says.
 gen: all
-	$(PYTHON) $(REPO)/tools/patch_gen.py . --stock $(STOCK)
+	$(PYTHON) $(REPO)/tools/patch_gen.py $(PATCH_JSON) --stock $(STOCK)
 
 apply: gen
 	@mkdir -p $(WORK)
-	$(PYTHON) $(REPO)/tools/patch_apply.py $(STOCK) . -o $(WORK)/$(NAME).bin
+	$(PYTHON) $(REPO)/tools/patch_apply.py $(STOCK) $(PATCH_JSON) -o $(WORK)/$(NAME).bin
 
 clean:
 	rm -rf $(BUILD)
