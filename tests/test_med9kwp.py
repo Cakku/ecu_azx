@@ -42,7 +42,7 @@ if HAVE_CAN:
     from med9kwp.kwp import DdliChunk, split_around_protected
     from med9kwp import vag_formulas
     import med9log
-    from ecu_sim import AnimatedRam, Med9Handlers
+    from ecu_sim import AnimatedRam, DEFAULT_STATICS, Med9Handlers
 
 _CHANNEL = 0
 
@@ -517,6 +517,12 @@ class TestUploadOverTheBus(_SimCase):
 class TestLoggerEndToEnd(_SimCase):
     """`med9log.py log` against the simulator, then through tools/logcmp.py."""
 
+    #: this session logs ff_ticks / ff_alive, and since brief F3 the stand-in
+    #: only fills 0x7FFB00 for an image that carries patches/ff_counter -- a
+    #: stock image must leave those bytes alone.  `flash1=True` says "pretend
+    #: Flash 1 is in", which is what this test has always assumed.
+    SIM_KW = {"ram": AnimatedRam(flash1=True, statics=dict(DEFAULT_STATICS))}
+
     def _session_file(self, folder: Path) -> Path:
         doc = {
             "ecu": "03H906032 / 1037382557",
@@ -661,12 +667,19 @@ class TestAnimatedRam(DumpUnchanged):
         self.assertAlmostEqual(ram.rpm(5.0), 1900.0)
 
     def _counters(self, live_set: str) -> dict[int, int]:
+        # flash1=True: the stand-in only fills 0x7FFB00 for an image that
+        # carries patches/ff_counter, and DUMP is the stock one.
         handlers = Med9Handlers(str(DUMP), animate=False,
-                                ram=AnimatedRam(live_task_set=live_set))
+                                ram=AnimatedRam(live_task_set=live_set,
+                                                flash1=True))
         handlers.ram.apply(handlers.emu, 1.0)          # one simulated second
-        return {a: struct.unpack(">I", handlers.read_ram(a, 4))[0]
-                for a in (0x7FD754, 0x7FD758, 0x7FD75C, 0x7FD760, 0x7FD778,
-                          0x7FFB00)}
+        out = {a: struct.unpack(">I", handlers.read_ram(a, 4))[0]
+               for a in (0x7FD754, 0x7FD758, 0x7FD75C, 0x7FD760, 0x7FD778,
+                         0x7FFB00)}
+        out[0x7FFB04] = struct.unpack(">H", handlers.read_ram(0x7FFB04, 2))[0]
+        out[0x7FFB06] = handlers.read_ram(0x7FFB06, 1)[0]
+        out[0x7FFB07] = handlers.read_ram(0x7FFB07, 1)[0]
+        return out
 
     def test_set_b_live_counts_at_the_c4_rates(self):
         c = self._counters("B")
@@ -674,16 +687,38 @@ class TestAnimatedRam(DumpUnchanged):
         self.assertEqual(c[0x7FD778], 500)       # set B 2 ms
         self.assertEqual(c[0x7FD758], 100)       # set B 10 ms
         self.assertEqual(c[0x7FFB00], 100)       # ff_ticks tracks it 1:1
+        self.assertEqual(c[0x7FFB06], 2)         # ff_src_seen = set B
         self.assertEqual(c[0x7FD754], 0)         # set A frozen
         self.assertEqual(c[0x7FD75C], 0)
 
-    def test_set_a_live_freezes_the_flash1_block(self):
-        """The case flash1_counter.json check 1 must not read as a bad flash."""
+    def test_set_a_live_still_counts_the_flash1_block(self):
+        """Brief F1: Flash 1 hooks BOTH 10 ms rasters, so the block runs
+        whichever set is live and ff_src_seen names it.  A frozen block is
+        now a statement about the flash -- flash1_counter.json check 1."""
         c = self._counters("A")
         self.assertEqual(c[0x7FD75C], 1000)      # set A 1 ms
         self.assertEqual(c[0x7FD754], 100)       # set A 10 ms
         self.assertEqual(c[0x7FD758], 0)         # set B frozen
-        self.assertEqual(c[0x7FFB00], 0)         # and so is our counter
+        self.assertEqual(c[0x7FFB00], 100)       # our counter is NOT frozen
+        self.assertEqual(c[0x7FFB06], 1)         # ff_src_seen = set A
+
+    def test_a_stock_image_leaves_the_flash1_block_alone(self):
+        """A live counter on an unpatched image is a false 'the patch is in'
+        -- and bench_rehearsal.py's stock step reads exactly those bytes."""
+        h = Med9Handlers(str(DUMP), animate=False,
+                         ram=AnimatedRam(live_task_set="A"))
+        self.assertFalse(h.ram.flash1, "no ff_counter blob at 0x150000")
+        h.ram.apply(h.emu, 12.0)
+        self.assertEqual(h.read_ram(0x7FFB00, 8), bytes(8))
+
+    def test_the_flash1_block_matches_the_patch_layout(self):
+        """+0x04 ff_alive = 0xFC01, +0x06 ff_src_seen, +0x07 ff_reserved."""
+        for live_set, want_src in (("A", 1), ("B", 2)):
+            with self.subTest(task_set=live_set):
+                c = self._counters(live_set)
+                self.assertEqual(c[0x7FFB04], 0xFC01)
+                self.assertEqual(c[0x7FFB06], want_src)
+                self.assertEqual(c[0x7FFB07], 0)
 
 
 if __name__ == "__main__":

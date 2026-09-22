@@ -125,6 +125,64 @@ class TestPatchRunner(DumpUnchanged):
                                     for b in raw), raw.hex())
 
 
+# ------------------------------------------- Flash 1, the other patch -------
+@requires_dump
+@requires_sim
+class TestTheRunnerDrivesFlash1Too(DumpUnchanged):
+    """`--sim-patch patches/ff_counter` runs that patch's own stubs.
+
+    `PatchRunner` used to look its hook up by the literal name
+    `ff_fuel_hook_a`; it now takes whichever symbol ends in `_hook_a` /
+    `_hook_b`, so a Flash-1 rehearsal exercises the real trampolines of
+    brief F1 rather than `AnimatedRam`'s stand-in.
+    """
+
+    FF_COUNTER = REPO / "patches" / "ff_counter"
+
+    def _run(self, task_set: str, seconds: float = 1.0):
+        h = Med9Handlers(str(DUMP), patch_dir=str(self.FF_COUNTER),
+                         ram=AnimatedRam(live_task_set=task_set,
+                                         statics=dict(DEFAULT_STATICS)))
+        h.runner.advance(seconds)
+        return h
+
+    def test_the_set_a_stub_counts_and_names_itself(self):
+        h = self._run("A")
+        block = h.emu.read(PATCH_RAM, 8)
+        self.assertEqual(struct.unpack_from(">I", block, 0)[0], h.runner.ticks)
+        self.assertEqual(struct.unpack_from(">H", block, 4)[0], 0xFC01)
+        self.assertEqual(block[6], 1, "ff_src_seen = set A")
+        self.assertEqual(block[7], 0, "ff_reserved")
+        self.assertEqual(h.runner.errors, [])
+        self.assertGreater(h.runner.ticks, 10)
+
+    def test_the_set_b_stub_names_itself(self):
+        h = self._run("B")
+        self.assertEqual(h.emu.read(PATCH_RAM, 8)[6], 2)
+        self.assertEqual(h.runner.errors, [])
+
+    def test_a_stock_image_has_no_flash1_block(self):
+        h = Med9Handlers(str(DUMP), animate=True,
+                         ram=AnimatedRam(live_task_set="A",
+                                         statics=dict(DEFAULT_STATICS)))
+        self.assertFalse(h.ram.flash1)
+        h.ram.apply(h.emu, 30.0)
+        self.assertEqual(h.emu.read(PATCH_RAM, 8), bytes(8))
+
+    def test_the_patched_image_switches_the_stand_in_on(self):
+        """Without a runner, the image alone is enough to animate it."""
+        from ecu_sim import apply_patch_to_temp
+        image = apply_patch_to_temp(str(self.FF_COUNTER), str(DUMP))
+        h = Med9Handlers(image, animate=True,
+                         ram=AnimatedRam(live_task_set="A",
+                                         statics=dict(DEFAULT_STATICS)))
+        self.assertTrue(h.ram.flash1)
+        self.assertTrue(h.ram.owns_patch_ram)
+        h.ram.apply(h.emu, 5.0)
+        self.assertEqual(struct.unpack(">I", h.emu.read(PATCH_RAM, 4))[0], 500)
+        self.assertEqual(h.emu.read(PATCH_RAM + 6, 1), b"\x01")
+
+
 # --------------------------------- the DDLI path, across several ids --------
 @requires_dump
 @requires_sim

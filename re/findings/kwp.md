@@ -701,3 +701,36 @@ loop:  21 F0   -> 61 F0 <bytes>        ; sample
 * `kwp_sec_level_flags` (0x7FB781) and the LFSR round count (0x7FB770) are
   BSS in the dump and are seeded at simulated power-on (0x03 and 5), as the
   verify tools do; on a real ECU the application sets them.
+
+> **2026-09-22 (F3, #20) — both bullets are now obsolete, and the second was
+> wrong about who writes those cells. VERIFIED-STATIC + VERIFIED-DYNAMIC.**
+>
+> **(a) The round count is the seed handler's, not "the application's".**
+> `kwp_sec_init` (0x036AB8), init-table index 71, writes 0x7FB781 = 0,
+> 0x7FB780 = 0 and 0x7FB770 = **0**; the 5 is written by `kwp_sid_27_h1`
+> itself, `li r10,5` / `stb r10,-0x4880(r13)` at **0x03635C**, in the level-1
+> arm of the seed request, together with `0x7FB781 |= 1` at 0x036348. The
+> level-**2** seed path sets its own bit 1 at 0x036558-0x036564, so the
+> hand-seeded 0x03 was never needed for the `27 03`/`27 04` pair either.
+> `logging/ecu_sim.py` now calls index 71 at power-on and seeds neither cell:
+> 0x7FB770 reads 0 until a `27 01`, then 5. `boot.md` §6.5 item 1, §6.7(b).
+>
+> **(b) The seed is no longer always 0 — the level-1 path could not have run
+> at all.** The seed loop at 0x036328-0x03633C re-reads `read_time_base`
+> (0x478460) **until** the value differs from the previous seed *and* its low
+> word's top byte is non-zero. With TBU/TBL frozen at 0 that loop never exits:
+> `27 01` on the simulator stopped at the instruction limit inside
+> `read_time_base`, which is why only the level-2 pair was ever exercised.
+> `emu/time_base.py` rewrites the three time-base reads inside that one
+> routine into `lwz` against a scratch pair and drives them from the
+> simulator's clock, so `27 01` → `27 02` with `key_level1(seed)` now runs end
+> to end (`tests/test_ecu_sim_initstate.py`). `--seed` still overrides the
+> **level-2** seed after the real handler ran, exactly as before; level 1 is
+> not overridden, because its seed is now real.
+>
+> **(c) A consequence for the part.** The same loop means a real ECU whose
+> time base has just been zeroed refuses a level-1 seed for the first
+> 0x01000000 ticks ≈ **4.8 s**, and again for 4.8 s out of every 1,224 s TBL
+> wrap. A tester that asks for `27 01` immediately after power-up can see the
+> request take that long. HYPOTHESIS for the behaviour on the car (it follows
+> from the loop, but the time base's start value at reset is not established).
