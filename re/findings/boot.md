@@ -328,6 +328,10 @@ in Ghidra is correct. **VERIFIED-STATIC.**
 > 0x019798)` and carries its own flash-device table at flash 0x01E71C.
 > `r2_context.py`'s clean result for it should be re-read with that in mind.
 >
+> *Added 2026-09-22 (integration, brief F5):* the loader's entry conditions,
+> transport (QSMCM SCI1, not CAN), command table, address blacklist and the
+> per-failure recovery table are in `re/findings/ram_loader.md`.
+>
 > **(c) §3.2 is wrong about r2.** "The relocated block (flash
 > 0x081A00-0x085400) contains **zero** r2-relative references" — it contains
 > four, all in the two-instruction form `addis rX,r2,-0x54` + a D-form
