@@ -564,8 +564,10 @@ effect are VERIFIED-STATIC.
 device is bound by `emu.qspi_eeprom`. Measured against the real walk, that is
 right in spirit and wrong in three details, all **VERIFIED-STATIC**:
 
-1. **`kwp_sec_init` (0x036AB8) is init-table index 71, and it does the
-   opposite of the hand-seeding.** It writes `kwp_sec_level_flags` (0x7FB781)
+1. **SETTLED (2026-09-22, F3, §6.7 and `logging/ecu_sim.py`'s module
+   docstring).** `power_on` now calls 0x036AB8 and lets the real `27 01` arm
+   the LFSR. **`kwp_sec_init` (0x036AB8) is init-table index 71, and it does
+   the opposite of the hand-seeding.** It writes `kwp_sec_level_flags` (0x7FB781)
    **= 0**, 0x7FB780 = 0 and `kwp_sec_lfsr_rounds` (0x7FB770) **= 0**, then
    loads `kwp_sec_delay_timer` (0x7FB748) from the **EEPROM mirror halfword at
    0x7FA02C** (`lis r11,0x80; lhz r11,-0x5FD4(r11)`), i.e. the SecurityAccess
@@ -576,14 +578,17 @@ right in spirit and wrong in three details, all **VERIFIED-STATIC**:
    real `27 01` arm the LFSR, or keep the shortcut and record that it emulates
    a post-`27 01` state, not a post-power-on one. `kwp.md` §12.6 assumed "the
    application sets them"; it is the *seed handler* that does.
-2. **`nvm_mode` (0x7FCD68) is 1 after start-up, not 0.** Index 18
+2. **SETTLED (2026-09-22, F3).** The simulator calls indices 18 and 24 and
+   `nvm_mode` reads 1. **`nvm_mode` (0x7FCD68) is 1 after start-up, not 0.** Index 18
    (`nvm_set_sync_mode`, writes 2) and index 24 (`nvm_set_normal_mode`,
    writes 1) are *both* called, in that order, so the manager comes up in
    **normal (asynchronous) mode**. `eeprom.md` §9 item 3 left the trigger of
    the synchronous mode as HYPOTHESIS; this shows both setters do run once at
    start-up and that nothing else in the image calls either, so the
    synchronous shutdown mode is never entered in a stock image.
-3. **`flash_crc_init` (0x12E2D8, index 75) clears the CRC state byte
+3. **SETTLED (2026-09-22, F3, §6.7).** Index 75 is called too, and
+   `flash_crc_task` now runs in the simulated background behind `--flash-crc`.
+   **`flash_crc_init` (0x12E2D8, index 75) clears the CRC state byte
    0x7FB6F4 and 0x801200.** A simulator that wants `flash_crc_task`
    (0x011CB10) to run at all has to start from state 0; on a cold emulator the
    cell is already 0, so this one is free — but it is the reason the CRC is a
@@ -604,6 +609,12 @@ handful of entries a session needs — 71, 72, 38, 83, 84 — and to keep the re
 of the hand-seeding, documented as such. That decision is the simulator
 owner's; this section is the input, and `logging/` was not touched by this
 brief.
+
+> **SETTLED 2026-09-22 (F3, #20/#38).** `Med9Handlers.power_on` now calls ten
+> entries — **18, 24, 38, 71, 72, 75, 83, 84, 86, 89**, in the table's own
+> order — and every one of them returns cleanly under Unicorn. The residue
+> that is still seeded by hand is a table in `logging/ecu_sim.py`'s module
+> docstring. §6.7 has what running them showed.
 
 ### 6.6 Reproduction
 
@@ -628,3 +639,99 @@ destination lands in 0x7F8000-0x807FFF. The method is stated here in full
 rather than kept as a tool, because it is a one-off sweep and `tools/` already
 carries the reusable half (`callgraph.py --entries` supplies the function-entry
 set the "is this a function pointer?" test uses).
+
+## 6.7 What running the init entries showed (F3, 2026-09-22, #20 / #38)
+
+`logging/ecu_sim.py`'s `power_on` calls ten entries of `tbl_module_init` in
+index order. Running them, rather than reading them, settled three things
+§6.4 and §6.5 could not.
+
+### (a) Every one of the ten returns under Unicorn, and the cells match §6.4
+
+| idx | entry | after the call |
+|---|---|---|
+| 18, 24 | `nvm_set_sync_mode`, `nvm_set_normal_mode` | `nvm_mode` 0x7FCD68 = **1** |
+| 38 | `kwp_tp_buf_init` | 0x8037E4 = 0x7F8892, 0x8037E8 = 0x7F8893, 0x8037EC = 0x7F889A, 0x8038D4 = 0x7F88AC |
+| 71 | `kwp_sec_init` | 0x7FB781 = 0, 0x7FB780 = 0, 0x7FB770 = **0**, 0x7FB748 = 0 |
+| 72 | `ddli_init` | 0x80403C = 0x80366C, then 0x80370C + 0x18·n |
+| 75 | `flash_crc_init` | 0x7FB6F4 = 0, 0x801200 = 0 |
+| 83, 84 | the eight pointers 0x7FB074-0x7FB0A8 | 0x7FB074 = 0x802C1E … 0x7FB0A8 = 0x802C94, 0x802CF8 = 0x802CFA = 0x444 |
+| 86, 89 | the list heads through 0x4104C4 | 0x7FBC09 = 0x7FBC0B = 0x7FCBA8 = 0 |
+
+VERIFIED-DYNAMIC (emulated). Note the last row: §6.4's classifier printed
+these as "ptr 0x7FBC09 ← 0x7FBC0A", but the disassembly is
+`addi r3,r13,-0x43E6` (the *argument* 0x7FBC0A) → `bl 0x4104C4` →
+`stb r3,-0x43E7(r13)`, i.e. the **byte return value** of 0x4104C4 is stored,
+not a pointer. With the calibration bytes at 0x5D09EE/0x5D09EF as they are in
+this dump the routine returns 0. A small correction to the table, not to the
+conclusion.
+
+### (b) The LFSR round count really is the seed handler's, and `27 01` needs a clock
+
+With index 71 called and nothing hand-seeded, `0x7FB770` is **0** after
+power-on and becomes **5** only after a `27 01` — together with bit 0 of
+`kwp_sec_level_flags`, both written at 0x036340-0x03635C inside
+`kwp_sid_27_h1`'s level-1 arm (`ori r12,r12,1` / `stb` at 0x036348-0x03634C,
+`li r10,5` / `stb r10,-0x4880(r13)` at 0x036358-0x03635C). `27 02` with `key_level1(seed)` then grants level 1.
+VERIFIED-DYNAMIC, `tests/test_ecu_sim_initstate.py`.
+
+Getting there needed one thing §6.5 could not have known: the level-1 seed
+path **spins forever on a frozen time base**. 0x36328-0x3633C re-reads
+`read_time_base` (0x478460) until the value differs from the previous seed
+*and* its low word's top byte is non-zero; Unicorn's 603e never advances
+TBU/TBL, so `27 01` stopped at the instruction limit inside `read_time_base`.
+`emu/time_base.py` rewrites the three time-base reads inside that one routine
+into `lwz` against a scratch pair and drives them from the simulator's clock.
+As a side note about the *part*: the same loop means a real ECU whose time
+base has just been zeroed refuses to produce a level-1 seed for the first
+0x01000000 ticks ≈ 4.8 s.
+
+### (c) `kwp_sec_init` reads the mirror **before** the mirror exists
+
+§6.5 item 1 says the SecurityAccess lockout "survives a power cycle through
+the EEPROM", because index 71 loads 0x7FB748 from the mirror halfword
+0x7FA02C. The order says otherwise, and this is a correction:
+
+* `app_init` zeroes **0x7F8490-0x7FA630** at 0x04CF90-0x04CFC4 — 0x7FA02C is
+  inside it — and only then, straight-line at **0x04D0A4**, calls
+  `os_start`, which walks the init table (§6.2). So index 71 runs on a
+  just-cleared cell.
+* the EEPROM start-up block read is **not** in the init table:
+  `nvm_read_all_blocks` (0x06227C) has one reference, the `addi` at 0x06259C
+  inside 0x061BF4, and `tools/sda_xref.py --code 0x061BF4` gives two callers,
+  **0x120FB8** (set B) and **0x45CD48** (set A) — task bodies, i.e. *after*
+  `os_start`.
+
+So on the part `kwp_sec_delay_timer` is **0 after every power-on** whatever the
+EEPROM holds, and the mirror's value only matters if something re-runs index
+71 later. VERIFIED-STATIC. It makes no practical difference here: a
+factory-shaped image holds **0x0000** at block 11 payload +0x0C (block 11's
+default record is `0b 02 00 00 …`, `tools/eeprom_map.py`), so the timer is 0
+either way. The simulator attaches the EEPROM before the init entries, so it
+reads the mirror; the difference is recorded in its module docstring.
+
+### (d) `flash_crc_task` has no `bl` caller anywhere
+
+`tools/sda_xref.py --code 0x11CB10` finds only five `b` thunks at
+0x11CD24-0x11CD34, and the only words in the image pointing at those thunks
+are `tbl_module_init` slots **0x0B2684-0x0B2694, indices 775-779**. So the
+"runtime CRC task" of `flash_programming.md` §5.3a is activated through this
+table, five times over during the init walk — 500 bytes of the 2,462,208 it
+has to hash. Something re-walks a slice of the array afterwards: 0x0B4E24
+stores **0x0B2678** (index 771) into the cursor 0x7FC9D8, which 0x0B5878 then
+compares against the time-table cell 0x7FE5A0. That is the second consumer
+`§6.1` noticed and could not place (`0x0B4E14 → 0x0B2678`). **The array at
+0x0B1A68 is therefore not purely a one-shot init list**; at least the run from
+index 771 is also walked as a periodic process list. What rate that walk has
+is **open** — F3's time box went to the NVM question — and it is what decides
+how long a real ECU takes to publish its flash checksum.
+VERIFIED-STATIC for the references, HYPOTHESIS for the periodic reading.
+
+Reproduce:
+
+```bash
+./.venv/bin/python3 tools/sda_xref.py data/passat_azx_ori.bin --code 0x11CB10 0x061BF4
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x4CF80 --addr 0x4CF80 --len 0x140
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x11CB10 --addr 0x11CB10 --len 0x214
+./.venv/bin/python3 -m unittest tests.test_ecu_sim_initstate
+```
