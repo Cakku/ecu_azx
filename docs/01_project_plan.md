@@ -229,6 +229,26 @@ pipeline.
 | Timing budget of the hooked task | keep the patch integer-only, few hundred instructions, measured on the bench |
 | Wrong r2 context when naming functions | decide r2 per function from the call graph before trusting decompiled constant loads |
 
+> **2026-09-22 (F5, #26/#28, `re/findings/ram_loader.md`) — the "bricked ECU"
+> risk, quantified.** The firmware carries a **second** programming route, a
+> RAM-resident bootstrap loader (RAM 0x7F8728) separate from the OBD/CAN route
+> E6 mapped. It speaks a **serial (SCI) line, not CAN**; it is entered
+> automatically when the calibration marker at 0x1E2500 is not `5A5A5A5A` (the
+> firmware sets the boot magic itself and reboots into it), and its address
+> filter is a **blacklist** — it will rewrite almost everything, **including the
+> resident programming module 0x080000-0x09FFFF that the OBD route refuses**.
+> Consequences for M1: (1) an interrupted **calibration** or **application**
+> write is recoverable over the connector (auto-loader over serial, or the
+> normal OBD route if the ECU still boots) — **not** an automatic brick; (2) the
+> loader protects the reset stub (0x0-0x1FFF) and the boot body
+> (0x10000-0x1FFFF), so **only a BDM slip can corrupt those, and only BDM can
+> repair them** — that, plus reading the missing 16 KB at 0x400000-0x403FFF, is
+> the real justification for the K-TAG/BDM purchase, not ordinary flash
+> failures; (3) budget for a tool that can drive the loader's **serial** line
+> (verify which pin SCI1 is bonded to on the bench) if connector-side recovery
+> of a bad calibration is to be relied on. A spare ECU remains a convenience,
+> not the recovery path.
+
 ## 7. Decisions taken
 
 | Date | Decision | Why |
