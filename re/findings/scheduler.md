@@ -446,6 +446,34 @@ Second choice, if a faster raster is wanted: **0x12061C**, `bl 0x11F054`
 `task_100ms`; for a verified-period task use `task_20ms` (0x11EC34) and the
 `bl 0x630C0` at 0x11EC44, whose 20 ms period is VERIFIED-STATIC.
 
+> **Added 2026-09-22 (brief F1, issues #27 / #44) — `patches/ff_counter` now
+> hooks both task sets, and this site is the set-B half of the pair.**
+>
+> §11.8 (brief E1) shows statically that **task set A is the live set**, and
+> 0x1205A0 is a set-B task, so a Flash 1 built on this site alone would have
+> shown a counter that never moves — the outcome C1's bench procedure already
+> listed. `patches/ff_counter` therefore hooks **0x432940** (§8.1, set A, the
+> on-chip twin) *and* 0x12067C, exactly as `patches/ff_fuel` does, and ORs a
+> source bit into a new `ff_src_seen` byte at `PATCH_RAM + 0x06`: **1 = set A,
+> 2 = set B, 3 = both**. One logged sample of that byte is the dynamic
+> confirmation of §11.8, and the counter's slope is 100 /s whichever set is
+> live.
+>
+> Nothing about *this* site changed: the word, the leaf, the dead-register set
+> and the 10 ms period are as above. What changed is that the patch no longer
+> depends on which set is live. The external word is kept rather than replaced
+> because 0x432940 is in the **on-chip** flash 0x404000-0x47FFFF, and whether
+> KESSv2 writes that array is still open (`flash_programming.md` §7.2). If it
+> does not, note what §11.8 and `flash_programming.md` §7.3 say together: the
+> set-A word was never written, the set-B word is in a task set that does not
+> run, and **no counter patch can execute at all** until the on-chip route is
+> available — there is no external-flash site in task set A to move to. That
+> combination is row **D** of `patches/ff_counter/test/procedure.md` §4, which
+> is now the decision table for the whole bench day.
+>
+> `make HOOKS=external` still builds the single-word patch of this section,
+> byte for byte, for the one case where §11.8 turns out to be wrong.
+
 ### 8.1 Added 2026-09-16 (brief D1, issue #32) — the task-set-A twin site, 0x432940
 
 Section 11.7 leaves open which task set runs with the engine turning, and a
