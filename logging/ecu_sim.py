@@ -188,6 +188,10 @@ IO_BUFFER_MAX = 0x100
 #: patches/ff_fuel's calibration block; its magic is how a patched image
 #: is recognised (patches/ff_fuel/src/ff_state.h).
 FFCAL001_BASE = 0x5E2510
+#: where patches/ff_counter's blob lands (patch.json build.flash).  It is the
+#: erased 0xFF of the free area 0x150000-0x1AFFFF in a stock image, so the word
+#: there is how a Flash-1 image is recognised.
+FF_COUNTER_FLASH = 0x150000
 
 #: what both 10 ms background tasks call to drain the EEP_CONF request queue
 #: (re/findings/eeprom.md section 8.4)
@@ -283,6 +287,15 @@ class AnimatedRam:
     #: `21 6F` (measuring block 111) answers with moving numbers -- the
     #: rehearsal for issue #39.  The two patches are never co-flashed.
     flexfuel: bool = False
+    #: True when the loaded image carries `patches/ff_counter` (its blob is at
+    #: flash 0x150000, which is 0xFF in a stock image).  Only then does the
+    #: stand-in put a Flash-1 counter block at 0x7FFB00: on a **stock** image
+    #: those bytes are whatever the reset left, and `ff_alive` = 0 is exactly
+    #: what `logging/sessions/flash1_counter.json` check 1 wants to see.  To
+    #: rehearse a successful Flash 1, give the simulator the patched image
+    #: (`--sim-dump work/ff_counter.bin`) or run the patch's own hooks
+    #: (`--sim-patch patches/ff_counter`).
+    flash1: bool = False
     #: ethanol the simulated Pico reports, in %
     flexfuel_e_pct: int = 85
     #: seconds of head start, so a one-shot `groups` request already shows a
@@ -431,7 +444,7 @@ class AnimatedRam:
             # patches/ff_fuel hooks the same two words (its README's hook
             # table), so its 10 ms producer runs under either set too.
             emu.write(0x7FFB00, self.flexfuel_block(t))
-        else:
+        elif self.flash1:
             emu.write(0x7FFB00, struct.pack(">I", int(t * 100)))
             emu.write(0x7FFB04, struct.pack(">H", 0xFC01))
             emu.write(0x7FFB06, bytes([2 if set_b else 1]))       # ff_src_seen
@@ -548,8 +561,17 @@ class PatchRunner:
             with open(os.path.join(patch_dir, "patch.json"), encoding="utf-8") as fh:
                 build = json.load(fh)["build"]
             self.syms = {k: int(v, 0) for k, v in build["symbols"].items()}
-            self.hook = self.syms["ff_fuel_hook_a" if task_set.upper() == "A"
-                                  else "ff_fuel_hook_b"]
+            #: The 10 ms raster hook of the live set, found by suffix rather
+            #: than by name, so `patches/ff_counter` (`ff_counter_hook_a/_b`)
+            #: runs here too and a Flash-1 rehearsal exercises the patch's own
+            #: stubs instead of `AnimatedRam`'s stand-in.
+            want = "_hook_a" if task_set.upper() == "A" else "_hook_b"
+            named = sorted(k for k in self.syms if k.endswith(want))
+            if not named:
+                raise KeyError(
+                    f"{patch_dir}/patch.json has no *{want} symbol; "
+                    f"it has {sorted(self.syms)}")
+            self.hook = self.syms[named[0]]
             self.rk_hook = self.syms.get("ff_fuel_rk_hook")
         self.task_set = task_set.upper()
         self.ram = ram
@@ -557,8 +579,11 @@ class PatchRunner:
         self.nvm_pump = nvm_pump
         self.tick_s = tick_ms / 1000.0
         self.mailbox = RxMailbox(emu, SLOT15)
+        #: the ethanol frame's id, out of FFCAL001 when the image carries it;
+        #: a patch without that block (ff_counter) listens to nothing, so the
+        #: default is only a place for `on_frame` to compare against.
         self.can_id = (int.from_bytes(emu.read(FFCAL001_BASE + 0x0C, 2), "big")
-                       if patch_dir is not None else 0x0EC)
+                       if emu.read(FFCAL001_BASE, 8) == b"FFCAL001" else 0x0EC)
 
         self.sim_t = 0.0
         self.ticks = 0
@@ -891,6 +916,12 @@ class Med9Handlers:
         #: `struct ff_state` rather than ff_counter's block (brief D2, #39).
         if self.emu.read(FFCAL001_BASE, 8) == b"FFCAL001":
             self.ram.flexfuel = True
+        #: and a Flash-1 image the same way: `patches/ff_counter`'s blob sits
+        #: at 0x150000, which is erased (0xFF) in a stock image.  A stock image
+        #: must leave 0x7FFB00 alone -- `bench_rehearsal.py`'s stock step reads
+        #: those bytes and a live counter there is a false "the patch is in".
+        elif self.emu.read(FF_COUNTER_FLASH, 4) != b"\xFF\xFF\xFF\xFF":
+            self.ram.flash1 = True
         if eeprom:
             self._install_eeprom(eeprom, wip_polls)
         if (patch_dir and run_patch) or stock_tasks:
@@ -1115,7 +1146,7 @@ class EcuSimulator:
                  drop_ack: int = 0, seed: int | None = None,
                  session_timeout_s: float | None = None, animate: bool = True,
                  dump: str = DUMP, patch_dir: str | None = None,
-                 eeprom: str | None = None,
+                 eeprom: str | None = None, ram: AnimatedRam | None = None,
                  trace: list[str] | None = None, verbose: bool = False):
         #: `dump` is how a PATCHED image is driven end to end: the handlers are
         #: the firmware's own, so `21 <group>` on patches/ff_fuel's image runs
@@ -1123,7 +1154,7 @@ class EcuSimulator:
         #: goes one further and runs the patch's own hooks (brief E4).
         self.handlers = handlers or Med9Handlers(
             dump, seed=seed, animate=animate, patch_dir=patch_dir,
-            eeprom=eeprom, session_timeout_s=session_timeout_s)
+            eeprom=eeprom, ram=ram, session_timeout_s=session_timeout_s)
         runner = self.handlers.runner
         self.link = FrameTap(link, runner.on_frame) if runner else link
         link = self.link

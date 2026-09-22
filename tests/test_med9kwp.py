@@ -42,7 +42,7 @@ if HAVE_CAN:
     from med9kwp.kwp import DdliChunk, split_around_protected
     from med9kwp import vag_formulas
     import med9log
-    from ecu_sim import AnimatedRam, Med9Handlers
+    from ecu_sim import AnimatedRam, DEFAULT_STATICS, Med9Handlers
 
 _CHANNEL = 0
 
@@ -517,6 +517,12 @@ class TestUploadOverTheBus(_SimCase):
 class TestLoggerEndToEnd(_SimCase):
     """`med9log.py log` against the simulator, then through tools/logcmp.py."""
 
+    #: this session logs ff_ticks / ff_alive, and since brief F3 the stand-in
+    #: only fills 0x7FFB00 for an image that carries patches/ff_counter -- a
+    #: stock image must leave those bytes alone.  `flash1=True` says "pretend
+    #: Flash 1 is in", which is what this test has always assumed.
+    SIM_KW = {"ram": AnimatedRam(flash1=True, statics=dict(DEFAULT_STATICS))}
+
     def _session_file(self, folder: Path) -> Path:
         doc = {
             "ecu": "03H906032 / 1037382557",
@@ -661,8 +667,11 @@ class TestAnimatedRam(DumpUnchanged):
         self.assertAlmostEqual(ram.rpm(5.0), 1900.0)
 
     def _counters(self, live_set: str) -> dict[int, int]:
+        # flash1=True: the stand-in only fills 0x7FFB00 for an image that
+        # carries patches/ff_counter, and DUMP is the stock one.
         handlers = Med9Handlers(str(DUMP), animate=False,
-                                ram=AnimatedRam(live_task_set=live_set))
+                                ram=AnimatedRam(live_task_set=live_set,
+                                                flash1=True))
         handlers.ram.apply(handlers.emu, 1.0)          # one simulated second
         out = {a: struct.unpack(">I", handlers.read_ram(a, 4))[0]
                for a in (0x7FD754, 0x7FD758, 0x7FD75C, 0x7FD760, 0x7FD778,
@@ -692,6 +701,15 @@ class TestAnimatedRam(DumpUnchanged):
         self.assertEqual(c[0x7FD758], 0)         # set B frozen
         self.assertEqual(c[0x7FFB00], 100)       # our counter is NOT frozen
         self.assertEqual(c[0x7FFB06], 1)         # ff_src_seen = set A
+
+    def test_a_stock_image_leaves_the_flash1_block_alone(self):
+        """A live counter on an unpatched image is a false 'the patch is in'
+        -- and bench_rehearsal.py's stock step reads exactly those bytes."""
+        h = Med9Handlers(str(DUMP), animate=False,
+                         ram=AnimatedRam(live_task_set="A"))
+        self.assertFalse(h.ram.flash1, "no ff_counter blob at 0x150000")
+        h.ram.apply(h.emu, 12.0)
+        self.assertEqual(h.read_ram(0x7FFB00, 8), bytes(8))
 
     def test_the_flash1_block_matches_the_patch_layout(self):
         """+0x04 ff_alive = 0xFC01, +0x06 ff_src_seen, +0x07 ff_reserved."""
