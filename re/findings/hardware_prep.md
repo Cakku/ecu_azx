@@ -40,6 +40,15 @@ and software revision; the **Bosch number `0261S02xxx` is the more reliable
 identifier**, and the **Bosch software number `1037xxxxxx` is the only thing
 that pins down the actual binary.**
 
+**Porsche shares the VW number.** The Cayenne 3.6 VR6 has no Porsche part
+number of its own: its DME is `03H906032M` / `03H906032DK`, Bosch
+`0261S02365`. There is therefore no second catalogue to search — but there
+are extra *search keywords*, which matters for sourcing (§1.4b): a listing
+titled "Porsche Cayenne Steuergerät", "Touareg 3.6", "Phaeton 3.6",
+"Audi Q7 3.6 FSI" or "Eos 3.6" is the same board and will never appear in a
+"Passat 3.2" search. COMMUNITY (three independent vendor catalogues agree),
+**high**.
+
 Suffix → Bosch number table collected from vendor catalogues. Status
 **COMMUNITY**, confidence **medium** for the number pairs, **low** for the
 "engine" column (see the conflict in §1.6).
@@ -51,6 +60,7 @@ Suffix → Bosch number table collected from vendor catalogues. Status
 | B | 0261S02168 | Passat 3.6 FSI | [cartech](https://www.cartechelectronics.com/products/plug-play-bosch-engine-ecu-vw-passat-3-6-fsi-0261s02168-0-261-s02-168-03h906032b-03h-906-032-b-med9-1-1039s14236) |
 | C | 0261S02226 *(see §1.6)* | "Passat 3.2 FSI" per Cartech; **"3.6 LITER" per VW's own catalogue** | [cartech](https://www.cartechelectronics.com/plug-play-bosch-engine-ecu-vw-passat-3-2-fsi-0261s02226-0-261-s02-226-03h906032c-03h-906-032-c-med9-1/), [parts.vw.com](https://parts.vw.com/p/Volkswagen__/Engine-Control-Module-ECM/47990925/03H906032C.html) |
 | H, L | 0261S02193 | — | cartech search p2 |
+| M | 0261S02365 | **Porsche Cayenne 3.6** | [cartech](https://www.cartechelectronics.com/plug-play-bosch-engine-ecu-porsche-cayenne-3-6-0261s02365-0-261-s02-365-03h906032m-03h-906-032-m-med9-1/), [ecubackup](https://www.ecubackup.com/porsche/porsche-cayenne/porsche-cayenne-3-6-03h906032m-0261s02365-med9-1-1037387735/) |
 | S | 0261S02355 | Touareg 3.6 FSI | [cartech](https://www.cartechelectronics.com/products/plug-play-bosch-engine-ecu-vw-touareg-3-6-fsi-0261s02355-0-261-s02-355-03h906032s-03h-906-032-s-med9-1) |
 | T | 0261S02354 | Touareg 3.6 FSI | cartech search p2 |
 | AB | 0261S02349 | **Passat B6 3.2 FSI V6** | [cartech](https://www.cartechelectronics.com/plug-play-bosch-engine-ecu-vw-passat-3-2-fsi-0261s02349-0-261-s02-349-03h906032ab-03h-906-032-ab-med9-1/), [obdtotal](https://obdtotal.com/product/vw-passat-b6-3-2-fsi-v6-bosch-med9-1-03h906032ab-0261s02349-1037384761-0764-ecu-stock-firmware/) |
@@ -67,6 +77,7 @@ Suffix → Bosch number table collected from vendor catalogues. Status
 | CD | 0261S02525 | — | [gowtuning](https://gowtuning.com/ecu/bosch/med9-1/p57846-03h906032cd-0261s02525/) |
 | CF | 0261S02532 | — | cartech search p2 |
 | DC, DE, DH | 0261S02592 / 0261S02599 / 0261S02593 | — | cartech search |
+| DK | 0261S02365 | **Porsche Cayenne 3.6** (same Bosch no. as suffix M) | [cartech](https://www.cartechelectronics.com/plug-play-bosch-engine-ecu-porsche-cayenne-3-6-0261s02365-0-261-s02-365-03h906032dk-03h-906-032-dk-1039s25265/), [ecubackup](https://www.ecubackup.com/porsche/porsche-cayenne/porsche-cayenne-3-6-03h906032dk-0261s02365-med9-1-1037393721/), [carfiles](https://www.carfiles.net/en/porsche-cayenne-3.6-bosch-med9.1-810) |
 | DN | 0261S02616 | Passat 3.6 FSI | [cartech](https://www.cartechelectronics.com/plug-play-bosch-engine-ecu-vw-passat-3-6-fsi-0261s02616-0-261-s02-616-03h906032dn-03h-906-032-dn-med9-1/) |
 | DQ | 0261S02625 | Passat/CC 3.6 FSI (BWS, automatic) | [cartech](https://www.cartechelectronics.com/plug-play-bosch-engine-ecu-vw-passat-3-6-fsi-0261s02625-0-261-s02-625-03h906032dq-03h-906-032-dq-med9-1/) |
 | EA, EB, EE | 0261S02660 / 0261S02661 / 0261S02664 | Phaeton 3.6 | cartech search |
@@ -90,6 +101,8 @@ above is what could be read off the first pages
 | 03H906032AB | 0261S02349 | 1037387767 / 1037396864 | — | — | [ziptuning](https://www.ziptuning.com/ecu-tuning-file/bosch-med9-1-03h906032ab-0261s02349-396864-ecu-tuning-files/) |
 | 03H906032S | 0261S02355 | 1037383785 (+1037390480) | — | — | [automoto-firmware](https://automoto-firmware.com/index.php?a=downloads&b=tags&tag=MED9.1) |
 | 03H906032AM | 0261S02356 | 1037393968 | — | — | [ziptuning](https://www.ziptuning.com/ecu-tuning-file/bosch-med9-1-03h906032am-0261s02356-393968-ecu-tuning-files/) |
+| 03H906032M | 0261S02365 | 1037387735 | — | — | [ecubackup](https://www.ecubackup.com/porsche/porsche-cayenne/porsche-cayenne-3-6-03h906032m-0261s02365-med9-1-1037387735/) |
+| 03H906032DK | 0261S02365 | 1037393721 / 1037396619 | — | — | [ecubackup](https://www.ecubackup.com/porsche/porsche-cayenne/porsche-cayenne-3-6-03h906032dk-0261s02365-med9-1-1037393721/), [carfiles](https://www.carfiles.net/en/porsche-cayenne-3.6-bosch-med9.1-810) |
 
 Two useful consequences:
 
@@ -150,7 +163,7 @@ Status **COMMUNITY**, confidence **medium** (prices move).
 |---|---|---|---|
 | **Nettivaraosa.fi** ([Passat parts](https://www.nettivaraosa.com/volkswagen-passat-varaosat)) | Finnish used-parts aggregator, dozens of breakers | €50-150 for an engine ECU | The 3.2 FSI Passat was a rare, high-tax car in Finland; expect few hits. Search "moottorinohjainlaite" + Passat 3.2 |
 | **Autopurkaamot.com** ([site](https://www.autopurkaamot.com/)) | Second Finnish breaker aggregator | same | Had a Passat 3.2 FSI engine listed at the time of writing, so 3.2 cars do get broken here |
-| **Ovoko / rrr.lt** ([listing example](https://rrr.lt/en/used-part/dra25594-03h906032-volkswagen-passat-b6-engine-control-unit-module)) | Baltic/EU marketplace of breakers, ships to Finland | one bare `03H906032` listed "from €499" (looks like an outlier; most B6 ECUs there are €60-200) | Best EU-wide coverage for PQ35 parts; the site blocks scripted access, browse by hand |
+| **Ovoko / rrr.lt** ([listing example](https://rrr.lt/en/used-part/dra25594-03h906032-volkswagen-passat-b6-engine-control-unit-module)) | Baltic/EU marketplace of breakers, ships to Finland | one bare `03H906032` listed "from €499" (looks like an outlier; most B6 ECUs there are €60-200) | Best EU-wide coverage for PQ35 parts; the site blocks scripted access, browse by hand. **Re-checked 2026-09-22: still "from €499", 2 items — this channel is not where a cheap mule comes from (§1.4b)** |
 | **eBay.de / eBay.co.uk / Kleinanzeigen** | Private and breaker listings | €40-150 delivered to FI | Search `03H906032` and `0261S02226`; sellers usually post the label photo, which is exactly what we need |
 | **Cartech Electronics (UK)** ([search](https://www.cartechelectronics.com/search?q=03H906032&type=product&options%5Bprefix%5D=last)) | Refurbished "plug & play", programmed to VIN, 12-month warranty | £395.99-£499.99 inc. VAT (≈ €460-580) | Overkill for a bench mule, and UK→FI import duty/VAT applies |
 | **German breakers** (autoteile-markt, Autoscout24 parts) | The 3.2 FSI Passat was mainly a German/Austrian car | €50-150 | Highest chance of a genuine 3.2 unit |
@@ -160,6 +173,71 @@ Recommendation: watch eBay.de and Ovoko for `0261S02226`; accept a 3.6 unit at
 weeks. Two units (a cheap 3.6 for harness bring-up plus a matching 3.2 for the
 flash rehearsal) still costs under €200 and keeps the car's ECU out of every
 experiment.
+
+## 1.4b Cheap-donor strategy (added 2026-09-22)
+
+The €400-500 that the first-line channels quote is a **refurbished,
+programmed-to-VIN** price (Cartech) or a Baltic-marketplace outlier (rrr.lt,
+re-checked 2026-09-22: `03H906032` still "from €499", 2 items). It is not what
+a bench mule should cost, and the purchase is better restructured than paid.
+
+### The spare does three unrelated jobs; only one of them is expensive
+
+| Job | What it actually needs | Realistic cost |
+|---|---|---|
+| Harness bring-up, power-up, connector and current work, KWP/TP2.0 | **any** VR6 `03H906032` — 3.6, Cayenne, Phaeton, Q7, even one sold *defekt / ungeprüft* | €20-80 |
+| Flash-procedure rehearsal (does the write land, do the 65 block sums hold) | same board, ideally SW `1037382557` | the €200-400 problem |
+| Recovery if the car's ECU bricks | **a full BDM backup plus write capability** — *not* a spare ECU | §2.7: €50-150 |
+
+The third row is the one that actually protects the car, and a spare ECU does
+not provide it. So the order of spending implied by `docs/01_project_plan.md`
+M1 is better read as:
+
+1. **€0 — keep rehearsing in `emu/`** (QSPI/M95160 device model, E4 bench
+   simulator). For job 2 this beats a spare carrying the *wrong* software,
+   because a donor on another SW number cannot be turned into a byte-identical
+   twin over OBD anyway: our image is 2 MB external flash **plus** 496 KB of
+   build-specific on-chip code at 0x404000-0x47FFFF, and a KESSv2 write of the
+   on-chip region has never been demonstrated
+   (`docs/07_workflow.md` §3.3, the "unchanged `4B FF 9F 25`" outcome row;
+   `docs/06_patch_pipeline.md` §6).
+2. **€0 — check Service Mode in K-Suite first** (§2.3). If it covers our unit
+   the BDM frame purchase disappears entirely.
+3. **€50-150 — shop bench read** (§2.7). This is the safety net, and the same
+   shop can write the ECU back if it is ever bricked, which makes a K-TAG of
+   our own an optimisation rather than a prerequisite.
+4. **€30-90 — clone BDM100-class interface + universal frame** (§2.4), only if
+   in-house capability is wanted.
+5. **Defer the spare.** Standing searches; take a 3.6/Cayenne/Touareg unit
+   opportunistically under ~€80 for job 1; chase a `0261S02226` only when a
+   flash is actually imminent.
+
+### Search keywords a "Passat 3.2" search misses
+
+From §1.1: the same board is sold as Porsche, Audi, Phaeton, Touareg and Eos.
+Worth searching verbatim, in German as well as English:
+
+`0261S02365`, `0261S02226`, `Porsche Cayenne 3.6 Steuergerät`,
+`Motorsteuergerät Touareg 3.6 FSI`, `Phaeton 3.6 Steuergerät`,
+`Audi Q7 3.6 FSI ECU`, `Eos 3.6`, and the bare Bosch numbers from the §1.1
+table. The 3.6 applications outsold the 3.2 by a wide margin, so both supply
+and price are much better there — and for job 1 the application is irrelevant.
+
+### Listing hygiene
+
+- **Titles bundle unrelated cars.** One eBay.de listing reads
+  "Motorsteuergerät Steuergerät VW Golf 5 R32 Passat 3C 3.2 V6 03H906032 AXZ",
+  but the Golf R32 (BUB) is a non-FSI VR6 on ME7.1.1 — a different ECU
+  entirely. Keyword spam is the norm on these channels.
+- §1.3's rule is the only one that holds: **pay after a label photo** showing
+  `03H906032x`, `0261S02xxx` **and** the 10-digit `1037xxxxxx`.
+- **Listings go stale fast.** A `partan.eu` catalogue entry carrying our exact
+  `0261S02226` (Passat 3C2, 2008) returned **HTTP 410 Gone** when re-checked on
+  2026-09-22. Saved/standing searches beat looking once.
+
+Status **COMMUNITY**, confidence **medium** for the price bands (they move, and
+marketplace snippets could not be verified listing by listing), **high** for
+the part-number and keyword facts, which come from §1.1.
 
 ## 1.5 Immobiliser implications for a bench unit
 

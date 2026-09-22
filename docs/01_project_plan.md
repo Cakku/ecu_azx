@@ -95,7 +95,9 @@ fuel change) is the owner's responsibility and is not covered here.
    verified to (`docs/README.md` legend). Old notes are hypotheses.
 2. **Bench before car, spare before own.** Every flash goes to a spare ECU on
    the bench first. The car's ECU is written only with files that already ran
-   on the bench.
+   on the bench. The unit used for harness, power-up and KWP work can be
+   **any** VR6 `03H906032`; only the flash rehearsal needs a
+   software-matching one (`re/findings/hardware_prep.md` §1.4b).
 3. **Reversible and minimal.** Patches live in free flash, hook at as few
    places as possible, and default to stock behaviour (factor 1.0 at E0 and on
    any fault). A patched file at E0 must behave identically to stock.
@@ -113,10 +115,12 @@ fuel change) is the owner's responsibility and is not covered here.
 
 | Task | Deliverable | Exit criterion |
 |---|---|---|
-| Acquire a spare 03H906032 ECU (same or close software; the calibration must match ours, so check the part suffix and `1037382557`) | bench ECU | on the desk |
-| Get a full **K-TAG BDM (MPC5xx, protocol 64)** read of the car's ECU: external flash, on-chip flash incl. 0x400000-0x403FFF, EEPROM | `data/backup_bdm/…` + SHA-256 in a manifest | files verified; `checksum.py verify` OK; on-chip region compared with the KESS tail |
+| **Settle the recovery route before buying any ECU** (`re/findings/hardware_prep.md` §1.4b). First action: check whether K-Suite **Service Mode** (§2.3) covers `0261S02226` — if it does, no BDM frame is needed at all | decision recorded in the findings doc | Service Mode support confirmed or ruled out |
+| Bench mule: **any** VR6 `03H906032` — 3.6, Touareg, Cayenne, Phaeton, Q7, or a unit sold *defekt/ungeprüft* (€20-80, §1.4b) | bench ECU | on the desk |
+| Software-matching spare: `03H906032` / `0261S02226` / SW `1037382557`. **Standing search; buy when a flash is imminent, not before** — a donor on another SW number cannot be made into a byte-identical twin over OBD (§1.4b step 1) | flash-rehearsal ECU | on the desk before Flash 0 goes to the car |
+| Get a full **bench/BDM read** of the car's ECU: external flash, on-chip flash incl. 0x400000-0x403FFF, EEPROM. Routes cheapest first (`re/findings/hardware_prep.md`): Service Mode §2.3, a shop with a master tool §2.7 (€50-150), clone BDM100-class frame §2.4 (€30-90), K-TAG protocol 64 §2.2 | `data/backup_bdm/…` + SHA-256 in a manifest | files verified; `checksum.py verify` OK; on-chip region compared with the KESS tail |
 | Bench harness: 12 V supply with current limit, ignition-switched line, CAN transceiver, OBD-style connector, Pico frame injection, PC CAN adapter | wiring doc + photo | ECU boots and answers a KWP TesterPresent on the bench |
-| Windows machine for K-Suite (Intel laptop recommended; Windows-on-ARM VMs are risky for the USB drivers) | working KESS/K-TAG install | reads the spare ECU |
+| Windows machine for K-Suite (Intel laptop recommended; Windows-on-ARM VMs are risky for the USB drivers) | working KESS/K-TAG install | reads the bench mule |
 | Dev environment on the Mac (`docs/03_tooling.md`): Ghidra, Python venv, PowerPC GCC | documented setup | a hello-patch compiles and disassembles correctly |
 | Download the MED9.1 Funktionsrahmen PDF (see tooling doc) into `documents/` (gitignored if large) | reference | |
 
@@ -183,7 +187,9 @@ pipeline.
 
 | # | Milestone | Proves |
 |---|---|---|
-| M1 | BDM backup + spare ECU on bench answering KWP | we can always go back |
+| M1 | Full BDM backup (external + on-chip incl. 0x400000-0x403FFF + EEPROM) verified against `passat_azx_ori.bin`, **and a demonstrated route to write it back** — our own tool or a shop's | we can always go back |
+| M1b | Any VR6 `03H906032` on the bench answering KWP TesterPresent | the harness, the Windows box and the KWP tooling work |
+| M1c | A software-matching `0261S02226` / `1037382557` spare on the desk | Flash 0/1 can be rehearsed on a true twin — needed only as M4 approaches (`re/findings/hardware_prep.md` §1.4b) |
 | M2 | Ghidra project with correct map; injection multiplication point named | the RE foundation |
 | M3 | Live logger reads nmot/rl/ti in the car | symbol map is right |
 | M4 | Flash 0 and Flash 1 run on bench and car | the write path is safe |
@@ -195,7 +201,7 @@ pipeline.
 
 | Risk | Mitigation |
 |---|---|
-| Bricked ECU (interrupted OBD write, wrong file) | BDM backup first; spare ECU; K-TAG BDM as recovery; battery charger during writes |
+| Bricked ECU (interrupted OBD write, wrong file) | BDM backup first, and a route that can write it back — our own K-TAG/BDM frame **or a shop with a master tool** (`re/findings/hardware_prep.md` §2.7); battery charger during writes. A spare ECU is not the recovery path |
 | The 16 KB not in the KESS read hides something we depend on | BDM read and diff; do not write files that touch 0x400000-0x47FFFF until the region is understood |
 | Undocumented signature beyond the block sums | Flash 0 test on the bench spare before any real change |
 | KESSv2 is end-of-life; protocol 179 support may lapse | keep the current K-Suite install working; consider KESS3/K-TAG |
