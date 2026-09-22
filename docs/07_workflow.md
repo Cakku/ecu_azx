@@ -471,7 +471,8 @@ is no spare ECU, no BDM tool and no `data/backup_bdm/MANIFEST` yet (issues
 #1-#4, #26-#28). Every step is marked **[unverified]** where its behaviour is a
 prediction rather than an observation. The first write is called **Flash 0**
 (`patches/ff_fuel`) or **Flash 1** (`patches/ff_counter`, the no-op counter,
-issue #27) — Flash 1 first, because it changes one flash word and nothing else.
+issue #27) — Flash 1 first, because it changes **two flash words** (one of them
+on-chip since brief F1, 2026-09-22 — see the note in §3.4) and nothing else.
 
 What the dump *does* now tell us comes from brief **E6**,
 `re/findings/flash_programming.md` (2026-09-17, VERIFIED-STATIC), and it is
@@ -578,14 +579,75 @@ Then the three checks E6's `flash_programming.md` §7.2 adds, in order:
    criterion is in #26; #28 repeats Flash 0 and Flash 1 on the *car's* ECU
    afterwards, with the BDM backup in hand.
 3. **Flash 1 next**:
-   `patches/ff_counter/test/procedure.md`. One flash word
-   (0x12067C, `4B FF E9 B1` → `48 02 F9 85`), 96 bytes of blob, a counter at
-   `PATCH_RAM+0x00` that must rise by **100/s** — not 10/s; C4 corrected every
-   raster in the earlier documents by a factor of ten. Read the **five stock
-   raster counters first**: the hook belongs to task set B, and which set is
-   live is still open (`re/findings/scheduler.md` §11.7). A frozen counter
-   because the other task set is live looks exactly like a failed flash and is
-   not one.
+   `patches/ff_counter/test/procedure.md`. **Two** flash words, 224 bytes of
+   blob, a counter at `PATCH_RAM+0x00` that must rise by **100/s** — not 10/s;
+   C4 corrected every raster in the earlier documents by a factor of ten. Read
+   the **five stock raster counters first**. A frozen counter because the other
+   task set is live looks exactly like a failed flash and is not one. See the
+   note below before flashing it.
+
+> **Corrected 2026-09-22 (brief F1, checked by F2).** This chapter described
+> Flash 1 as the single external word 0x12067C → `48 02 F9 85` with a 96-byte
+> blob. Since F1 the patch **hooks the 10 ms raster of both task sets**, one
+> word each, and records which one ran (`patches/ff_counter/README.md`):
+>
+> | Site | Where | Old → new | Task |
+> |---|---|---|---|
+> | **0x432940** | **on-chip flash** 0x404000-0x47FFFF | `4B C8 B0 A5` → `4B D1 D6 C1` (`bl 0x150000`) | `task_100ms_int` 0x4328E4, id 19, 10 ms, **task set A** |
+> | 0x12067C | external flash | `4B FF E9 B1` → `48 02 F9 A5` (`bl 0x150020`) | `task_100ms` 0x1205A0, TCB 23, 10 ms, task set B |
+>
+> Three consequences for this chapter:
+>
+> 1. **Flash 1 now writes the on-chip array**, so it inherits §3.1's on-chip
+>    caveat and §3.3's warning. `patch_apply.py` says so itself:
+>
+>    ```bash
+>    ./.venv/bin/python3 tools/patch_apply.py data/passat_azx_ori.bin patches/ff_counter -o work/ff_counter.bin
+>    ```
+>
+>    ```
+>    ff_counter: 5 patch range(s) (229 B), 6 descriptor range(s) (16 B), 0 unexpected
+>    checksums: ALL OK (65 blocks); identification block unchanged
+>    sha256: 3cd20443c068ed009b7d48b32210790eb320cb159489fc36cc1ef1ea67696498
+>    WARNING: ff_counter: "ram_status": "static" - the RAM block at 0x007FFB00 is VERIFIED-STATIC only (re/findings/ram.md): no instruction references it, but the runtime snapshots of issue #23 are still pending. Do not flash this image.
+>    WARNING: change at 0x432940+0x4 writes the MPC561 on-chip flash (0x404000-0x47FFFF). The block checksums are handled and the firmware's own OBD programming route whitelists the range (re/findings/flash_programming.md), but a KESSv2 write of it has not been demonstrated: read the image back and compare before trusting it.
+>    ```
+>
+>    So **§3.3's check 1 — read back 0x404000-0x47FFFF and `bindiff` it — is
+>    part of Flash 1, not only of Flash 0 and `ff_fuel`.** Per word:
+>
+>    ```bash
+>    ./.venv/bin/python3 tools/blobdis.py work/ff_counter.bin --file-off 0x22E940 --addr 0x432940 --len 4
+>    ./.venv/bin/python3 tools/blobdis.py work/ff_counter.bin --file-off 0x12067C --addr 0x12067C --len 4
+>    ```
+>
+>    ```
+>    00432940  4B D1 D6 C1  bl       0x150000
+>    0012067C  48 02 F9 A5  bl       0x150020
+>    ```
+>
+>    against the stock word at the same place, `4B C8 B0 A5  bl 0xbd9e4`
+>    (`tools/blobdis.py data/passat_azx_ori.bin --file-off 0x22E940 --addr
+>    0x432940 --len 4`). If the on-chip word reads the stock bytes back, KESS
+>    skipped the array — and because set A is the live set
+>    (`re/findings/scheduler.md` §11.8), **no build of this patch can then
+>    produce a moving counter**: there is no external-flash alternative to move
+>    the hook to (`flash_programming.md` §7.3).
+> 2. **The read-out step gains a byte.** The RAM block is now `ff_ticks` (u32,
+>    `PATCH_RAM+0x00`), `ff_alive` (u16, +0x04) and **`ff_src_seen` (u8,
+>    +0x06): 1 = set A ran, 2 = set B, 3 = both** — with the counter then
+>    rising at 200/s. It is re-derived from scratch at every cold start, so it
+>    cannot survive a power cycle stale. `logging/sessions/flash1_counter.json`
+>    logs all three.
+> 3. **The bench-day decision table is `patches/ff_counter/test/procedure.md`
+>    §4**, rows A-I: the stock raster counters (§3a), the on-chip read-back
+>    (§3b) and the slope plus `ff_src_seen` (§3c) together pick one row, and
+>    the row says what has been proved and which issue to write it into. Row D
+>    is "KESS skipped the on-chip array"; row A upgrades §11.8 to
+>    VERIFIED-DYNAMIC and settles the on-chip half of #32. §4.5 says when the
+>    `make HOOKS=external` build (the pre-F1 patch, byte for byte) is worth
+>    building: **only** if set B turns out to be live and the on-chip array
+>    cannot be written.
 3. Then `patches/ff_fuel`: `patches/ff_fuel/test/procedure.md` §§2-6, then
    `procedure_d2.md`, then `procedure_e1.md` / `_e2.md` / `_e5.md` for whichever
    feature you enable. **One feature at a time** (docs/01 §3 principle 5): every
