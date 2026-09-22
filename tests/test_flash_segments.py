@@ -172,6 +172,77 @@ class TestMode4Segments(DumpUnchanged):
 
 
 @requires_dump
+class TestRamLoader(DumpUnchanged):
+    """Brief F5, re/findings/ram_loader.md — the second programming route."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.d = DUMP.read_bytes()
+
+    def test_command_table_has_the_write_services_behind_security(self):
+        t = fs.loader_kwp_table(self.d)
+        self.assertEqual(len(t), 16)
+        by = {}
+        for e in t:
+            by.setdefault((e["sid"], e["sub"]), e)
+        # RequestDownload / TransferData / RequestTransferExit exist and are
+        # gated on security level 1 or 2 (mask 0x06) and session 2.
+        for sid in (0x34, 0x36, 0x37):
+            e = by[(sid, 0xFF)]
+            self.assertEqual(e["sec_mask"], 0x06, hex(sid))
+            self.assertEqual(e["session_mask"], 0x0004, hex(sid))
+        # SecurityAccess and TesterPresent carry no security gate.
+        self.assertEqual(by[(0x27, 0xFF)]["sec_mask"], 0xFFFFFFFF)
+        self.assertEqual(by[(0x3E, 0xFF)]["sec_mask"], 0xFFFFFFFF)
+        # every handler is inside the relocated loader image.
+        for e in t:
+            self.assertTrue(0x7F8728 <= e["handler"] < 0x7FD7B8, e)
+
+    def test_erase_service_is_31_02(self):
+        by = {(e["sid"], e["sub"]): e for e in fs.loader_kwp_table(self.d)}
+        self.assertIn((0x31, 0x02), by)
+        self.assertEqual(by[(0x31, 0x02)]["handler"], 0x7FB280)
+
+    def test_device_table_matches_the_application_ranges(self):
+        ldr = fs.devices(self.d, fs.LDR_DEV_TABLE)
+        self.assertEqual([(e["start"], e["end"]) for e in ldr],
+                         [(0x000000, 0x3FFFFF), (0x404000, 0x47FFFF),
+                          (0xC00000, 0xC7FFFF)])
+        for e in ldr:                       # loader driver ops live in SRAM
+            for op in e["ops"]:
+                self.assertTrue(0x7F8728 <= op < 0x7FD7B8, hex(op))
+
+    def test_loader_geometry_and_masks_mirror_the_application(self):
+        self.assertEqual(
+            [g["total"] for g in fs.geometry(self.d, fs.LDR_GEOM_TABLE)],
+            [g["total"] for g in fs.geometry(self.d)])
+        self.assertEqual(
+            fs.uc3f_masks(self.d, 10, fs.LDR_UC3F_MASK_TABLE),
+            fs.uc3f_masks(self.d, 10))
+
+    def test_the_filter_is_a_blacklist_that_leaves_the_prog_module_writable(self):
+        prot = fs.LOADER_PROTECTED
+        # exactly the three protected windows, and the boot core is one of them.
+        self.assertEqual([(s, e) for s, e, _ in prot],
+                         [(0x000000, 0x001FFF), (0x010000, 0x01FFFF),
+                          (0x400000, 0x403FFF)])
+
+        def blocked(start, end):
+            return any(start <= pe and ps <= end for ps, pe, _ in prot)
+
+        # the resident programming module and the calibration are writable here
+        # although the OBD route refuses / aliases them.
+        self.assertFalse(blocked(0x080000, 0x09FFFF))
+        self.assertFalse(blocked(0x1C0000, 0x1FFFFF))
+        self.assertFalse(blocked(0x404000, 0x47FFFF))
+        # the reset stub, the boot body and the UC3F config block are refused.
+        self.assertTrue(blocked(0x000000, 0x001FFF))
+        self.assertTrue(blocked(0x011524, 0x01978F))
+        self.assertTrue(blocked(0x400000, 0x403FFF))
+
+
+@requires_dump
 class TestCli(DumpUnchanged):
     def test_all_sections_print(self):
         buf = io.StringIO()
@@ -180,7 +251,17 @@ class TestCli(DumpUnchanged):
         self.assertEqual(rc, 0)
         out = buf.getvalue()
         for needle in ("0x404000  0x47FFFF", "RequestDownload",
-                       "SBBLOCK[0]", "EEP_CONF"):
+                       "SBBLOCK[0]", "EEP_CONF", "bootstrap loader",
+                       "SCI1"):
+            self.assertIn(needle, out)
+
+    def test_loader_section_prints(self):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = fs.main([str(DUMP), "--loader"])
+        self.assertEqual(rc, 0)
+        out = buf.getvalue()
+        for needle in ("0x080000-0x09FFFF", "SecurityAccess", "0x7FAA9C"):
             self.assertIn(needle, out)
 
     def test_json_is_valid(self):
@@ -192,6 +273,8 @@ class TestCli(DumpUnchanged):
         doc = json.loads(buf.getvalue())
         self.assertEqual(len(doc["devices"]), 3)
         self.assertEqual(len(doc["uc3f_blocks"]), 10)
+        self.assertEqual(len(doc["loader"]["kwp_table"]), 16)
+        self.assertEqual(len(doc["loader"]["protected_windows"]), 3)
 
 
 if __name__ == "__main__":
