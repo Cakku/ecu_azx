@@ -418,6 +418,9 @@ class TestBothStubs(DumpUnchanged):
             snaps[tag], insns[tag] = res.snapshot(SRAM_START, SRAM_LEN), res.insns
 
         self.assertEqual(insns["stock"], 2, "bl + the empty leaf's blr")
+        # The emulator resets RAM to zero, so this is the cold-start path:
+        # the site's `bl` + 8 (HOOK_TAIL) + 20 (tick) + the empty leaf's `blr`.
+        self.assertEqual(insns["patched"], 30)
         changed = {SRAM_START + i for i in range(SRAM_LEN)
                    if snaps["stock"][i] != snaps["patched"][i]}
         allowed = set(range(PATCH_RAM, PATCH_RAM + 8))
