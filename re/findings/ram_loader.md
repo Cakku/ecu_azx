@@ -319,7 +319,44 @@ failures are unrecoverable over the wire.
 
 ---
 
-## 7. Reproduction
+## 7. Dynamic confirmation (emulator, task 4)
+
+**VERIFIED-DYNAMIC.** The relocated loader was run in `Med9Emu` (Unicorn) with
+the transport stubbed, per the brief's task 4. The loader blob is copied to its
+RAM address, DECRAM 0x6F840C is primed with 0xDEADBEEF (what
+`boot_enter_prog_mode` writes just before `bl 0x7F8728`, §1), the system-clock
+byte 0x7F8025 is set, and SCI1 status (SC1SR 0x70500C) is stubbed to "no receive
+data ready":
+
+```python
+# run from the repo root with ./.venv/bin/python3 (imports emu/ read-only)
+import struct
+from emu import Med9Emu
+D = open("data/passat_azx_ori.bin", "rb").read()
+emu = Med9Emu("data/passat_azx_ori.bin", r2="app", trace=True)
+emu.stub_read(0x70500C, 0x0000)          # SCI1 SC1SR: no RDRF -> the loop waits
+emu.stub_read(0x704810, 0xFFFF)          # QADC_A conversion-complete
+res = emu.run(0x7F8728, max_insns=300000, mem={
+    0x7F8728: D[0x019798:0x019798 + 0x5090],   # the loader
+    0x7FD7B8: D[0x110D0:0x110D0 + 0x48],        # boot_swsr_service
+    0x6F840C: struct.pack(">I", 0xDEADBEEF),
+    0x7F8025: b"\x28"})
+```
+
+Result: **no faults, no unmapped accesses** (`res.issues == []`); the loader
+relocates, runs its init chain, opens **SCI1** (`ldr_sci_open` 0x7FA1C8 is
+executed), reaches the command **dispatcher** (`ldr_dispatch` 0x7FB9F0) and then
+idles in its receive/dispatch loop (0x7F8788-0x7F88BC) spinning on the stubbed
+SC1SR — exactly the "waiting for the first serial command" state. 529 distinct
+loader instructions execute before it settles into the wait. This confirms the
+relocation model (§0), the SCI transport (§3) and the loop structure (§2)
+dynamically. A full command frame was **not** injected — the SCI framing was not
+reverse-engineered far enough to trust a synthesised frame — so the address
+filter (§4.2) stands on the static evidence only.
+
+---
+
+## 8. Reproduction
 
 ```bash
 ./.venv/bin/python3 tools/checksum.py verify -q data/passat_azx_ori.bin
