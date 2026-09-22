@@ -206,7 +206,11 @@ class TestSessionFiles(unittest.TestCase):
         by_name = {v.name: v for v in session.variables}
         self.assertEqual(by_name["ff_ticks"].address, ram)
         self.assertEqual(by_name["ff_alive"].address, ram + 4)
-        self.assertEqual(by_name["ff_reserved"].address, ram + 6)
+        # Brief F1 (2026-09-22): +6 became the u8 ff_src_seen (1 = task set A,
+        # 2 = set B, 3 = both) and ff_reserved moved to +7.
+        self.assertEqual(by_name["ff_src_seen"].address, ram + 6)
+        self.assertEqual(by_name["ff_src_seen"].size, 1)
+        self.assertEqual(by_name["ff_reserved"].address, ram + 7)
 
     def test_symbols_resolve_from_symbols_csv(self):
         self.assertEqual(med9log._resolve_symbol("cnt_raster_1ms_b"),
