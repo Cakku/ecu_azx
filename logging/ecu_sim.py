@@ -200,6 +200,27 @@ RK_FUEL_MASS = 0x803038
 #: equivalence comparison execute the same stock code.
 RKSPLIT = 0x41C3A0
 
+#: --- the flash CRC-32 task (flash_programming.md 5.3a, re/symbols.csv) -----
+#: A four-state machine driven at 0x64 bytes per activation.  It is the classic
+#: VW "Flash-Prüfsumme": a **reported** value with nothing in the image to
+#: compare it against, so it cannot stop the engine -- but a tester can read it
+#: and a patched image changes it, which is what makes it worth simulating.
+FLASH_CRC_TASK = 0x11CB10
+FLASH_CRC_STATE = 0x7FB6F4      # 0 build table, 1 hash, 2 publish, 7 done
+FLASH_CRC_RANGE = 0x7FB6F5      # u8 index into tbl_crc32_ranges
+FLASH_CRC_BUDGET = 0x7FB6F6     # u16 bytes left in this activation
+FLASH_CRC_ACC = 0x7FB6F8        # u32 running CRC register (init 0xFFFFFFFF)
+FLASH_CRC_END = 0x7FB6FC        # u32 last address of the current range
+FLASH_CRC_CURSOR = 0x7FB700     # u32 next byte to hash
+#: 0x7F9178 gets the **high** halfword and 0x7F917A the low one -- the other
+#: way round from `flash_programming.md` 5.3, corrected here from the run.
+FLASH_CRC_PUB_HI = 0x7F9178
+FLASH_CRC_PUB_LO = 0x7F917A
+FLASH_CRC_DONE = 0x801200       # bit 0 once the value has been published
+FLASH_CRC_RANGES = 0x0A3A10     # {start, end} pairs, terminated by {0, 0}
+#: 0x64 bytes per activation over the three ranges
+FLASH_CRC_ACTIVATIONS = 24627
+
 #: Stack pointer for the hook calls.  `Med9Emu.call()` parks r1 at the boot
 #: stack top 0x7FEFFC, and a C function's frame there runs straight over
 #: application variables -- `zwist_display_b1` (0x7FEF87) is 0x75 bytes below
@@ -627,6 +648,178 @@ class PatchRunner:
                 + (f", {len(self.errors)} hook errors" if self.errors else ""))
 
 
+class FlashCrcTask:
+    """Run the firmware's own `flash_crc_task` (0x11CB10) in the background.
+
+    The state machine is the firmware's, unchanged: state 0 builds the
+    reflected CRC-32 table (polynomial 0xEDB88320) into RAM 0x800288 and loads
+    range 0 from `tbl_crc32_ranges` (0x0A3A10); state 1 hashes **0x64 bytes per
+    activation** with no reset between ranges; state 2 publishes the two
+    halfwords to 0x7F9178 / 0x7F917A; state 7 sets bit 0 of 0x801200 and of
+    0x7F9176 and every later activation returns at once.
+
+    **What it costs.** The three ranges are 0x020000-0x1BFFFF, 0x404000-
+    0x47FFFF and 0x5C2E00-0x5FFFFF, 2,462,208 bytes, so the value appears
+    after **24,627 activations** -- 246 s at one activation per 10 ms raster,
+    and about 37 s of host CPU.  That is why this is opt-in (`--flash-crc`)
+    and why `advance()` carries the same wall-clock budget `PatchRunner` does:
+    a simulator that services TP2.0 from the same thread must not disappear
+    into the CRC.  `0x7F9178` therefore moves exactly **once**, at the end;
+    what a logging session can watch move every activation is the cursor
+    0x7FB700 and the running register 0x7FB6F8 (`logging/sessions/
+    flash_crc.json` logs all four).
+
+    **The harness must not show up in the answer.**  The second range is the
+    on-chip flash, and `emu/time_base.py` rewrites three words at 0x47846C
+    inside it -- which changes the CRC (0x7FB0DF4E instead of 0x5562139F).
+    Anything the harness writes into a hashed range does.  So the task
+    compares the live flash against the image the emulator was built from and
+    puts the image's own bytes back for the one activation whose window covers
+    them.  A *patch* is not hidden: it is part of `emu.dump`, and a patched
+    image really does report a different checksum.
+    """
+
+    #: how much wall time one `advance()` may spend, as `PatchRunner`
+    MAX_CATCHUP_WALL_S = 0.003
+
+    def __init__(self, emu, *, tick_ms: float = 10.0,
+                 hide_harness_writes: bool = True):
+        self.emu = emu
+        self.tick_s = tick_ms / 1000.0
+        self.sim_t = 0.0
+        self.activations = 0
+        self.lagged = 0
+        self.errors: list[str] = []
+        self.ranges = self._read_ranges()
+        self.shadow = (self._find_harness_writes() if hide_harness_writes
+                       else {})
+
+    # -- setup -------------------------------------------------------------
+    def _read_ranges(self) -> list[tuple[int, int]]:
+        out, addr = [], FLASH_CRC_RANGES
+        while True:
+            start, end = struct.unpack(">II", self.emu.read(addr, 8))
+            if end == 0:
+                return out
+            out.append((start, end))
+            addr += 8
+
+    def _find_harness_writes(self) -> dict[int, bytes]:
+        """{address: the image's own bytes} for every run the harness changed.
+
+        `Med9Emu.dump` is the file the emulator was built from -- the patched
+        temporary image when `--sim-patch` is on -- so this finds exactly the
+        edits made *after* load: the virtual time base, and anything else a
+        future harness writes into a hashed range.
+        """
+        tools = os.path.join(REPO, "tools")
+        if tools not in sys.path:
+            sys.path.insert(0, tools)
+        import med9lib as ml                                  # noqa: E402
+
+        out: dict[int, bytes] = {}
+        for start, end in self.ranges:
+            live = self.emu.read(start, end - start + 1)
+            base = ml.cpu_to_file(start)
+            stock = bytes(self.emu.dump[base:base + len(live)])
+            if live == stock:
+                continue
+            run_start = None
+            for i in range(len(live) + 1):
+                differs = i < len(live) and live[i] != stock[i]
+                if differs and run_start is None:
+                    run_start = i
+                elif not differs and run_start is not None:
+                    out[start + run_start] = stock[run_start:i]
+                    run_start = None
+        return out
+
+    # -- state -------------------------------------------------------------
+    @property
+    def state(self) -> int:
+        return self.emu.read(FLASH_CRC_STATE, 1)[0]
+
+    @property
+    def done(self) -> bool:
+        return bool(self.emu.read(FLASH_CRC_DONE, 1)[0] & 1)
+
+    @property
+    def cursor(self) -> int:
+        return struct.unpack(">I", self.emu.read(FLASH_CRC_CURSOR, 4))[0]
+
+    @property
+    def crc(self) -> int:
+        """The published 32-bit value; 0 until state 2 has run."""
+        hi, lo = struct.unpack(">HH", self.emu.read(FLASH_CRC_PUB_HI, 4))
+        return (hi << 16) | lo
+
+    # -- running -----------------------------------------------------------
+    def _swap(self, lo: int, hi: int) -> list[tuple[int, bytes]]:
+        saved = []
+        for addr, stock in self.shadow.items():
+            if addr < hi and lo < addr + len(stock):
+                saved.append((addr, bytes(self.emu.read(addr, len(stock)))))
+                self.emu.write(addr, stock)
+        return saved
+
+    def _unswap(self, saved) -> None:
+        for addr, live in saved:
+            self.emu.write(addr, live)
+        drop = getattr(self.emu.uc, "ctl_remove_cache", None)
+        for addr, live in saved:
+            if drop is not None:
+                try:
+                    drop(addr, addr + len(live))
+                except Exception:                             # pragma: no cover
+                    pass
+
+    def activate(self) -> bool:
+        """One activation.  False once the task has published and parked."""
+        if self.done:
+            return False
+        cursor = self.cursor
+        saved = self._swap(cursor, cursor + 0x68) if self.shadow else []
+        try:
+            res = self.emu.call(FLASH_CRC_TASK, regs={"r1": TASK_STACK_TOP},
+                                reset=False, max_insns=4_000_000)
+        finally:
+            if saved:
+                self._unswap(saved)
+        self.activations += 1
+        if not res.ok and len(self.errors) < 20:
+            self.errors.append(
+                f"flash_crc_task at {FLASH_CRC_TASK:#08x}: {res.stop_reason} "
+                f"at {res.pc:#08x}")
+            return False
+        return True
+
+    def advance(self, target_s: float) -> None:
+        """Run one activation per 10 ms of simulated time, within a budget."""
+        if self.done or target_s <= self.sim_t:
+            return
+        deadline = time.monotonic() + self.MAX_CATCHUP_WALL_S
+        while self.sim_t + self.tick_s <= target_s:
+            self.sim_t += self.tick_s
+            if not self.activate():
+                return
+            if time.monotonic() >= deadline:
+                self.lagged += 1
+                return
+
+    def run_to_completion(self, max_activations: int = 30000) -> int | None:
+        """Activate until the value is published; the CRC, or None."""
+        while self.activations < max_activations and not self.done:
+            if not self.activate():
+                return None
+        return self.crc if self.done else None
+
+    def status(self) -> str:
+        return (f"flash CRC: {self.activations} activations, state "
+                f"{self.state}, cursor {self.cursor:#08x}"
+                + (f", published {self.crc:#010x}" if self.done
+                   else f" ({100.0 * self.activations / FLASH_CRC_ACTIVATIONS:.1f} %)"))
+
+
 class FrameTap:
     """A `CanLink` proxy that shows every received frame to a callback.
 
@@ -661,7 +854,7 @@ class Med9Handlers:
                  patch_dir: str | None = None, eeprom: str | None = None,
                  time_scale: float = 1.0, run_patch: bool = True,
                  stock_tasks: bool = False, wip_polls: int = 0,
-                 time_base: bool = True):
+                 time_base: bool = True, flash_crc: bool = False):
         from emu import Med9Emu
         from emu.time_base import VirtualTimeBase
         if patch_dir:
@@ -684,6 +877,7 @@ class Med9Handlers:
         self.eeprom = None
         self.qspi = None
         self.runner: PatchRunner | None = None
+        self.flash_crc: "FlashCrcTask | None" = None
         #: P3: drop back to session 0 after this long without a KWP request.
         #: `None` = never, which is what an emulator does on its own; the real
         #: ECU times out in ~5 s (kwp.md 2.2, exact value not extracted).
@@ -710,6 +904,9 @@ class Med9Handlers:
                 self.ram.flexfuel = False
                 self.ram.owns_patch_ram = False
         self.power_on()
+        #: built after `power_on`, so `flash_crc_init` (init entry 75) has put
+        #: the state byte back to 0 and the shadow scan sees the final flash
+        self.flash_crc = FlashCrcTask(self.emu) if flash_crc else None
 
     # -- the EEPROM device -------------------------------------------------
     def _install_eeprom(self, path: str, wip_polls: int) -> None:
@@ -800,9 +997,11 @@ class Med9Handlers:
         return (self.clock() - self.t0) * self.time_scale
 
     def step(self) -> None:
-        """Let the patch's hooks catch up with the wall clock."""
+        """Let the patch's hooks and the CRC task catch up with the clock."""
         if self.runner is not None:
             self.runner.advance(self.wall_target())
+        if self.flash_crc is not None:
+            self.flash_crc.advance(self.sim_time())
 
     def read_ram(self, addr: int, size: int) -> bytes:
         return self.emu.read(addr, size)
@@ -1090,6 +1289,13 @@ def main(argv=None) -> int:
                     help="make an EEPROM page write report WIP for N status "
                          "polls (0 = instant, which is what a time base that "
                          "never advances gives us anyway)")
+    ap.add_argument("--flash-crc", action="store_true",
+                    help="run the firmware's own flash_crc_task (0x11CB10) in "
+                         "the background, one activation per simulated 10 ms "
+                         "raster, and publish to 0x7F9178/0x7F917A. It needs "
+                         "24,627 activations (246 simulated s, ~37 s of host "
+                         "CPU) to get there; logging/sessions/flash_crc.json "
+                         "logs the cursor and the running register too")
     ap.add_argument("--time-scale", type=float, default=1.0, metavar="X",
                     help="simulated seconds per wall-clock second (default 1)")
     ap.add_argument("--task-set", choices=("A", "B"), default="A",
@@ -1112,7 +1318,7 @@ def main(argv=None) -> int:
         args.dump, seed=args.seed or None, animate=not args.no_animate,
         session_timeout_s=args.session_timeout or None,
         patch_dir=args.sim_patch, eeprom=args.eeprom,
-        stock_tasks=args.sim_stock_tasks,
+        stock_tasks=args.sim_stock_tasks, flash_crc=args.flash_crc,
         time_scale=args.time_scale, wip_polls=args.wip_polls,
         ram=AnimatedRam(live_task_set=args.task_set,
                         statics=dict(DEFAULT_STATICS)))
@@ -1131,6 +1337,12 @@ def main(argv=None) -> int:
               f"wall s")
     if handlers.eeprom is not None:
         print(f"EEPROM: {args.eeprom} (2 KB M95160, written back on exit)")
+    if handlers.flash_crc is not None:
+        c = handlers.flash_crc
+        print(f"flash CRC task: {len(c.ranges)} ranges, "
+              f"{FLASH_CRC_ACTIVATIONS} activations to a published value"
+              + (f", hiding {len(c.shadow)} harness edit(s) from it"
+                 if c.shadow else ""))
     print("ctrl-C to stop")
     try:
         sim.serve_forever()
@@ -1140,6 +1352,8 @@ def main(argv=None) -> int:
             print(handlers.runner.status())
             for line in handlers.runner.errors[:5]:
                 print("  !", line)
+        if handlers.flash_crc is not None:
+            print(handlers.flash_crc.status())
     finally:
         sim.close()
     for line in handlers.log[-5:]:
