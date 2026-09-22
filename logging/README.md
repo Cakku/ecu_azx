@@ -85,9 +85,27 @@ JSON (recommended) or CSV with columns `var,max_abs,mean_abs,rel,interp`
 | `mean_abs` | limit on the mean absolute deviation — the one that catches a small constant offset |
 | `rel` | limit as a fraction of the largest absolute baseline value of that variable; the effective `max_abs` is the larger of the two |
 | `interp` | `linear` (default) or `hold`. Use `hold` for enumerations, bit flags and anything that steps rather than ramps. |
+| `max_abs: null` | **not compared** — "expected to differ, do not judge". The way a file says a variable was considered rather than forgotten (free-running counters, a patch's own state block on a stock run). |
 
 Tolerances belong next to the thing they judge: the bench tolerances for a
 patch live in `patches/<name>/test/`, not here.
+
+**Added 2026-09-22 (F2).** Two runs are two power-ups, so align them on the
+ECU's own clock before comparing, and derive the limits from two runs instead
+of guessing them (docs/07 §§5.4-5.5):
+
+```bash
+python3 tools/logcmp.py base.csv cand.csv -t tolerance.json \
+        --align-on raster_setA_10ms_count:100 --uncovered report
+python3 tools/logcmp.py derive stock1.csv stock2.csv -o tolerance.json \
+        --align-on raster_setA_10ms_count:100 --exclude 'raster_*' ff_ticks
+```
+
+`--uncovered {fail,report,ignore}` says what happens to variables the file does
+not name: judge them against `default` (`fail`, the historical behaviour),
+leave them out and list them (`report`), or leave them out silently. `derive`
+writes the `_derived` provenance block — the two runs, the factor, the
+alignment, the common time range, what was excluded — which the loader ignores.
 
 ## 3. Synthetic samples
 
@@ -100,12 +118,19 @@ step from 4 s to 8 s, idle) used by `tests/test_logcmp.py`:
 | `candidate_ok.csv` | a repeat run: sensor noise and a 17 ms time skew, inside tolerance |
 | `candidate_bad.csv` | the same run with `ti_1_w` deliberately +8 % |
 | `tolerance.json` | limits for this scenario |
+| `stock_run1.csv` | two runs of the same scenario on the same software, from two separate **power-ups**: each carries `raster_setA_10ms_count` from its own offset, and run 2's logger started 0.25 s of ECU time further into the scenario (added 2026-09-22, F2) |
+| `stock_run2.csv` | |
 
 ```bash
 python3 tools/logcmp.py logging/samples/baseline.csv logging/samples/candidate_ok.csv \
     -t logging/samples/tolerance.json          # RESULT: OK,     exit 0
 python3 tools/logcmp.py logging/samples/baseline.csv logging/samples/candidate_bad.csv \
     -t logging/samples/tolerance.json          # FAIL ti_1_w,    exit 1
+python3 tools/logcmp.py logging/samples/stock_run1.csv logging/samples/stock_run2.csv \
+    -t logging/samples/tolerance.json          # 5 of 7 fail on the offset alone
+python3 tools/logcmp.py logging/samples/stock_run1.csv logging/samples/stock_run2.csv \
+    -t logging/samples/tolerance.json \
+    --align-on raster_setA_10ms_count:100      # RESULT: OK,     exit 0
 python3 logging/make_samples.py                # regenerate them (byte-identical)
 ```
 
@@ -492,10 +517,17 @@ budget in `patches/ff_fuel/test/tolerance.json` and says nothing about the
 software. Both logs carry the live raster counter, so the offset is
 **measurable**: shift the candidate's time axis by
 `(raster_cand - raster_base) / 100` before comparing.
-`bench_rehearsal.py::_align_on_raster` does it, and with that one step
+`bench_rehearsal.py::_align_on_raster` did it, and with that one step
 `tools/logcmp.py` passes on identical animation and fails on `rk_fuel_mass`
 alone when `rk` is perturbed by 3 %. A bench comparison of two drives needs
 the same step.
+
+**2026-09-22 (F2):** that step is now `tools/logcmp.py --align-on
+raster_setA_10ms_count:100`, with `--uncovered report` for the variables
+`tolerance.json` does not name and `logcmp.py derive run1 run2` for the
+tolerances themselves; `bench_rehearsal.py` calls the tool's `align_on` and
+`compare(..., uncovered="report")` instead of its own copies, and
+`--fresh-eeprom` is still **69/69** (docs/07 §§5.4-5.5).
 
 ### What the simulator now models, and what it still does not
 
