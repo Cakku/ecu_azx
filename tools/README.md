@@ -17,6 +17,7 @@ document and `med9lib.py` together.
 | `bindiff.py` | Diff two dumps and classify every changed byte as *patch* (listed in a `patch.json`), *descriptor* (a checksum sum/~sum word) or **unexpected**. Exit 1 on anything unexpected. |
 | `logcmp.py` | Compare a baseline and a candidate log over their common variables with per-variable tolerances. Format and tolerance file: `logging/README.md`. |
 | `draft_to_xdf.py` | `re/calibration_draft.csv` -> a TunerPro `.xdf`. Maps CPU addresses to **file offsets** through `med9lib`, emits big-endian row-major tables, and validates the result structurally (`--validate`, `--self-test`). No scaling is applied: every value is raw counts. |
+| `cal_show.py` | Print one object of `re/calibration_draft.csv` — its cells, both axes' breakpoints and the same numbers under a trial scaling — or any raw run of elements with `--raw`. `--guess` reports the physical range the numbers would have under every unit `re/findings/` has proved and marks the ones that fit. Read-only; the naming pass's read-out helper (issue #41). |
 | `blobdis.py` | Disassemble a raw big-endian PowerPC blob at a chosen CPU address; `--check-sda` fails if patch code touches r2/r13. |
 | `eeprom_map.py` | Decode the SPI EEPROM block layout (EEP_CONF, file 0xB2FF0): block table, copies, RAM mirror, free space; `--clients` maps which block bytes the firmware actually uses; `--check` verifies the block checksums of a real 2 KB EEPROM read. `re/findings/eeprom.md`. |
 | `callgraph.py` | Static PowerPC call graph: every `bl` target is a function entry, each function is walked as a CFG (`--reach`, `--func`, `--callers`, `--entries`). Also extracts r2/r13-relative accesses and finds `lis`+D-form pairs that address a register range (`--xref-store`). |
@@ -131,6 +132,7 @@ constant):
 | File | What it covers |
 |---|---|
 | `test_bindiff.py` | builds a patched copy in a temp directory and checks that only the edits and their descriptors moved |
+| `test_cal_show.py` | `tools/cal_show.py`'s parsers, that `--guess` rejects as well as accepts, and that the bytes it reads match `med9lib` |
 | `test_draft_to_xdf.py` | the XDF skeleton, the file-offset mapping, the `val[iy*nx+ix]` layout, and `re/calibration_names.csv` against the draft |
 | `test_ecu_sim_patch.py` | `logging/ecu_sim.py --sim-patch`: the patch's hooks driven on a simulated raster |
 | `test_emu.py` | the Unicorn harness (`emu/README.md`) |

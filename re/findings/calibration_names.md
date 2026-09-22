@@ -265,7 +265,7 @@ address of its consumer.
 | 0x5C8FAE — 8 × 8 u16 over `rl_w` × `nmot_w`, 29…983 | `FUN_004336E0` | **SETTLED and CORRECTED (2026-09-17, E3, §9.6):** it is `cand_KFRLSOLDY`, the step size of the charge-setpoint approach, over (Δcharge, `nmot_w`); it does **not** produce 0x803508 |
 | nine 14 × 14 u8 maps 0x5C430D…0x5C4A1D, values around 128 = 1.0 | `FUN_00424CD0` | **SETTLED and CORRECTED (2026-09-17, E3, §9.4):** `%GGHFM`'s air-mass correction — `KFKHFM` plus the eight `KFPU*` pulsation maps; the three states are adjusters, not temperatures |
 | 0x5D863C — 16 × 12 u16, 0…65277 | `FUN_0045FAA8` | **SETTLED (2026-09-17, E3, §9.1):** `cand_KFMIOPRL`, torque from the alternative charge request 0x8034B8 |
-| the lambda path (`LAMSOLL` `lamsbg_w`, `LAMBTS` `KFLBTS`, WOT enrichment) | not located | **STILL OPEN after E3 (2026-09-17, §9.5).** E3 narrowed it: the fuel path's lambda entry is the Q7 scalar `fgru_trim` 0x801CF2, built without any map from `cand_KFGRUTRIM` and the unwritten-by-any-visible-store variable 0x7FD066, and the knock→enrichment route of ignition.md §13.3 turns out to be a knock-control *window*, not the exhaust-temperature model |
+| the lambda path (`LAMSOLL` `lamsbg_w`, `LAMBTS` `KFLBTS`, WOT enrichment) | not located | **SETTLED as an exclusion (2026-09-22, F4, §10.1-§10.2):** 0x7FD066 is tester adaptation channel 10, not a lambda request, so `fgru_trim` has no map upstream of it; `cand_KFMIXA`/`cand_KFMIXB` — the `%LAMSOLL`-shaped pair — are **all 128**, i.e. λ = 1 everywhere; and every other factor `gk_rk` applies is named. **There is no full-load or component-protection enrichment on the fuel path of this dataset.** `%LAMBTS` through `%ATM` was time-boxed; the candidate module is `FUN_00108950` |
 | the charge limiters 0x80234C / 0x802358 / 0x802360 / 0x80235E feeding the min-chain at 0x0C7CF8 | `FUN_000FBE74`, `FUN_000FC250` | **SETTLED (2026-09-17, E3, §9.3):** all four sources named and read out of the image; only `cand_KLRLMXNRED` (0x5D7EAE) is calibrated to anything but "off". (The 0x803358 / 0x803360 of the original lead were typos for 0x802358 / 0x802360.) |
 
 ## 8. Reproducing
@@ -379,6 +379,13 @@ set and decrements it by one per activation afterwards, so `t` runs from
 100/128 = 0.78 down to 0 and the steady-state map is `cand_KFMIRL`. Which
 event 0x7FE95B marks is **open**.
 
+> **SETTLED 2026-09-22 (F4, #41, §10.6).** 0x7FE95B is bit 0 of the first data
+> byte of the CAN frame received in RX slot 4, **id 0x440** (`can.md` §4,
+> shadow at 0x803F18); it is set at 0x0A93A8 and cleared with six sibling
+> flags by `FUN_00428FCC` when that message times out. 0x440 is the gearbox
+> group in the public VAG matrices, so `cand_KFMIRLUM` is the charge map used
+> while the gearbox asks for it.
+
 ### 9.3 The charge-limit chain — almost all of it is switched off
 
 rail.md §10 and §12.3 named the min-chain `rl_limit_min_awea` 0x0C7CF8 but not
@@ -449,6 +456,17 @@ cheapest next entries are (a) the writer of 0x7FD066, (b) `%LAMBTS` through
 the exhaust-temperature model proper (`ATM`, FR p2259), and (c) the lambda
 controller outputs `fr_w` 0x802DF8 / 0x802E00 traced backwards.
 
+> **ANSWERED 2026-09-22 (F4, #41, §10.1-§10.2).** (a) 0x7FD066 is **tester
+> adaptation channel 10**, written by the KWP adaptation service
+> `FUN_00038708` through the pointer table at 0x0A3ADC and restored from
+> EEP_CONF block 8 by `FUN_0012E3F8`; there is no map upstream of
+> `fgru_trim`. (c) `fr_w` 0x802DF8 / 0x802E00 are written by the PI controller
+> `FUN_00440A3C`, whose setpoint 0x802CDE is computed by `FUN_0043E164` **from
+> the commanded `rk` itself**, so the loop tracks the request rather than
+> carrying one. (b) was time-boxed. The conclusion is that this dataset has no
+> lambda-setpoint map at all: `cand_KFMIXA` and `cand_KFMIXB` are the
+> `%LAMSOLL`-shaped pair and every cell of both is 128.
+
 ### 9.6 The other §7 leads
 
 * **0x5C9938 (`cand_KFMIRLINV`)** — `FUN_000E069C` evaluates the same map
@@ -498,3 +516,318 @@ export GHIDRA_INSTALL_DIR=/usr/local/Cellar/ghidra/12.1.3/libexec
 FR pages read for this brief: **724-728** (`MDFUE`), **729-745** (`MDBAS` /
 `MDIST`), **813-823** (`GGHFM`), **1037-1047** (`BGRLMIN`, `BGRLMXS`) and the
 table of contents **2-29**.
+
+---
+
+## 10. Pass 3 (brief F4, 2026-09-22, issues #41 and #43)
+
+Brief `docs/agent_briefs/F4_calibration_naming_pass3_lambda.md`. Dump
+unchanged (`tools/checksum.py verify -q` -> `ALL OK (65 blocks)` before and
+after). The Ghidra work was done in a private copy at `/tmp/ghidra_F4`; the
+read-outs use the new `tools/cal_show.py`.
+
+### 10.0 Counts
+
+| | before (E3) | after (F4) |
+|---|---|---|
+| objects with a name | 259 | **359** |
+| … tagged `static` (the *label*) | 57 | **148** |
+| … tagged `hypothesis` | 202 | 211 |
+| objects with a unit | 244 | **344** |
+| scaling tagged `static` | 197 | **268** |
+| tables/curves/axes still `cand_*` | 958 of 1,066 | **876 of 1,066** |
+
+The 100 new rows are 57 axes, 18 scalars, 12 `map_2d_data`, 5 `map_2d`,
+4 `map_2d_shared`, 2 `curve_1d` and 2 `curve_1d_shared`.
+
+### 10.1 The writer of 0x7FD066 — it is a tester adaptation channel (VERIFIED-STATIC)
+
+E3 left "the writer of 0x7FD066" as the cheapest next entry into the lambda
+path (§9.5), and `start.md` §4.1 had recorded that the cell has "**no code
+writer at all** — it is only reachable through the tester pointer table at
+0x0A3ADC". Both are right about the mechanism and wrong about the conclusion:
+the cell **is** written, through that table, by the **KWP adaptation service**,
+and it has nothing to do with the lambda request.
+
+The structure at 0x0A3AD8 is a four-table adaptation-channel descriptor for
+**17 channels**, indexed 1..0x11:
+
+| table | base | what the entry is |
+|---|---|---|
+| RAM pointer | 0x0A3AD8 + 4n | the byte the channel lives in |
+| upper limit | 0x0A3B2C + 4n | pointer to a calibration byte |
+| lower limit | 0x0A3B70 + 4n | pointer to a calibration byte |
+| default | 0x0A3BB8 + 4(n−1) | pointer into the byte array at 0x0A3B20 |
+
+with **0x008001D0 as the "channel not implemented" sink**. Twelve channels are
+implemented; `FUN_0012E3F8` (0x0012E3F8) sets the implemented-mask 0x8001D4 to
+`(… & 0xFFFC77BF) | 0x77BE` — bits 1,2,3,4,5,7,8,9,10,12,13,14 — and restores
+each of them from **EEP_CONF block 8** with
+`nvm_block_request(8, n + 1, 1, 1, PTR[n], 0)`.
+
+| ch | RAM | max | min | default | signed | read at | what it multiplies |
+|---|---|---|---|---|---|---|---|
+| 1 | 0x7FD06B | 0x5C608E = 0 | 0x5C608F = 0 | 0 | yes | 0x46B0BC | — |
+| 2 | 0x7FD064 | 141 | 64 | 128 | no | 0x0E8F20 | 0x801D16 |
+| 3 | 0x7FD068 | 192 | 64 | 128 | no | 0x0E8EE4 | 0x801D18 |
+| 4 | 0x7FD065 | 141 | 64 | 128 | no | **0x41A0BC** | **the running mixture** |
+| 5 | 0x7FD069 | 141 | 64 | 128 | no | **0x430394** | **the 0x7FD264 mixture factor** |
+| 7 | 0x7FD06D | 0 | 205 | 0 | yes | 0x0FBCB8 | — |
+| 8 | 0x7FD067 | 141 | 64 | 128 | no | **0x41A5EC, 0x41A780** | **`ksta`, the start quantity** |
+| 9 | 0x7FD063 | 13 | 243 | 0 | yes | (through the pointer only) | — |
+| 10 | **0x7FD066** | **179** | **26** | **128** | no | **0x0E8DA8** | **`fgru_trim`** |
+| 12 | 0x7FD06C | 0 | 0 | 255 | yes | (through the pointer only) | — |
+| 13 | 0x7FD062 | 255 | 0 | 0x5C885C | yes | 0x11816C, 0x46B0C4 | — |
+| 14 | 0x7FD06A | 255 | 0 | 0 | no | 0x466908 | — |
+
+`FUN_00038708` (0x00038708) is the service. Sub-function 0x81 reads a channel,
+0x82 writes one — clamping the tester's byte between the two calibration
+limits and storing it with `**(byte **)(&DAT_000a3ad8 + n*4) = 0x8001E6` —
+and 0x83 commits it to the EEPROM. Channels whose bit is set in the mask
+**0x382C2** (1, 6, 7, 9, 11, 12, 13) are displayed signed, i.e. offset by
+−0x80. Sub-function 0x82 with channel 0 restores every channel to its default.
+
+**Three of the twelve are fuel trims, and all three matter for flex fuel:**
+
+* **channel 10 → `fgru_trim`.** `FUN_000E8D9C`:
+  `fgru_trim = min(mul_shr15_sat(cand_KFGRUTRIM = 128, ch10 × 64 + 0x6000), 255)`,
+  so the factor is `0.75 + n/512` in Q7 and the limits 26…179 allow
+  **0.797 … 1.094**, i.e. −20.3 % … +9.4 % on `rk`, with 128 = exactly 1.0.
+* **channel 8 → `ksta`.** `esstt_ksta` 0x41A268 multiplies the start quantity
+  by `ch8/128` (the `mul_shr15_sat(v, ch8 << 8)` at 0x41A5EC), limits 64…141 =
+  **0.50 … 1.10**.
+* **channel 4 → the running mixture.** `mixture_running_build` 0x419DA4:
+  `(ch4 × 0x7FD267 × v) >> 14`, limits 64…141, same 128 = 1.0.
+
+Two consequences. First, **`fgru_trim` is not a lambda setpoint and there is no
+map upstream of it** — the exclusion E3 asked for is complete, and §9.5's
+"whatever sets the lambda request writes it through a pointer" is answered: no
+lambda request writes it, a tester does. Second, these three channels are a
+**tester-writable, EEPROM-persistent ±10 % fuel trim that needs no patch at
+all**, which is worth knowing for bench work even though ±10 % is far short of
+what E85 needs. They are also a *risk*: a workshop "basic setting" that resets
+them changes the fuelling of a flex-fuel calibration.
+
+> **Correction to `re/findings/start.md` §4.1 (2026-09-22, F4):** the line
+> "`0x7FD066` has **no code writer at all** … so it is 1.0 in normal
+> operation" is right about the default and wrong about the reason. It is
+> adaptation channel 10, written by `FUN_00038708` through the table and
+> restored from EEP_CONF block 8 by `FUN_0012E3F8` at every power-up. It is
+> 1.0 only while the channel sits at its default 128.
+
+> **Correction to `re/findings/eeprom.md` §9 (2026-09-22, F4):** "Exactly one
+> [call site] names block 8" is an artefact of `eeprom_map.py --clients`
+> resolving immediates only. `FUN_0012E3F8` and `FUN_00038708` call
+> `nvm_block_request` with the block number **loaded from 0x0A3AD8**, so
+> block 8 has three more clients, including a *commit* path in sub-function
+> 0x83. D2's conclusion that a patch must commit block 8 itself still holds —
+> the tester path only runs when a tester asks.
+
+### 10.2 The lambda path, closed as far as this dataset allows
+
+With §10.1 the fuel path is fully accounted for, and the answer to "where is
+`LAMSOLL` / `KFLBTS` / the WOT enrichment" is **that this dataset does not have
+them as maps**. The evidence, all VERIFIED-STATIC:
+
+1. `gk_rk` 0x41AA48 multiplies exactly four things into the base quantity:
+   `fgru_trim` (§10.1, a tester constant), `ksta_adapted` or `mixture_running`,
+   the charge `rl_for_fuel`, and the lambda **controller** outputs
+   `fr`/`fra`/`frm`. There is no fifth factor and no additive enrichment.
+2. `mixture_running` 0x803020 is Q12 with 4096 = 1.0 and is built as
+   `mul_q15(0x803026, (0x7FD264 × (0x80301C + 0x1000)) >> 7)`.
+   **0x803026 = `cand_KFMIXA` × `cand_KFMIXB` × 2**, and this pass read both
+   maps out of the image: **every cell of both is 128**, so 0x803026 is
+   0x8000 = 1.0 at every operating point. The `%LAMSOLL`-shaped pair of this
+   software is calibrated to λ = 1 everywhere.
+3. The only non-neutral contribution to `mixture_running` is 0x80301C, and
+   §10.3 names every map in it. It is a *warm-up* enrichment over `tmst`, zero
+   once the engine is warm.
+4. The lambda **controller** setpoint is not a map either. `FUN_0043E164`
+   computes 0x802CDE from the *commanded* fuel mass (0x80303E / 0x80303A, both
+   written by `gk_rk`) divided by the charge, and `FUN_00440A3C` (the PI
+   controller, 0x440A3C-0x442037) subtracts the sensor value 0x802E0C from it.
+   So the loop tracks whatever `rk` asks for; the request is implicit in `rk`.
+
+**So there is no full-load or component-protection enrichment on the fuel path
+of this dataset.** `%LAMBTS` may exist as code — nothing here proves it does
+not — but it cannot reach `rk`, because every term that can is named and none
+of them is a function of an exhaust temperature. For flex fuel this is good
+news: an ethanol factor at B6's `rk` hook is not fighting a hidden enrichment.
+It is also a warning: **there is no stock enrichment to lean out**, so the
+whole E85 fuel increase has to come from the patch, and the ±10 % of the
+adaptation channels is the only stock lever.
+
+What was *not* done, and is the honest remainder: lead (b), `%LAMBTS` through
+the exhaust-temperature model `%ATM`, was time-boxed once the exclusion above
+made it unable to change the fuel path. The candidate module is
+`FUN_00108950` (0x108950-0x10A0DB), a soak/cool-down model over
+(engine-off time 10…945 s, `tmst` −39.75…99.75 °C) with six 10 × 10 u16 maps;
+it was identified and left unnamed.
+
+Commands that produced the exclusion:
+
+```bash
+./.venv/bin/python3 tools/sda_xref.py data/passat_azx_ori.bin --var 0x7FD062 0x7FD06D
+./.venv/bin/python3 tools/find_abs_refs.py data/passat_azx_ori.bin --range 0x7FD040 0x7FD080
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin 0x5C6B64   # KFMIXA, all 128
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin 0x5C6C12   # KFMIXB, all 128
+./.venv/bin/python ghidra_scripts/decompile.py --project-dir /tmp/ghidra_F4 \
+    --project-name med9 0x00038708 0x0012E3F8 0x000E8D9C 0x0041AA48 \
+    0x00419DA4 0x0043E164 0x00440A3C 0x0010C874 0x004302DC 0x00430448
+```
+
+The 12 pointer words of the adaptation table were found with a halfword-aligned
+scan for words whose value lies in 0x7FD060-0x7FD07F (`ram_map.csv` already
+flagged the line with `ptr_words = 12`), which is the search
+`find_abs_refs --target` cannot do because the address never appears as an
+instruction immediate.
+
+### 10.3 The running-mixture cascade (%GK), 13 maps
+
+`start.md` §4.2 listed the cascade and called its calibration "partly
+HYPOTHESIS". All thirteen objects are now named, each with its fixed point read
+off the shift at the use site (per-object evidence in
+`re/calibration_names.csv`):
+
+| function | objects | produces |
+|---|---|---|
+| `FUN_004302DC` | `mix_7FD265_map` 0x5C6A56, `mix_7FD261_map` 0x5C6A86, `mix_7FD264_nmot_curve` 0x5C6AED | 0x7FD265, 0x7FD261, 0x7FD264 |
+| `FUN_00430448` | `mix_7FD267_map` 0x5C6AF6, `mix_7FD268_map` 0x5C6B26 | 0x7FD267, 0x7FD268, and 0x803026 from `cand_KFMIXA` / `cand_KFMIXB` |
+| `FUN_0010C874` | `mix_801CF6_map` 0x5C6AB6, `mix_801CF5_map` 0x5D3580, `mix_801D00_map` 0x5D3568, `mix_801D01_map` 0x5D361B, `mix_801CF4_curve` 0x5D3673 | 0x801CF4-0x801D01 |
+| `FUN_000C5E54` | `mix_801D04_map` 0x5D365B, `mix_801D06_map` 0x5D36A8 | 0x801D04, 0x801D06 |
+| `FUN_004544A8` | `mix_7FD263_map` 0x5D362D | 0x7FD263 |
+
+**Eleven of the thirteen are neutral in this dataset.** The two that are not:
+
+* **`mix_801CF5_map` 0x5D3580**, 12 × 12 u8 over (`tmst` −30…+90 °C, the
+  0x7FD3F7 temperature). It is *added* to 0x7FD265 and runs 44/128 = +34 % at
+  the cold corner down to 0 hot. **This is the warm-up enrichment of this
+  software** — the thing `start.md` §4.1 correctly said is not a separate
+  `fnsk` / `fwlk` factor. It is the map an E85 cold-start calibration has to
+  move, alongside `KFKSTT` / `KFWKSTT` (which act during cranking only).
+* **`mix_7FD264_nmot_curve` 0x5C6AED**: 1.60 at 600 rpm, 1.00 at 1000 rpm,
+  0.797 from 1520 rpm up.
+
+Argument-order note, used throughout this section and worth writing down:
+`lookup_2d_*(struct, a, b)` takes **a = the y (row) value and b = the x
+(column) value** — the convention `KFWKSTT` fixes (`start.md` §3, whose call is
+`lookup_2d_u8(&DAT_005c6c60, tmst, anztist)` with `tmst` on the 12-point y
+axis) — and `interp_2d_*(map, x_axis_struct, key_y, key_x)` likewise puts the
+*second* key on x. Both were re-checked against four independent draft rows
+before the rows above were written.
+
+### 10.4 The three shared axis-key processes, and 57 axes
+
+`cal_axis_key_process` 0x0BDB58 (§3) is one of **three** functions of that
+shape. `FUN_000FB974` performs 15 breakpoint searches and `FUN_00115AE0` 18,
+into the same 0x7FD79x-0x7FD8Ax key block. Between them every unnamed `axis`
+row in 0x5C88xx and 0x5D79xx-0x5D7Axx is a breakpoint list whose input is named
+in the call, so 40 axes were named in one pass, plus 17 more from the consumers
+of §10.3 and §10.5. 24 of the 40 carry a unit this project had already proved;
+the rest keep raw counts and say so.
+
+Two fixed points fall out of the grids:
+
+* **0x8022A2 is a Q15 signed fraction.** `axis_q15_8022A2_5D79CA` 0x5D79CA is
+  −32768, −24576, −16384, −3277, 3277, 16384, 24576, 32767 = **−1.0, −0.75,
+  −0.5, −0.1, +0.1, +0.5, +0.75, +1.0** at 1/32768 exactly.
+* **0x7FD3E5 is *probably* a battery voltage at 1/16 V per LSB, and this is
+  NOT settled.** For it: the axis 0x5C7BA5 that `start.md` §5 recorded without
+  a unit is 40, 80, 120, 160, 200, 240, i.e. **2.5, 5.0, 7.5, 10.0, 12.5,
+  15.0 V** exactly, and `axis_ubatt_5D7947` 0x5D7947 reads 8.19…14.00 V.
+  Against it: under the proved `tmot` unit (0.75 °C − 48) the same axes read
+  −18…132 °C in exact 30 °C steps and 50.25…120 °C, both plausible temperature
+  ladders, and 0x5D5FF1 over the same cell reads −24.75…80.25 °C, which looks
+  more like a coolant grid than a voltage grid. Both sidecar rows are therefore
+  `hypothesis` on the name **and** on the scale, and the axis of
+  `zwdelta_7FD338_map` (§10.5) keeps raw counts. **Settling 0x7FD3E5 is a
+  short job for the next brief**: decompile its writers 0x0F8FD4, 0x11A990 and
+  0x11A998.
+
+### 10.5 Two calibrated interventions nobody had located
+
+* **`FUN_00459334` writes the s8 ignition term 0x7FD338**, and
+  `zwbas_per_bank` 0x41D10C reads it at 0x41D120 — so it is an ignition angle
+  at 0.75 °CA/LSB, on top of `zwgru`, and **no findings file mentioned it**.
+  It is `zwdelta_7FD338_weight_map` 0x5D5F81 (a load/speed gate that is zero
+  below 47 % charge) times `zwdelta_7FD338_map` 0x5D5FFB (−6.0…+2.25 °CA over
+  speed and 0x7FD339) plus `zwdelta_7FD338_add_map` 0x5D6075 (−3.75…+7.5 °CA
+  over the 0x7FD3F7 temperature and load, largest cold). Anything that adds
+  advance — brief E1's ethanol blend included — shares the budget with it, and
+  `ignition.md` should pick it up on the next pass through that file.
+* **`FUN_000C7DD0` holds six charge thresholds over (engine speed, operating
+  mode)**, all in the 100/32768 %/LSB charge domain, and
+  `rl_rlsolreq_limit_curve` 0x5D9216 is the ceiling it compares `rlsol_req`
+  against: **100.0 % up to 4000 rpm, 105.0 % above**, setting 0x7FD442 bit 0.
+
+### 10.6 The three loose ends of §9
+
+* **0x7FE95B — SETTLED (VERIFIED-STATIC for the mechanism, COMMUNITY for the
+  message).** It is written at 0x0A93A8 as `bit 0 of the byte at 0x803F18`.
+  `can.md` §4 says 0x803F18 is the data shadow of **RX slot 4, CAN id 0x440**,
+  and `FUN_00428FCC` — the receive handler that owns slots 4 (0x440), 5
+  (0x540) and 7 (0x442) — clears 0x7FE95B together with six sibling flags when
+  that message times out. 0x440 / 0x442 / 0x540 are the **gearbox** group in
+  the public VAG powertrain matrices, which makes `cand_KFMIRLUM` the charge
+  map used *while the gearbox asks for it* and `cand_ZRLMIRLUM` = 100 the
+  number of activations it is blended out over afterwards (§9.2). The CAN id
+  and the slot are VERIFIED-STATIC; "gearbox" is COMMUNITY and one bench trace
+  of 0x440 would confirm it.
+* **0x80223B — SETTLED (VERIFIED-STATIC).** It has its own axis,
+  `axis_opmode_5C887B` 0x5C887B = 0, 1, 2, 3, 4, 5, 6, 7, searched by
+  `cal_axis_key_process` into 0x7FD7A0, and exactly one writer, 0x45C064. Four
+  of the six charge thresholds of §10.5 are maps over it. It is the
+  **operating-mode index**, the same variable `%MDFUE` compares against 7 to
+  select `cand_KFMIRLS` (§9.1). Its eight values are the combustion modes of a
+  BDE engine; which value is which mode is **not** established, and VCDS
+  measuring id 130 (groups 051.3 / 068.3, format 0x36) displays it directly,
+  so one drive log would settle that too.
+* **`cand_KFMIRLINV` 0x5C9938's value unit — still open.** What was tried:
+  `FUN_000E069C` evaluates it at 0x8034FA and at `0x8034FA × 200 / 0x8015AF`
+  and writes 0x8015D0, whose only readers are three sites inside
+  `FUN_000E06F8` (0x0E0720, 0x0E07E0, 0x0E0838) where it is a *breakpoint
+  argument*, not an arithmetic operand — so there is no shift to read the
+  fixed point off, and the measuring-handler oracle does not help either
+  (0x8015D0 is not a measuring variable). The remaining lead is **0x8015AF**,
+  the divisor: it is written at 0x0E0D5C and 0x104224 and the literal 200 is
+  its reference value, so naming 0x8015AF (an ambient or manifold pressure,
+  most likely) would fix the unit of the whole block. Time-boxed here.
+
+### 10.7 Reproducing
+
+```bash
+mkdir -p /tmp/ghidra_F4
+cp -R ghidra_projects/med9.gpr ghidra_projects/med9.rep /tmp/ghidra_F4/
+export GHIDRA_INSTALL_DIR=/usr/local/Cellar/ghidra/12.1.3/libexec
+./.venv/bin/python -m pyghidra.ghidra_launch --install-dir "$GHIDRA_INSTALL_DIR" \
+    ghidra.app.util.headless.AnalyzeHeadless /tmp/ghidra_F4 med9 \
+    -process passat_azx_ori.bin -noanalysis \
+    -scriptPath ghidra_scripts -postScript import_symbols.py "$PWD"
+
+# the functions this brief decompiled
+./.venv/bin/python ghidra_scripts/decompile.py --project-dir /tmp/ghidra_F4 \
+    --project-name med9 0x00038708 0x0012E3F8 0x000E8D9C 0x000E8DE4 0x0041AA48 \
+    0x00419DA4 0x0043E164 0x00440A3C 0x0010C874 0x004302DC 0x00430448 \
+    0x004544A8 0x000C5E54 0x000BDB58 0x000FB974 0x00115AE0 0x000C7958 \
+    0x000C7DD0 0x000F44D8 0x00459334 0x00108950 0x00428FCC
+
+# the three axis-key processes and the adaptation limit block
+./.venv/bin/python tools/sda_xref.py data/passat_azx_ori.bin --var 0x7FD780 0x7FD8FF
+./.venv/bin/python tools/cal_show.py data/passat_azx_ori.bin --raw 0x5C607C 24 u8
+
+# any object named by this pass, e.g.
+./.venv/bin/python tools/cal_show.py data/passat_azx_ori.bin 0x5D3580 \
+    --scale 1/128 --x-scale 0.75 --x-offset -48
+./.venv/bin/python tools/cal_show.py data/passat_azx_ori.bin 0x5D7A42 --guess
+
+# the definition (the integrator builds the committed one)
+./.venv/bin/python tools/draft_to_xdf.py re/calibration_draft.csv -o work/x.xdf \
+    --min-confidence hypothesis --extra-rows patches/ff_fuel/ffcal001_rows.csv
+./.venv/bin/python tools/draft_to_xdf.py --validate work/x.xdf
+./.venv/bin/python -m unittest discover -s tests
+```
+
+**No Funktionsrahmen page was read for this pass.** Every label it adds is
+either descriptive (`axis_*`, `mix_*`, `rl_*`, `zwdelta_*`, `tol_*`, `krke_*`,
+`esstt_*`, `esnswl_*`, `N_*`, `CW_*`, `adap_*`) or an existing `cand_` label,
+so no new FR-module category was needed and no new Bosch label is claimed.

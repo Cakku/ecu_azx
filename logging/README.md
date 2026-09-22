@@ -212,6 +212,7 @@ that spills onto the next id, which is then polled in the same sample; past
 | `sessions/can_bc_check.json` | do TouCAN modules B and C share one wire? (`can.md` section 3) |
 | `sessions/flash1_counter.json` | did Flash 1 run, and at what rate? (`patches/ff_counter/test/procedure.md`) |
 | `sessions/ram_snapshot.json` | the *ranges* for `dump`, from brief C2 |
+| `sessions/tuning_checklist.json` | the baseline log of issue #43 (brief F4): 36 variables in 28 DDLI chunks, taken before and after any hardware or calibration change and compared with `tools/logcmp.py`. It is the *logs* column of `re/findings/tuning_checklist_draft.md`, and it carries the six cells no measuring variable exposes — `zwdelta_load` 0x7FD338 and the three tester adaptation channels among them |
 
 ## 5. Where the protocol comes from, and the licences
 
