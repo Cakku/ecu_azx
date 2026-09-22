@@ -191,17 +191,38 @@ run twice:
 > ```
 >
 > Add `shift` to **every** candidate timestamp before calling `logcmp`.
-> `logging/bench_rehearsal.py::_align_on_raster` (E4) is the implementation and
-> the worked example; use `raster_setA_10ms_count` or `raster_setB_10ms_count`
-> according to what `ff_src_seen` says is live. Without this step the E0
-> comparison fails on timing, not on behaviour.
+> **Since 2026-09-22 (brief F2) the tool does it**: `--align-on
+> raster_setA_10ms_count:100` shifts the candidate itself and prints the shift
+> (`logcmp.align_on` is E4's code, lifted out of `bench_rehearsal.py`, which
+> now calls it). Use `raster_setA_10ms_count` or `raster_setB_10ms_count`
+> according to what `ff_src_seen` says is live. A counter missing from either
+> log is an error, exit 2. Without this step the E0 comparison fails on timing,
+> not on behaviour.
+
+Record the stock scenario **twice**, and turn the two runs into limits before
+judging the patched one — the numbers in `tolerance.json` are predictions until
+you do (§5 of `patches/ff_counter/test/procedure.md` says the same thing about
+Flash 1, and docs/07 §5.5 is the worked recipe):
 
 ```bash
-python3 tools/logcmp.py patches/ff_fuel/test/baseline.csv logs/2026-xx-xx_ff_fuel_aligned.csv \
-        -t patches/ff_fuel/test/tolerance.json --json work/logcmp.json
+python3 tools/logcmp.py derive work/stock_run1.csv work/stock_run2.csv \
+        --align-on raster_setA_10ms_count:100 --exclude 'raster_*' 'ff_*' \
+        -o work/tolerance_measured.json
 ```
 
-Exit 0 is the criterion. Do **not** pass `--strict`. (`tolerance.json` used to
+Then the comparison itself:
+
+```bash
+python3 tools/logcmp.py patches/ff_fuel/test/baseline.csv work/ff_fuel_e0.csv \
+        -t patches/ff_fuel/test/tolerance.json \
+        --align-on raster_setA_10ms_count:100 --uncovered report \
+        --json work/logcmp.json
+```
+
+Exit 0 is the criterion. `--uncovered report` lists the variables
+`tolerance.json` does not name instead of judging them against its `default`
+limit of 1.0; the JSON report carries the shift as `summary.shift_s`. Do
+**not** pass `--strict`. (`tolerance.json` used to
 say the `ff_*` variables exist only in the candidate log — **that was wrong**:
 the session file reads plain RAM addresses, so on a stock image they are
 present and read 0. They are now listed in `tolerance.json` with null limits,

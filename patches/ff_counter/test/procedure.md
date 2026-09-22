@@ -231,7 +231,9 @@ survives a skipped on-chip write — so the default build always carries it.
 
 ```bash
 python3 tools/logcmp.py patches/ff_counter/test/baseline.csv work/flash1.csv \
-        -t patches/ff_counter/test/tolerance.json --json work/logcmp.json
+        -t patches/ff_counter/test/tolerance.json \
+        --align-on raster_setA_10ms_count:100 --uncovered report \
+        --json work/logcmp.json
 ```
 
 Exit status 0 is the exit criterion of issue #27's "log comparison against
@@ -239,10 +241,34 @@ baseline shows no other change". Do **not** pass `--strict`: `ff_ticks`,
 `ff_alive` and `ff_src_seen` exist only in the candidate log and are listed,
 not compared.
 
+> **Two runs are two power-ups (added 2026-09-22, brief F2).** `--align-on`
+> shifts the candidate so the two runs' ECU clocks agree, using the live raster
+> activation counter at 100/s — section 3a says which set is moving, so align
+> on `raster_setA_10ms_count` or `raster_setB_10ms_count` accordingly, and
+> **never** on a counter the flash itself produces (`ff_ticks` starts at 0 in
+> the candidate run and does not exist in the baseline). A counter missing from
+> either log is an error, exit 2, not a silent unaligned comparison.
+> `--uncovered report` is what "listed, not compared" means on the command
+> line: the three Flash-1 variables are named in the report, not judged against
+> the file's `default` limit of 1.0.
+
 `baseline.csv` is the stock run of section 3 and is recorded on the bench, so
 it is not in this directory yet. Record it — **twice** — before flashing: after
 the flash there is no way back to a stock baseline except reflashing, and two
 runs are what turn `tolerance.json`'s predictions into measured repeatability.
+The second run is not spare tape; it is the input of
+
+```bash
+python3 tools/logcmp.py derive work/stock_run1.csv work/stock_run2.csv \
+        --align-on raster_setA_10ms_count:100 --exclude 'raster_*' \
+        -o work/tolerance_measured.json
+```
+
+which writes this scenario's measured spread (max|d| and mean|d| over the
+common time range × 1.5, `--factor` to change it) with the free-running
+counters as explicit "not compared" rows. Retighten `tolerance.json` row by row
+from it — keep this file's reasoning and units, take the numbers — and say in
+the commit which pair of runs they came from (docs/07 §5.5).
 
 ## 6. If something is wrong
 
