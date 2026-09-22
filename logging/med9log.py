@@ -385,6 +385,7 @@ def start_simulator(args):
         seed=kw.pop("seed"), patch_dir=kw.pop("patch_dir", None),
         eeprom=kw.pop("eeprom", None),
         stock_tasks=getattr(args, "sim_stock_tasks", False),
+        flash_crc=getattr(args, "sim_flash_crc", False),
         time_scale=getattr(args, "time_scale", 1.0),
         ram=AnimatedRam(live_task_set=getattr(args, "sim_task_set", "A"),
                         statics=dict(DEFAULT_STATICS)))
@@ -775,6 +776,12 @@ def _add_bus_args(p) -> None:
                    help="with --sim and WITHOUT --sim-patch: still run the "
                         "stock code the patch's hooks replace, so a stock "
                         "baseline is comparable with a --sim-patch run")
+    p.add_argument("--sim-flash-crc", action="store_true",
+                   help="with --sim: also run the firmware's own flash CRC-32 "
+                        "task (0x11CB10) in the simulated background, so "
+                        "logging/sessions/flash_crc.json has something to "
+                        "watch. It needs 246 simulated seconds to publish, so "
+                        "give it --seconds and --time-scale")
     p.add_argument("--sim-node", action="store_true",
                    help="with --sim: also run logging/ethanol_frame_send.py's "
                         "node on the same in-process bus, so the whole bench "

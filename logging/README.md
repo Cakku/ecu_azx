@@ -508,4 +508,15 @@ the same step.
 | the EEP_CONF block manager's start-up read and its device pointers | same |
 | **not** the ignition stub at 0x41D40C | it is a mid-function trampoline; `ff_dzw_e` is produced by the 10 ms half anyway |
 | **not** any other OS task | the stock baseline runs only what the hook sites replace (`--sim-stock-tasks`) |
-| **not** the PowerPC time base | it never advances under Unicorn (`kwp.md` section 12.6) |
+| the firmware's own one-shot init entries at power-on | `ecu_sim.INIT_ENTRIES` (F3; `boot.md` section 6.5) |
+| a running PowerPC time base for `read_time_base` | `emu/time_base.py` (F3) — without it the real `27 01` never returns |
+| the firmware's flash CRC-32 task, one activation per simulated 10 ms raster | `ecu_sim.FlashCrcTask`, `--flash-crc` / `med9log --sim-flash-crc` (F3) |
+| **not** every other init-table entry | 1,028 of them, most touching peripherals the emulator does not model; the residue is a table in `ecu_sim.py`'s docstring |
+
+> **2026-09-22 (F3, #20/#38).** `power_on` no longer hand-seeds the KWP
+> security cells: it calls ten entries of the firmware's own init table, so
+> `kwp_sec_lfsr_rounds` is 0 until a real `27 01` writes 5 and `nvm_mode`
+> reads 1. `--flash-crc` runs the flash checksum task; for the stock dump it
+> publishes **0x5562139F** to 0x7F9178/0x7F917A after 24,627 activations
+> (246 simulated seconds), and `logging/sessions/flash_crc.json` logs the
+> cursor and the running register, which move every activation.
