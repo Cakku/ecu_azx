@@ -33,9 +33,11 @@ What is **not** real, and why (details in `re/findings/kwp.md` section 12):
 A few RAM cells are animated so a log shows movement: an rpm ramp, coolant
 warm-up, the Flash-1 counter of `patches/ff_counter/` and the five raster
 activation counters of the two OS task sets.  `--task-set A` makes the *other*
-set live, which freezes the set-B counters **and** the Flash-1 block -- the
-case `logging/sessions/flash1_counter.json` check 1 has to tell apart from a
-failed flash.  See :class:`AnimatedRam`.
+set live, which freezes the set-B raster counters.  Since brief F1 (2026-09-22)
+the Flash-1 block does **not** freeze with it: `patches/ff_counter` now hooks
+the 10 ms raster of *both* sets, so the counter runs whichever set is live and
+`ff_src_seen` at PATCH_RAM+0x06 names it (1 = set A, 2 = set B, 3 = both).
+See :class:`AnimatedRam`.
 
 Usage::
 
@@ -193,8 +195,11 @@ class AnimatedRam:
     flexfuel_warm_s: float = 60.0
     #: which OS task set is live, "A" or "B" (re/findings/scheduler.md 11-12,
     #: brief C4): os_init installs set A and 0x11DA64 switches to set B when
-    #: 0x7FEB5E != 0.  The counters of the other set stay frozen -- and so does
-    #: C1's Flash-1 counter, whose hook sits in a set-B task.
+    #: 0x7FEB5E != 0.  The stock counters of the other set stay frozen.  C1's
+    #: Flash-1 counter used to freeze with set B, because its single hook sat
+    #: in a set-B task; brief F1 gave `patches/ff_counter` a hook in **both**
+    #: 10 ms rasters (0x432940 set A, on-chip; 0x12067C set B), so the block
+    #: now counts under either set and records which hook ran.
     live_task_set: str = "B"
     #: static values written once at power-on: {address: (bytes)}
     statics: dict = field(default_factory=dict)
@@ -316,18 +321,26 @@ class AnimatedRam:
         emu.write(0x7FD758, struct.pack(">I", int(t * 100) if set_b else 0))
         emu.write(0x7FD760, struct.pack(">I", int(t * 1000) if set_b else 0))
         emu.write(0x7FD778, struct.pack(">I", int(t * 500) if set_b else 0))
-        # Flash 1: patches/ff_counter/ at build.ram = 0x7FFB00.  Its hook is in
-        # a set-B task, so with set A live it never runs and the block stays
-        # untouched -- the case the bench procedure has to be able to tell from
-        # a failed flash.
+        # Flash 1: patches/ff_counter/ at build.ram = 0x7FFB00.  Brief F1
+        # (2026-09-22) gave it a hook in the 10 ms raster of BOTH task sets --
+        # 0x432940 (set A, on-chip) and 0x12067C (set B) -- so unlike C1's
+        # single set-B hook it counts whichever set is live, at 100/s either
+        # way, and `ff_src_seen` at +0x06 says which hook ran (1 = A, 2 = B,
+        # 3 = both; patches/ff_counter/README.md "The RAM block").  A frozen
+        # block is now a statement about the FLASH, not about the task sets --
+        # flash1_counter.json check 1.  The simulator never runs both hooks at
+        # once, so it emits 1 or 2 and never 3.
         if not self.owns_patch_ram:
             return                      # a PatchRunner keeps 0x7FFB00 itself
         if self.flexfuel:
-            emu.write(0x7FFB00, self.flexfuel_block(t if set_b else 0.0))
+            # patches/ff_fuel hooks the same two words (its README's hook
+            # table), so its 10 ms producer runs under either set too.
+            emu.write(0x7FFB00, self.flexfuel_block(t))
         else:
-            emu.write(0x7FFB00, struct.pack(">I", int(t * 100) if set_b else 0))
-            emu.write(0x7FFB04, struct.pack(">H", 0xFC01 if set_b else 0))
-            emu.write(0x7FFB06, struct.pack(">H", 0))             # reserved
+            emu.write(0x7FFB00, struct.pack(">I", int(t * 100)))
+            emu.write(0x7FFB04, struct.pack(">H", 0xFC01))
+            emu.write(0x7FFB06, bytes([2 if set_b else 1]))       # ff_src_seen
+            emu.write(0x7FFB07, bytes([0]))                       # ff_reserved
 
     def power_on(self, emu) -> None:
         for addr, value in self.statics.items():

@@ -664,9 +664,13 @@ class TestAnimatedRam(DumpUnchanged):
         handlers = Med9Handlers(str(DUMP), animate=False,
                                 ram=AnimatedRam(live_task_set=live_set))
         handlers.ram.apply(handlers.emu, 1.0)          # one simulated second
-        return {a: struct.unpack(">I", handlers.read_ram(a, 4))[0]
-                for a in (0x7FD754, 0x7FD758, 0x7FD75C, 0x7FD760, 0x7FD778,
-                          0x7FFB00)}
+        out = {a: struct.unpack(">I", handlers.read_ram(a, 4))[0]
+               for a in (0x7FD754, 0x7FD758, 0x7FD75C, 0x7FD760, 0x7FD778,
+                         0x7FFB00)}
+        out[0x7FFB04] = struct.unpack(">H", handlers.read_ram(0x7FFB04, 2))[0]
+        out[0x7FFB06] = handlers.read_ram(0x7FFB06, 1)[0]
+        out[0x7FFB07] = handlers.read_ram(0x7FFB07, 1)[0]
+        return out
 
     def test_set_b_live_counts_at_the_c4_rates(self):
         c = self._counters("B")
@@ -674,16 +678,29 @@ class TestAnimatedRam(DumpUnchanged):
         self.assertEqual(c[0x7FD778], 500)       # set B 2 ms
         self.assertEqual(c[0x7FD758], 100)       # set B 10 ms
         self.assertEqual(c[0x7FFB00], 100)       # ff_ticks tracks it 1:1
+        self.assertEqual(c[0x7FFB06], 2)         # ff_src_seen = set B
         self.assertEqual(c[0x7FD754], 0)         # set A frozen
         self.assertEqual(c[0x7FD75C], 0)
 
-    def test_set_a_live_freezes_the_flash1_block(self):
-        """The case flash1_counter.json check 1 must not read as a bad flash."""
+    def test_set_a_live_still_counts_the_flash1_block(self):
+        """Brief F1: Flash 1 hooks BOTH 10 ms rasters, so the block runs
+        whichever set is live and ff_src_seen names it.  A frozen block is
+        now a statement about the flash -- flash1_counter.json check 1."""
         c = self._counters("A")
         self.assertEqual(c[0x7FD75C], 1000)      # set A 1 ms
         self.assertEqual(c[0x7FD754], 100)       # set A 10 ms
         self.assertEqual(c[0x7FD758], 0)         # set B frozen
-        self.assertEqual(c[0x7FFB00], 0)         # and so is our counter
+        self.assertEqual(c[0x7FFB00], 100)       # our counter is NOT frozen
+        self.assertEqual(c[0x7FFB06], 1)         # ff_src_seen = set A
+
+    def test_the_flash1_block_matches_the_patch_layout(self):
+        """+0x04 ff_alive = 0xFC01, +0x06 ff_src_seen, +0x07 ff_reserved."""
+        for live_set, want_src in (("A", 1), ("B", 2)):
+            with self.subTest(task_set=live_set):
+                c = self._counters(live_set)
+                self.assertEqual(c[0x7FFB04], 0xFC01)
+                self.assertEqual(c[0x7FFB06], want_src)
+                self.assertEqual(c[0x7FFB07], 0)
 
 
 if __name__ == "__main__":
