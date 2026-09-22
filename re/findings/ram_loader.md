@@ -335,7 +335,7 @@ failures are unrecoverable over the wire.
 ./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x1B9E8 --addr 0x7FA978 --len 0x48
 ./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x1CA58 --addr 0x7FB9F0 --len 0x120
 ./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x1BB0C --addr 0x7FAA9C --len 0x208
-./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x1CEE4 --addr 0x7FCF0C --len 0x170
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x1DF7C --addr 0x7FCF0C --len 0x164
 ```
 
 > Note for the integrator: `boot.md` is owned by brief F3 this pair. F3 should
