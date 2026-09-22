@@ -20,15 +20,25 @@ Four tables, all read straight out of `data/passat_azx_ori.bin`:
   EEP_CONF, the SPI-EEPROM block table at 0x0B2FF0, so the window is the
   EEPROM image; `tools/eeprom_map.py` decodes the same bytes from the EEPROM
   side.
+* ``--loader`` (brief F5, `re/findings/ram_loader.md`) the tables of the
+  *RAM-resident bootstrap loader* — the second programming route that the boot
+  copies from flash 0x019798-0x02A827 to RAM 0x7F8728 and runs over the serial
+  (SCI) line, not CAN.  It carries its own KWP command table (RAM 0x7FD510 =
+  flash 0x01E580, 16 entries), its own flash device table (flash 0x01E71C),
+  its own erase geometry (flash 0x01E774) and UC3F mask table (flash 0x01E814),
+  and its own address filter — which is a *blacklist* of three protected
+  windows, far more permissive than the application route's whitelist.
 
 Usage::
 
     python3 tools/flash_segments.py data/passat_azx_ori.bin --all
+    python3 tools/flash_segments.py data/passat_azx_ori.bin --loader
     python3 tools/flash_segments.py data/passat_azx_ori.bin --geometry
     python3 tools/flash_segments.py data/passat_azx_ori.bin --json
 
 Nothing here is a guess: every address is cited in
-`re/findings/flash_programming.md` with the instruction that reads it.
+`re/findings/flash_programming.md` (application route) or
+`re/findings/ram_loader.md` (the loader) with the instruction that reads it.
 """
 from __future__ import annotations
 
@@ -53,6 +63,36 @@ MODE4_TABLE = 0x0B2FF0        # EEP_CONF, 32 x 0xC
 MODE4_ENTRIES = 32
 MODE4_WINDOW = 0x480000
 LFSR_MASK_AT = 0x088170       # 0x5FBD5DBD, the level-1 SecurityAccess mask
+
+# --- the RAM-resident bootstrap loader (brief F5, ram_loader.md) ------------
+# The loader runs at RAM 0x7F8728, copied from flash 0x019798; the relocation
+# delta is DST - SRC.  Its tables are read here from their *flash* source
+# addresses (what the dump holds), and their RAM addresses are DST + (f - SRC).
+LOADER_SRC = 0x019798         # boot copies 0x019798-0x02A827 (0x5090 B)
+LOADER_RAM = 0x7F8728         # ... to here
+LOADER_DELTA = LOADER_RAM - LOADER_SRC          # 0x7DEF90
+LDR_KWP_TABLE = 0x01E580      # RAM 0x7FD510: 16 x 20-byte command entries
+LDR_KWP_COUNT = 16
+LDR_KWP_ENTRY_SIZE = 20
+LDR_DEV_TABLE = DEV_TABLE_LOADER                # 0x01E71C, RAM 0x7FD6AC
+LDR_GEOM_TABLE = 0x01E774     # RAM 0x7FD704: 5 x 0x20, same shape as 0x0825E4
+LDR_UC3F_MASK_TABLE = 0x01E814  # RAM 0x7FD7A4: 10 x u16 UC3FCTL select bits
+
+# The loader's SID 0x34 (RequestDownload, RAM 0x7FAA9C) and 31 02 (erase, RAM
+# 0x7FB280) refuse a request whose [start,end] overlaps any of these three
+# windows; everything else in the device's address space is accepted.  The
+# constants are the lis/addi immediates in those two handlers, verbatim.
+LOADER_PROTECTED = (
+    (0x000000, 0x001FFF, "CS0 parameter block 0: reset stub, exception "
+                         "tables, RCW"),
+    (0x010000, 0x01FFFF, "CS0 main block 0: the boot module body and the "
+                         "loader's own source (lower half)"),
+    (0x400000, 0x403FFF, "UC3F small block 0: shadow row / reset "
+                         "configuration word"),
+)
+
+LOADER_TRANSPORT = "QSMCM SCI1 (asynchronous serial), base 0x705000: "\
+    "SC1SR status 0x70500C, SC1DR data 0x70500E"
 
 # The whitelist `kwp_download_range_allowed` (0x0889C8) hard-codes.  The last
 # three rows depend on the variant byte at RAM 0x7FD328; see flash_programming.md
@@ -102,11 +142,11 @@ def devices(d: bytes, base: int = DEV_TABLE) -> list[dict]:
     return out
 
 
-def geometry(d: bytes) -> list[dict]:
+def geometry(d: bytes, base: int = GEOM_TABLE) -> list[dict]:
     """The erase-block geometry of each of the five command-set types."""
     out = []
     for t in range(GEOM_TYPES):
-        e = GEOM_TABLE + t * GEOM_ENTRY_SIZE
+        e = base + t * GEOM_ENTRY_SIZE
         counts = list(d[e + 4:e + 9])
         sizes = [_u32(d, e + 0x0C + 4 * k) for k in range(5)]
         regions = [(c, s) for c, s in zip(counts, sizes) if c and s]
@@ -133,8 +173,8 @@ def blocks(regions, array_base: int) -> list[tuple[int, int, int]]:
     return out
 
 
-def uc3f_masks(d: bytes, n: int) -> list[int]:
-    return [_u16(d, UC3F_MASK_TABLE + 2 * i) for i in range(n)]
+def uc3f_masks(d: bytes, n: int, base: int = UC3F_MASK_TABLE) -> list[int]:
+    return [_u16(d, base + 2 * i) for i in range(n)]
 
 
 def kwp_prog_table(d: bytes) -> list[dict]:
@@ -176,6 +216,49 @@ def mode4_segments(d: bytes) -> list[dict]:
             "window_end": MODE4_WINDOW + off + span - 1,
         })
     return out
+
+
+def loader_kwp_table(d: bytes) -> list[dict]:
+    """The RAM loader's KWP command table (flash 0x01E580, RAM 0x7FD510).
+
+    20-byte entries: +0 SID, +1 sub (0xFF = any), +2 u16 session mask,
+    +4 u32 security mask (bit n = level n), +8 handler, +0xC h2, +0x10 arg.
+    Handlers are given as their RAM addresses inside 0x7F8728-0x7FD7B8.
+    """
+    out = []
+    for i in range(LDR_KWP_COUNT):
+        e = LDR_KWP_TABLE + i * LDR_KWP_ENTRY_SIZE
+        out.append({
+            "index": i,
+            "addr_flash": e,
+            "addr_ram": e + LOADER_DELTA,
+            "sid": d[e],
+            "sub": d[e + 1],
+            "session_mask": _u16(d, e + 2),
+            "sec_mask": _u32(d, e + 4),
+            "handler": _u32(d, e + 8),
+            "h2": _u32(d, e + 0x0C),
+            "arg": _u32(d, e + 0x10),
+        })
+    return out
+
+
+def loader_tables(d: bytes) -> dict:
+    """Everything the loader carries, keyed for --json."""
+    geom = geometry(d, LDR_GEOM_TABLE)
+    blks = blocks(geom[UC3F_TYPE]["regions"], 0x400000)
+    return {
+        "entry_ram": LOADER_RAM,
+        "entry_flash": LOADER_SRC,
+        "transport": LOADER_TRANSPORT,
+        "kwp_table": loader_kwp_table(d),
+        "devices": devices(d, LDR_DEV_TABLE),
+        "geometry": geom,
+        "uc3f_blocks": blks,
+        "uc3f_masks": uc3f_masks(d, len(blks), LDR_UC3F_MASK_TABLE),
+        "protected_windows": [
+            {"start": s, "end": e, "what": w} for s, e, w in LOADER_PROTECTED],
+    }
 
 
 # --- printers ---------------------------------------------------------------
@@ -257,6 +340,47 @@ def print_segments(d: bytes) -> None:
     print("  actually be read through this window.")
 
 
+def print_loader(d: bytes) -> None:
+    print(f"RAM-resident bootstrap loader: runs at 0x{LOADER_RAM:06X}, copied "
+          f"from flash 0x{LOADER_SRC:06X}")
+    print(f"  transport: {LOADER_TRANSPORT}")
+    print()
+    print(f"KWP command table (flash 0x{LDR_KWP_TABLE:06X} = RAM "
+          f"0x{LDR_KWP_TABLE + LOADER_DELTA:06X}), {LDR_KWP_COUNT} entries")
+    print("  idx  SID  sub  service                   sess    sec       handler(RAM)")
+    for e in loader_kwp_table(d):
+        name = KWP_SERVICE_NAMES.get(e["sid"], "?")
+        print(f"  {e['index']:3d}  0x{e['sid']:02X} 0x{e['sub']:02X}  "
+              f"{name:<24}  0x{e['session_mask']:04X}  0x{e['sec_mask']:08X}  "
+              f"0x{e['handler']:06X}")
+    print("  sec mask bit n = SecurityAccess level n; 0x06 = level 1 or 2 "
+          "(write/erase);")
+    print("  0xFFFFFFFF = no security gate. Default session after entry = 2.")
+    print()
+    print(f"flash device table (flash 0x{LDR_DEV_TABLE:06X} = RAM "
+          f"0x{LDR_DEV_TABLE + LOADER_DELTA:06X}), {d[LDR_DEV_TABLE]} entries")
+    print("  idx  start     end       driver entry points (RAM)")
+    for e in devices(d, LDR_DEV_TABLE):
+        ops = " ".join(f"0x{o:06X}" for o in e["ops"])
+        print(f"  {e['index']:3d}  0x{e['start']:06X}  0x{e['end']:06X}  {ops}")
+    print()
+    geom = geometry(d, LDR_GEOM_TABLE)
+    print(f"erase geometry (flash 0x{LDR_GEOM_TABLE:06X}), same five types as "
+          f"the application 0x{GEOM_TABLE:06X}:")
+    for g in geom:
+        regions = ", ".join(f"{c} x 0x{s:X}" for c, s in g["regions"])
+        print(f"  type {g['type']}  id 0x{g['id']:08X}  total 0x{g['total']:X}  "
+              f"[{regions}]")
+    print()
+    print("address filter (blacklist) enforced by SID 0x34 (RAM 0x7FAA9C) and "
+          "31 02 erase (RAM 0x7FB280):")
+    print("  a request is refused (NRC 0x42) if [start,end] overlaps -")
+    for s, e, what in LOADER_PROTECTED:
+        print(f"    0x{s:06X}-0x{e:06X}  {what}")
+    print("  everything else in the device is accepted - including the resident")
+    print("  programming module 0x080000-0x09FFFF that the OBD route refuses.")
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -265,6 +389,8 @@ def main(argv=None) -> int:
     p.add_argument("--geometry", action="store_true")
     p.add_argument("--kwp", action="store_true")
     p.add_argument("--segments", action="store_true")
+    p.add_argument("--loader", action="store_true",
+                   help="the RAM-resident bootstrap loader's tables (F5)")
     p.add_argument("--all", action="store_true")
     p.add_argument("--json", action="store_true", help="machine-readable dump")
     a = p.parse_args(argv)
@@ -285,14 +411,16 @@ def main(argv=None) -> int:
                 {"start": s, "end": e, "when": w, "what": t}
                 for s, e, w, t in DOWNLOAD_WHITELIST],
             "mode4_segments": mode4_segments(d),
+            "loader": loader_tables(d),
         }, sys.stdout, indent=1)
         print()
         return 0
 
-    want = (a.devices, a.geometry, a.kwp, a.segments)
+    want = (a.devices, a.geometry, a.kwp, a.segments, a.loader)
     if a.all or not any(want):
-        want = (True, True, True, True)
-    printers = (print_devices, print_geometry, print_kwp, print_segments)
+        want = (True, True, True, True, True)
+    printers = (print_devices, print_geometry, print_kwp, print_segments,
+                print_loader)
     first = True
     for flag, fn in zip(want, printers):
         if flag:
