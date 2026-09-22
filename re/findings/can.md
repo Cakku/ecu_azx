@@ -86,6 +86,7 @@ So every message buffer of every module is accounted for:
   3 buffers, first buffer 0x0B, .., tbl_can_tx)`). Those are the Motor_x
   frames plus 0x7C4-0x7C7 (CCP) — VERIFIED-STATIC.
 - **Module C (0x707800) never transmits.** It only receives.
+  - *Correction 2026-09-22 (brief F6, `re/findings/obd.md` §1.1):* true of `tbl_can_tx` (0x2BDF0), the only source this section checked, but **not** of `can_cfg_struct` (0x2BF50): its record [5] registers id **0x7E8 on module C buffer 13 with flags = 0x01**, the OBD-II response object. Module C transmits exactly one identifier, 0x7E8; read the sentence as "module C carries no `tbl_can_tx` object".
 - **All three modules use identical bit timing**: `can_module_cfg_a/b/c`
   (0x2C1D8 / 0x2C1F8 / 0x2C218) all end in `07 08 04 03 02`, which
   `can_module_configure` turns into PRESDIV 6, PROPSEG 7, PSEG1 3, PSEG2 2,

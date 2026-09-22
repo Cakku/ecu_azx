@@ -794,3 +794,29 @@ Sixteen of the 1507 spare ids and four of the sixteen free groups are spent.
 The remaining free groups are 17, 19, 25, 29, 40, 45, 48, 49, 58, 59, 65
 and 67 — the whole wave-E budget of `docs/agent_briefs/README.md` is now
 allocated, and the next brief that wants a block picks from those twelve.
+
+---
+
+## 9. Stock measuring variables the naming pass leaned on (F4, 2026-09-22, #41)
+
+Brief F4 took **no** measuring id and changed nothing in
+`re/measuring_vars.csv`. It used the table the other way round — as the
+scaling oracle of §7 and §9 of `calibration_names.md` — and the ids below are
+the ones the `re/findings/tuning_checklist_draft.md` *logs* column now cites,
+recorded here so the checklist does not become the only place they live.
+
+| id | RAM | fmt / A | what this pass established about it |
+|---|---|---|---|
+| **130** | 0x80223B | 0x36 / 0 | the **operating-mode index**, 0..7. It has its own calibration axis (`axis_opmode_5C887B` 0x5C887B = 0..7) and exactly one writer, 0x45C064; four charge thresholds are maps over it. VCDS groups 051.3 / 068.3. Which value is which combustion mode is still open |
+| 320 | 0x802CDE | 0x1F / 0xA0 | the **commanded** lambda of bank 1 — `lam_ist_from_rk` 0x43E164 computes it from `rk` itself, so it is what the ECU asked for, not what the sensor saw |
+| 45 | 0x802BEA | 0x1F / 0x14 | the sensor-side lambda the controller subtracts (0x802E0C is the conditioned copy, id 651) |
+| 29 / 28 | 0x802DF8 / 0x802E00 | 0x14 / 0x32 | `fr_w` per bank, the PI controller output `lam_controller` 0x440A3C writes. Logging 320 and 29 together separates "the request moved" from "the loop is correcting" |
+| 3 | 0x80303A | 0x21 / 0x11 | the per-bank `rk` after the controller — the cell whose axis `axis_rk_5C89C8` this pass named |
+| 375 | 0x803510 | 0x21 / 0x80 | `rlsol_req`; its handler 0x03C348 (A = 0x80) is what fixes **32768 counts = 100 %** for the whole charge domain, which is how the six new `rl_*` thresholds of §10.5 got their unit |
+| 2051 | 0x80235A | — | the arbitrated charge limit E3 §9.3 says to log on any E85 run; unchanged here |
+
+Two warnings that belong with them, both from §7 above: the display byte of
+formula 0x05 **saturates at 143 °C**, so a component-temperature check must
+use DDLI on the RAM cell instead; and formula 0x21's `A` is a tester-side
+normalisation, so a VCDS charge reading is about 3.8 % below the value the
+ECU's own maps use.

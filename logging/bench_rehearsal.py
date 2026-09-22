@@ -303,74 +303,35 @@ def run_step(step: Step, eeprom_file: str | None) -> None:
         raise SystemExit(f"{step.name} failed with {rc}")
 
 
-def _named_only(log, names):
-    """The log restricted to the variables `tolerance.json` actually names.
-
-    `tolerance.json` says the `ff_*` variables "exist only in the patched
-    log", but the session file reads plain RAM, so on a stock image they are
-    present and read 0 -- and then they fall to the file's `default` limit of
-    1.0 and drown the report.  The same is true of the raster counters, which
-    are free-running counts nobody can compare between two runs.  Restricting
-    the comparison to the named variables is what the file means; the ones it
-    does not name are reported as uncovered.
-    """
-    out = type(log)()
-    out.meta, out.path = log.meta, log.path
-    for name in names:
-        if name in log:
-            out[name] = log[name]
-    return out
-
-
+#: the live 10 ms raster activation counter -- the ECU's own clock, 100 per
+#: second (`re/findings/scheduler.md` section 11).  Aligning two runs on it is
+#: `tools/logcmp.py --align-on raster_setA_10ms_count:100`; the E4 code that
+#: used to live here is now `logcmp.align_on` (brief F2), so the bench and the
+#: rehearsal run the same implementation.
 RASTER = "raster_setA_10ms_count"
 
 
-def _align_on_raster(base, cand):
-    """Shift the candidate's time axis so the two ECUs' own clocks agree.
-
-    Two runs are two separate power-ups: the logger's t = 0 is its own first
-    sample, and the tens of milliseconds between "the ECU powered on" and
-    "the tester finished the DDLI setup" are not the same twice.  On a ramp
-    of 110 rpm/s that offset alone is worth more than half of the `nmot_w`
-    budget, and it says nothing about the software.
-
-    Both logs carry the live raster activation counter, which IS the ECU's
-    clock (100 per second, `re/findings/scheduler.md` section 11), so the
-    offset is measurable rather than guessable.  A bench comparison of two
-    drives needs exactly the same step -- this is the missing line of the E0
-    comparison recipe.
-    """
-    if RASTER not in base or RASTER not in cand:
-        return cand, 0.0
-    b, c = base[RASTER], cand[RASTER]
-    if not b.t or not c.t:
-        return cand, 0.0
-    # seconds of ECU time at each log's first sample
-    shift = (c.v[0] - b.v[0]) / 100.0 - (c.t[0] - b.t[0])
-    out = type(cand)()
-    out.meta, out.path = cand.meta, cand.path
-    for name, series in cand.items():
-        moved = type(series)(name)
-        moved.t = [t + shift for t in series.t]
-        moved.v = list(series.v)
-        out[name] = moved
-    return out, shift
-
-
 def compare_e0(strict_fail_gain: float = 1.03) -> list[tuple[str, bool, str]]:
-    """procedure.md section 4 + the E0 comparison recipe of brief E0."""
+    """procedure.md section 4 + the E0 comparison recipe of brief E0.
+
+    `uncovered="report"` is what `tolerance.json` means: the session file
+    reads plain RAM, so a stock log carries the patch's `ff_*` variables
+    reading 0, and the free-running raster counters can never be compared
+    between two power-ups.  The variables the file does not name are listed,
+    not judged against its default limit.
+    """
     out = []
     base, cand = BY_NAME["stock"].path, BY_NAME["e0"].path
     if not (base.exists() and cand.exists()):
         return [("logcmp E0 equivalence", False, "run the stock and e0 steps first")]
     default, per = logcmp.load_tolerances(str(TOLERANCE))
-    named = set(per)
     blog, clog = logcmp.load_log(base), logcmp.load_log(cand)
-    uncovered = sorted((set(blog) & set(clog)) - named
-                       - {n for n in (set(blog) & set(clog)) if n.startswith("ff_")})
-    clog, shift = _align_on_raster(blog, clog)
-    rows, _summary = logcmp.compare(_named_only(blog, named),
-                                    _named_only(clog, named), default, per)
+    try:
+        clog, shift = logcmp.align_on(blog, clog, RASTER)
+    except logcmp.AlignError as exc:
+        return [("logcmp E0 equivalence", False, str(exc))]
+    rows, summary = logcmp.compare(blog, clog, default, per, uncovered="report")
+    uncovered = summary["uncovered"]
     bad = [r.var for r in rows if r.verdict == "FAIL"]
     out.append(("logcmp stock vs patched-at-E0 passes", not bad,
                 ", ".join(bad) or f"aligned by {shift * 1000:+.0f} ms of ECU time"))
@@ -380,9 +341,8 @@ def compare_e0(strict_fail_gain: float = 1.03) -> list[tuple[str, bool, str]]:
 
     perturbed = Path(tempfile.mkdtemp()) / "rk_plus_3pct.csv"
     _scale_variable(cand, perturbed, "rk_fuel_mass", strict_fail_gain)
-    plog, _shift2 = _align_on_raster(blog, logcmp.load_log(perturbed))
-    rows2, _s2 = logcmp.compare(_named_only(blog, named),
-                                _named_only(plog, named), default, per)
+    plog, _shift2 = logcmp.align_on(blog, logcmp.load_log(perturbed), RASTER)
+    rows2, _s2 = logcmp.compare(blog, plog, default, per, uncovered="report")
     bad2 = [r.var for r in rows2 if r.verdict == "FAIL"]
     out.append((f"logcmp FAILS when rk is perturbed by "
                 f"{(strict_fail_gain - 1) * 100:.0f} %",

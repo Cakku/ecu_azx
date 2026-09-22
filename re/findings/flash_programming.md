@@ -709,10 +709,10 @@ caller exists — but **that situation is not the one the dump predicts**.
 
 | Question | Status |
 |---|---|
-| Which consumer turns `boot_mode_flags` bit 2 (0x7FD401) into "start the programming KWP stack"? The getters 0x04CC34-0x04CC7C and the module entry 0x087494 have no static callers; they sit behind the 0x0B1A80+ pointer-table family. | open (HYPOTHESIS: an init-table entry) |
+| Which consumer turns `boot_mode_flags` bit 2 (0x7FD401) into "start the programming KWP stack"? The getters 0x04CC34-0x04CC7C and the module entry 0x087494 have no static callers; they sit behind the 0x0B1A80+ pointer-table family. | **NARROWED (2026-09-22, F5, `ram_loader.md` §6).** The bit-2 getters 0x04CC34-0x04CC7C have **no** callers (dead in this image). **0x087494 is not the consumer** — it is the SID `31` routine-**0xC5** handler (dispatched by local id at 0x087B00, sibling of 0x873C0). `prog_kwp_init` (0x08C244) is registered from the prog-module init at 0x085FEC (reached via 0x08A110); how 0x085FEC is entered on the post-`10 85` reboot (code-directory selection) is the open thread. |
 | Which CS0 part is fitted — type 1 (AMD, id 0x7E) or type 2 (ST, id 0x8835)? The probe result is a RAM byte; the dump cannot say. | needs the bench (read RAM 0x7F800C/0x7F800D over DDLI) |
-| What does the RAM bootstrap loader (0x7F8728, flash 0x019798-0x02A827) allow? It has its own device table but its own whitelist, if any, was not decoded. | open; it is the route that could rewrite 0x000000-0x01FFFF and 0x080000-0x09FFFF |
-| Meaning of the byte at 0x7FD328 that selects the calibration whitelist variant (0x11 / 0x33 / other). | open |
+| What does the RAM bootstrap loader (0x7F8728, flash 0x019798-0x02A827) allow? It has its own device table but its own whitelist, if any, was not decoded. | **SETTLED (2026-09-22, F5, `ram_loader.md`).** Its filter is a **blacklist** (RAM 0x7FAA9C / 0x7FB280): it refuses only 0x0-0x1FFF, 0x10000-0x1FFFF and 0x400000-0x403FFF, and **writes everything else — including 0x080000-0x09FFFF, which the OBD route refuses**. It speaks **SCI1 (serial), not CAN**, and is entered by the 0x7F8000 magic (software/auto) or a BDM-only 0x7F8010 door. It **cannot** rewrite 0x0-0x1FFF or 0x10000-0x1FFFF (it protects them), so the boot body and reset stub stay BDM-only. |
+| Meaning of the byte at 0x7FD328 that selects the calibration whitelist variant (0x11 / 0x33 / other). | **NARROWED (2026-09-22, F5, `ram_loader.md` §6).** Written by an on-chip function at 0x458F7C, read only by the OBD whitelist (0x0889C8); it is a market/variant coding that selects which calibration sub-ranges the **OBD** route downloads. The RAM loader ignores it. Source of the coded value not fully traced. |
 | What the second UC3F module at 0xEFC800 / 0xC00000-0xC7FFFF is for (device 2). Not populated on this ECU (`0x7F8019 != 0x20`). | closed enough: multi-variant firmware |
 | Does `31 C5` (0x0891C8) report erase progress or run a checksum? | partly decoded; not needed for the decision |
 
@@ -728,3 +728,18 @@ GHIDRA_INSTALL_DIR=/usr/local/Cellar/ghidra/12.1.3/libexec \
   ./.venv/bin/python ghidra_scripts/decompile.py --project-dir /tmp/ghidra_E6 \
   --project-name med9 0x889c8 0x86a28 0x81c18 0x81f78 0x82208
 ```
+
+## 10. The second route — see `ram_loader.md`
+
+> **2026-09-22 (F5, #26 #28, risk table of #2).** This file maps the
+> **application-side** OBD route. The image has a **second** programming route,
+> the **RAM-resident bootstrap loader** (RAM 0x7F8728, flash 0x019798-0x02A827),
+> decoded in **`re/findings/ram_loader.md`**. In short: it speaks **SCI1
+> (serial), not CAN**; it is entered by the 0x7F8000 software magic (which the
+> firmware sets itself on a bad calibration marker — the recovery path) or by a
+> **BDM-only** 0x7F8010 + DECRAM door; its address filter is a **blacklist**
+> (only 0x0-0x1FFF, 0x10000-0x1FFFF and 0x400000-0x403FFF are refused), so it is
+> the **only** route that can rewrite the resident programming module
+> 0x080000-0x09FFFF, while the boot body and reset stub stay BDM-only. Dump its
+> tables with `tools/flash_segments.py --loader`. The §8 rows above are updated
+> from that work.

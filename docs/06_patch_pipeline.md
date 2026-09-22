@@ -280,6 +280,15 @@ ERCOSEK raster task (`re/findings/scheduler.md` §7). Both end by
 tail-branching to the original target, so the stock call still happens and
 exactly one flash word changes.
 
+> **Added 2026-09-22 (integration after brief F1, issue #27).** "Exactly one
+> flash word" holds *per hook*, not per patch. A patch may instantiate one
+> trampoline per ERCOSEK task set: `patches/ff_counter` now hooks the 10 ms
+> raster of both sets (0x432940 in set A, 0x12067C in set B) exactly as
+> `patches/ff_fuel` does, so Flash 1 changes two hook words, and §3's on-chip
+> row (0x404000-0x47FFFF, `"onchip_edit": true`, read-back required) applies
+> to `ff_counter` as well, not only to `ff_fuel`. `make HOOKS=external` still
+> builds the single-word set-B patch (`patches/ff_counter/README.md`).
+
 The tail branch is `ba` (AA=1), not `b`. **VERIFIED-STATIC 2026-09-16:** the
 GNU/LLVM PowerPC assembler reads a *numeric* branch operand as a
 **displacement**, so `b 0x0011F02C` assembles to 0x4811F02C — a branch to
@@ -397,7 +406,20 @@ a check we do not know about). Roll back by writing the original read.
 > computed and *reported* (RAM 0x7F9178), never compared. The 65 block sums
 > still have to be correct because the *tool* checks them, not the ECU.
 
-## 7. Regression
+> **2026-09-22 (F5, #26/#28, `re/findings/ram_loader.md`) — the recovery path if
+> an OBD write is interrupted.** If a calibration write is cut short so the
+> `5A5A5A5A` marker at 0x1E2500 is wrong, the ECU does **not** brick: on the next
+> power-up it sets the boot magic itself and reboots into the **RAM bootstrap
+> loader**, which can reprogram the calibration (and almost everything else, the
+> resident programming module included) — but only over its **serial (SCI) line,
+> not CAN**. So keep a serial-capable recovery tool on hand, and recognise the
+> "reboots into the loader and stays there" symptom as *recoverable*, not a
+> brick (`04_re_guidelines.md` §6). An interrupted *application* or *on-chip*
+> write usually leaves the OBD `10 85` route intact instead, so re-flash over
+> CAN. Only a corruption of the boot body (0x010000-0x01FFFF) or reset stub
+> (0x000000-0x001FFF) needs BDM — and neither this route nor the loader can
+> write those, so an OBD write can never cause it; treat a BDM tool as insurance
+> for that case and for reading 0x400000-0x403FFF, per `01_project_plan.md` §6.
 
 Each patch keeps a baseline log (stock) and a patched log over the same bench
 scenario; a script compares the common variables and flags deviations. The E0

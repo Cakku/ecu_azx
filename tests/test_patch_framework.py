@@ -54,6 +54,7 @@ CLEARED_HALF = 0x800E18
 PATCH_FLASH = 0x150000
 PATCH_RAM = 0x7FFB00                        # re/findings/ram.md 8.1 (C2, #23); runtime confirmation pending
 ALIVE = 0xFC01
+SRC_B = 0x02                                # ff_src_seen bit of the set-B hook (F1)
 SRAM_START, SRAM_LEN = 0x7F8000, 0x10000    # the whole ECU RAM (emu/memmap.py)
 STACK_TOP = 0x7FEFFC                        # emu resets r1 here
 HOOK_TAIL_FRAME = 16                        # patches/common/hooks.h
@@ -127,7 +128,10 @@ class TestBuild(unittest.TestCase):
         self.assertIn("ba       0x11f02c", r.stdout)     # the tail branch
 
     def test_patch_json_still_matches_a_fresh_build(self):
-        """`changes` is generated; a stale patch.json must not survive a build."""
+        """`changes` is generated; a stale patch.json must not survive a build.
+
+        `ff_counter`'s second descriptor, `patch.external.json`, is checked the
+        same way in `tests/test_ff_counter_patch.py` (brief F1)."""
         for patch_dir in (HELLO, FF_COUNTER, FF_FUEL):
             with self.subTest(patch=patch_dir.name):
                 r = make(patch_dir, "all")
@@ -139,7 +143,8 @@ class TestBuild(unittest.TestCase):
     def test_a_missing_placement_symbol_fails_the_link(self):
         """patch.ld has no defaults on purpose (see its header comment)."""
         self.assertEqual(make(FF_COUNTER, "all").returncode, 0)
-        obj = FF_COUNTER / "build" / "hook.o"
+        # ff_counter builds per variant since brief F1: build/<HOOKS>/.
+        obj = FF_COUNTER / "build" / "both" / "hook.o"
         r = subprocess.run(
             [str(LLVM_DIR / "bin" / "ld.lld"), "-m", "elf32ppc",
              "-T", str(PATCHES / "common" / "patch.ld"),
@@ -249,7 +254,11 @@ class TestApply(DumpUnchanged):
             self.assertTrue(cs.verify(m.load_dump(str(out)), quiet=True))
         patched = m.load_dump(str(out))
         off = m.cpu_to_file(HOOK_SITE)
-        self.assertEqual(bytes(patched[off:off + 4]), bytes.fromhex("4802f985"))
+        # The set-B trampoline is the second one in the blob since brief F1,
+        # so take its address from the symbols rather than pinning the word.
+        hook_b = int(load_patch(FF_COUNTER)["build"]["symbols"]["ff_counter_hook_b"], 0)
+        self.assertEqual(int.from_bytes(bytes(patched[off:off + 4]), "big"),
+                         patch_gen.encode_branch(HOOK_SITE, hook_b, "bl"))
         blob_off = m.cpu_to_file(PATCH_FLASH)
         self.assertEqual(bytes(patched[blob_off:blob_off + len(blob_of(FF_COUNTER))]),
                          blob_of(FF_COUNTER))
@@ -409,7 +418,12 @@ class TestApply(DumpUnchanged):
 @requires_dump
 @requires_emu
 class TestEmulatedHook(DumpUnchanged):
-    """The trampoline and the hooked site, run on the patched image."""
+    """The trampoline and the hooked site, run on the patched image.
+
+    The site is 0x12067C, the set-B raster: these are C1's tests, kept running
+    against the set-B half of the two-hook patch brief F1 built (the set-A half
+    and the source byte are `tests/test_ff_counter_patch.py`).
+    """
 
     @classmethod
     def setUpClass(cls):
@@ -418,7 +432,7 @@ class TestEmulatedHook(DumpUnchanged):
         cls.image = cls.tmp / "ff_counter.bin"
         data, _report, _w = patch_apply.apply_patch(DUMP, FF_COUNTER)
         cls.image.write_bytes(bytes(data))
-        cls.hook_addr = int(load_patch(FF_COUNTER)["build"]["symbols"]["ff_counter_hook"], 0)
+        cls.hook_addr = int(load_patch(FF_COUNTER)["build"]["symbols"]["ff_counter_hook_b"], 0)
 
     @classmethod
     def tearDownClass(cls):
@@ -428,7 +442,7 @@ class TestEmulatedHook(DumpUnchanged):
     @staticmethod
     def _seeded(ticks: int, alive: int) -> dict[int, bytes]:
         """A warm RAM image: a counter mid-count and both stock cells dirty."""
-        return {PATCH_RAM: struct.pack(">IHH", ticks, alive, 0),
+        return {PATCH_RAM: struct.pack(">IHBB", ticks, alive, 0, 0),
                 CLEARED_BYTE: b"\xAA",
                 CLEARED_HALF: b"\xBE\xEF"}
 
@@ -451,10 +465,11 @@ class TestEmulatedHook(DumpUnchanged):
 
         self.assertTrue(res.ok, f"{res.stop_reason}: {res.issues}")
         after = res.snapshot(SRAM_START, SRAM_LEN)
-        ticks, alive, reserved = struct.unpack(
-            ">IHH", after[PATCH_RAM - SRAM_START:PATCH_RAM - SRAM_START + 8])
+        ticks, alive, src_seen, reserved = struct.unpack(
+            ">IHBB", after[PATCH_RAM - SRAM_START:PATCH_RAM - SRAM_START + 8])
         self.assertEqual(ticks, 0x1235)
         self.assertEqual(alive, ALIVE)
+        self.assertEqual(src_seen, SRC_B, "the set-B stub must set bit 1 (F1)")
         self.assertEqual(reserved, 0)
 
     def test_the_original_leaf_still_runs(self):
@@ -486,9 +501,9 @@ class TestEmulatedHook(DumpUnchanged):
         emu = Med9Emu(self.image)
         res = emu.call(self.hook_addr)             # RAM is all zero after reset
         after = res.snapshot(SRAM_START, SRAM_LEN)
-        ticks, alive, _ = struct.unpack(
-            ">IHH", after[PATCH_RAM - SRAM_START:PATCH_RAM - SRAM_START + 8])
-        self.assertEqual((ticks, alive), (1, ALIVE))
+        ticks, alive, src_seen, _ = struct.unpack(
+            ">IHBB", after[PATCH_RAM - SRAM_START:PATCH_RAM - SRAM_START + 8])
+        self.assertEqual((ticks, alive, src_seen), (1, ALIVE, SRC_B))
 
     def test_the_hooked_site_behaves_like_the_stock_site(self):
         """Run 0x12067C..0x120680 on both images and diff the whole of RAM."""
@@ -501,7 +516,7 @@ class TestEmulatedHook(DumpUnchanged):
             snaps[tag], insns[tag] = res.snapshot(SRAM_START, SRAM_LEN), res.insns
 
         self.assertEqual(insns["stock"], 5)         # bl + the 4-instruction leaf
-        self.assertEqual(insns["patched"], 29)      # + trampoline + ff_counter_tick
+        self.assertEqual(insns["patched"], 33)      # + trampoline + ff_counter_tick_b
 
         changed = set(self._changed(snaps["stock"], snaps["patched"]))
         allowed = set(range(PATCH_RAM, PATCH_RAM + 8))

@@ -413,6 +413,29 @@ Q15 at those instructions, **COMMUNITY** for the names. That closes the
 > `%LAMSOLL` / `lamsbg_w`; `re/findings/calibration_names.md` §9.5 lists the
 > other two.
 
+> **Added 2026-09-22 (F4, #41): that store is the tester, and this chain has
+> no lambda setpoint at all.** 0x7FD066 is **adaptation channel 10** of the
+> table at 0x0A3AD8: `kwp_adaptation_service` 0x038708 writes it through
+> `**(byte **)(&DAT_000a3ad8 + 40)` after clamping it between 26 (0x5C6085)
+> and 179 (0x5C6084), and `adaptation_restore_all` 0x12E3F8 reloads it from
+> EEP_CONF block 8 index 11 at every power-up. Default 128, so `fgru_trim` is
+> exactly 1.0 unless a tester has moved it; the reachable range is
+> **0.797 … 1.094**. E3's "the request arrives as the single byte 0x7FD066"
+> was the right trace and the wrong conclusion: **no request arrives there**.
+>
+> The rest of the chain above is now complete in the same sense. Of the four
+> multiplicative terms, `fgru_trim` is a tester constant, `0x80302C`
+> (`ksta_adapted`) and `mixture_running` are the start/warm-up cascade
+> (`calibration_names.md` §10.3, whose two `%LAMSOLL`-shaped maps
+> `cand_KFMIXA` / `cand_KFMIXB` are **all 128**, i.e. λ = 1 everywhere), and
+> `fr`/`fra`/`frm` are the closed loop — whose own setpoint 0x802CDE is
+> computed by `lam_ist_from_rk` 0x43E164 **from 0x80303E / 0x80303A, i.e.
+> from this chain's own output**. So the loop tracks whatever `rk` asks for.
+> **There is no full-load or component-protection enrichment on the fuel path
+> of this dataset**, and an ethanol factor at the `rk` hook of §3 is not
+> fighting a hidden one. `calibration_names.md` §10.2 has the exclusion with
+> the commands.
+
 ## 10. Verification: the Python model
 
 `emu/models/injection.py` is a bit-exact model of `rk2ti` (0x0AC370),

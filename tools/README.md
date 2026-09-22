@@ -15,13 +15,15 @@ document and `med9lib.py` together.
 | `ethanol_frame_decode.py` | Decode the Pico flex-fuel node's CAN frame (0x0EC) from candump / candump -L / SavvyCAN CSV lines or a whole log, with plausibility and counter/gap checks. `--live` uses python-can if installed; everything else is dependency-free. Layout also in `data/ethanol_node.dbc`. |
 | `measuring_vars.py` | Measuring-variable (TKMWL) table: find the dispatcher, walk all 2200 handlers, report each variable's RAM address/width and VAG display formula; `--groups` dumps the measuring-block group table. |
 | `bindiff.py` | Diff two dumps and classify every changed byte as *patch* (listed in a `patch.json`), *descriptor* (a checksum sum/~sum word) or **unexpected**. Exit 1 on anything unexpected. |
-| `logcmp.py` | Compare a baseline and a candidate log over their common variables with per-variable tolerances. Format and tolerance file: `logging/README.md`. |
+| `logcmp.py` | Compare a baseline and a candidate log over their common variables with per-variable tolerances. `--align-on VAR[:RATE]` first shifts the candidate so the two ECUs' own clocks agree — two runs are two power-ups — and `--uncovered {fail,report,ignore}` says what happens to variables the tolerance file does not name. `logcmp.py derive run1 run2 -o tolerance.json` turns two runs of the same software into limits that are measured repeatability instead of predictions. Format and tolerance file: `logging/README.md`; the recipe: `docs/07_workflow.md` §§5.4-5.5. |
 | `draft_to_xdf.py` | `re/calibration_draft.csv` -> a TunerPro `.xdf`. Maps CPU addresses to **file offsets** through `med9lib`, emits big-endian row-major tables, and validates the result structurally (`--validate`, `--self-test`). No scaling is applied: every value is raw counts. |
+| `cal_show.py` | Print one object of `re/calibration_draft.csv` — its cells, both axes' breakpoints and the same numbers under a trial scaling — or any raw run of elements with `--raw`. `--guess` reports the physical range the numbers would have under every unit `re/findings/` has proved and marks the ones that fit. Read-only; the naming pass's read-out helper (issue #41). |
 | `blobdis.py` | Disassemble a raw big-endian PowerPC blob at a chosen CPU address; `--check-sda` fails if patch code touches r2/r13. |
 | `eeprom_map.py` | Decode the SPI EEPROM block layout (EEP_CONF, file 0xB2FF0): block table, copies, RAM mirror, free space; `--clients` maps which block bytes the firmware actually uses; `--check` verifies the block checksums of a real 2 KB EEPROM read. `re/findings/eeprom.md`. |
 | `callgraph.py` | Static PowerPC call graph: every `bl` target is a function entry, each function is walked as a CFG (`--reach`, `--func`, `--callers`, `--entries`). Also extracts r2/r13-relative accesses and finds `lis`+D-form pairs that address a register range (`--xref-store`). |
 | `r2_context.py` | Decides the SDA2 base (r2) of every function from the call graph and checks every r2-relative access against it: reports references that leave the SDA2 window, land outside a mapped region, or hit 0xFF filler. Evidence for issue #8. |
 | `sda_xref.py` | Whole-image cross-references. `--var LO [HI]` decodes every r2/r13-relative D-form load/store and prints the ones resolving into the range — the small-data accesses `callgraph.py --xref-store` cannot see. `--code ADDR...` prints every `b`/`bl` **site** targeting an address (not the enclosing function), so a flat ERCOSEK task body reads off directly. Used throughout `re/findings/rail.md` (issue #17). |
+| `store_xref.py` | Every store whose effective address lands in a RAM window, with the base register that formed it. Goes past `find_abs_refs.py` (lis + D-form only) and `sda_xref.py` (r2/r13 only): it carries a constant-propagation model, follows `lwz` through pointer words in flash, and covers `stmw`, `stfd` and the indexed forms. `--near` keeps indexed stores whose base sits below the window, `--loops` lists the `stwu` copy/fill loops, `--control` scans three windows with known writers so a scan that proves nothing says so. `re/findings/eeprom.md` section 10.7. |
 | `gen_stock_header.py` | Generate `patches/common/med9_stock.h` (stock function / RAM addresses for patch code) from `re/symbols.csv`; `--check` fails the build when the checked-in header is stale. |
 | `patch_gen.py` | Turn a patch's `build` section into its `changes` list: resolve hook targets from the `.sym` file, encode the I-form branch words (reach and alignment checked), assert the stock bytes under the blob are 0xFF, and emit one change per `build.data` entry (a new calibration block from a file, or an inline table edit) with its `old` read from the stock image. `changes` is generated, never hand-edited. |
 | `patch_apply.py` | The only tool that modifies an image. Checks `base_sha256`, the forbidden regions and every `old`; writes the `new` bytes to a copy; fixes and verifies the checksums; proves the identification block is unchanged; requires a clean `bindiff`. Writes nothing if any of that fails. Guarded regions are unlocked per change by `calibration_edit` (0x1C0000-0x1DFFFF) or `onchip_edit` (0x404000-0x47FFFF, always warns); 0x000000-0x00FFFF, 0x400000-0x403FFF and the identification block are never unlockable. |
@@ -48,6 +50,7 @@ python3 tools/callgraph.py data/passat_azx_ori.bin \
 python3 tools/r2_context.py data/passat_azx_ori.bin --compare --violations
 python3 tools/sda_xref.py data/passat_azx_ori.bin --var 0x8031DA   # prist readers/writers
 python3 tools/sda_xref.py data/passat_azx_ori.bin --code 0x457BC8  # who calls the HDR controller
+python3 tools/store_xref.py data/passat_azx_ori.bin --window 0x7FAB58 0x7FAB80  # who binds the NVM device
 python3 tools/ram_survey.py data/passat_azx_ori.bin --csv re/ram_map.csv
 python3 tools/ram_survey.py data/passat_azx_ori.bin --indexed --indexed-min 0x40
 python3 tools/ram_survey.py data/passat_azx_ori.bin --stack
@@ -103,7 +106,10 @@ Regression checks before a file goes anywhere near the car
 python3 tools/bindiff.py data/passat_azx_ori.bin work/patched.bin \
         -p patches/ff_counter/patch.json          # exit 0 == only intended bytes moved
 python3 tools/bindiff.py stock.bin patched.bin -p patch.json --json work/diff.json
-python3 tools/logcmp.py base.csv cand.csv -t patches/ff_counter/test/tolerance.json
+python3 tools/logcmp.py base.csv cand.csv -t patches/ff_counter/test/tolerance.json \
+        --align-on raster_setA_10ms_count:100 --uncovered report
+python3 tools/logcmp.py derive stock1.csv stock2.csv -o work/tolerance_measured.json \
+        --align-on raster_setA_10ms_count:100 --exclude 'raster_*' ff_ticks
 ```
 
 `checksum.py fix` is semantics-preserving, and running it on the original dump
@@ -131,6 +137,7 @@ constant):
 | File | What it covers |
 |---|---|
 | `test_bindiff.py` | builds a patched copy in a temp directory and checks that only the edits and their descriptors moved |
+| `test_cal_show.py` | `tools/cal_show.py`'s parsers, that `--guess` rejects as well as accepts, and that the bytes it reads match `med9lib` |
 | `test_draft_to_xdf.py` | the XDF skeleton, the file-offset mapping, the `val[iy*nx+ix]` layout, and `re/calibration_names.csv` against the draft |
 | `test_ecu_sim_patch.py` | `logging/ecu_sim.py --sim-patch`: the patch's hooks driven on a simulated raster |
 | `test_emu.py` | the Unicorn harness (`emu/README.md`) |
@@ -139,7 +146,7 @@ constant):
 | `test_ff_diag_patch.py`, `test_ff_fuel_patch.py`, `test_ff_ign_patch.py`, `test_ff_rail_patch.py`, `test_ff_start_patch.py` | the five `patches/ff_fuel` features under the emulator, including the two bit-identity proofs each (disabled, and enabled at neutral calibration) |
 | `test_flexfuel_model.py` | `emu/models/flexfuel.py`, the reference model the patch and FFCAL001 are both checked against |
 | `test_injection_model.py`, `test_start_model.py`, `test_window_model.py`, `test_zw_model.py` | the bit-exact models of the injection, start, injection-window and base-ignition paths |
-| `test_logcmp.py` | the synthetic logs in `logging/samples/` |
+| `test_logcmp.py` | the synthetic logs in `logging/samples/`, including the alignment on the raster counter, the `--uncovered` modes and `derive` |
 | `test_med9kwp.py` | the TP2.0 + KWP2000 stack against `logging/ecu_sim.py` (49 tests, no hardware) |
 | `test_patch_framework.py` | `patches/common/` + `patch_gen` + `patch_apply` + the `ff_counter` hook under the emulator; the build layer skips itself with a clear message when `LLVM_DIR` is not installed |
 | `test_qspi_eeprom.py` | the QSMCM QSPI queue and the M95160 device model |

@@ -713,6 +713,38 @@ only switches the mode.
 > Still true: **no DTC is raised.** A fault only switches the mode, and the
 > mode is field 4. OBD PID 0x52 is untouched.
 
+> **2026-09-22 — brief F6, issue #39: the OBD half is located and *deferred*,
+> not implemented.** Full evidence: `re/findings/obd.md`; regression cover:
+> `tests/test_ff_obd_patch.py` (13 tests). Nothing in `patches/ff_fuel/**`
+> changed and FFCAL001 stays at **v4 / 332 B**.
+>
+> The generic-OBD stack **is** in this image. J1979 modes 0x01-0x09 are nine
+> more entries of the same 28-entry dispatch table at 0x2B820 that `kwp.md` §1
+> describes, gated to internal sessions 4 and 6. Mode 01 is `obd_mode01_h1`
+> (0x5D0F4); a PID needs a byte in the **dense** class table at 0x0A39B4
+> (index = PID) **and** an entry in one of five (record-pointer, PID,
+> support-mask) lists in calibration 0x5C5D24-0x5C5E1B.
+>
+> **All five lists are exactly full** — 20 + 8 + 3 + 6 + 4 = 41 entries, every
+> slot used, two slack bytes in the whole block — and each loop bound is an
+> immediate in stock code. So PID 0x52 is **not** the "table word + handler"
+> shape D2 used for the TKMWL: the cheapest addition is 7 instruction words
+> plus a relocated list, which brief F6 rules out for an optional feature.
+> Emulated control in `tests/test_ff_obd_patch.py`: the class byte alone
+> changes nothing, class byte **plus** a list slot makes the firmware answer
+> `41 52 85` with no instruction changed.
+>
+> Two things this settles for whoever picks it up:
+>
+> * **The support bitmaps are RAM** (0x801215-0x801220), rebuilt by
+>   `obd_pid_support_build` (0x5CBE8) from each record's *validity byte*. They
+>   are not flash constants, so `ff_pid52_enable` would gate both the answer
+>   and the advertised bit through **one RAM byte** — no calibration edit to
+>   switch the PID on or off, and with the byte at 0 the image behaves exactly
+>   as stock.
+> * **The #39 exit criterion does not depend on this.** Measuring block 111
+>   already publishes `E_filt`; PID 0x52 stays the optional half.
+
 ### 3.8 Persistence (Phase 5)
 Store `E_filt` in EEPROM via the ECU's own EEPROM block handler or in
 battery-backed RAM if the external SRAM is permanently powered (to be

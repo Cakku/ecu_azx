@@ -181,6 +181,8 @@ everything listed under "still hardware-only" below, now with `docs/07` and
 `flash_programming.md` §7.2 as the checklist for the first flash — eight hook
 words, seven on-chip, all inside the whitelist the firmware enforces.
 
+*2026-09-22: every desk item of this list was taken up by wave F (below): logcmp alignment → F2; lambda path → F4 (closed as an exclusion: this dataset has no lambda-setpoint map); torque limiter → still deferred (design note in `procedure_e5.md`); RAM bootstrap loader → F5; init-table entries → F3; the 0x7FAB70/74 driver binding → F3 (bounded negative: nothing in the image writes it).*
+
 
 | Pair | Brief | Issues | Needs | Owns (nobody else edits these while it runs) |
 |---|---|---|---|---|
@@ -216,7 +218,75 @@ Still hardware-only (no brief): #1-#4, #22, #26-#28, #30-#31, #33, #40, #45,
 the runtime half of #23 and #44, the generator test of #29, the TunerPro
 check of #41, and the calibration values of #34-#36.
 
-## Wave F — next (planned 2026-09-22): make Flash 1 decisive, close the desk gaps, keep the bench un-blocked
+## Wave F — done on `integration/wave-F` (2026-09-22): make Flash 1 decisive, close the desk gaps, keep the bench un-blocked
+
+**Status 2026-09-22 (late): all six briefs ran and are merged on
+`integration/wave-F`** (F1 c7f72cd, F4 b0d5d39 + XDF 55a7334, F2 4c6ac12,
+F5 55b5f12, F3 c699a48, F6 8e2d237, plus the integration fixes 2e0fac0,
+20b001f and 37afd62). Every branch passed the gate before its merge (dump
+sha unchanged, `ALL OK (65 blocks)`, `re/med9_draft.xdf` and
+`re/calibration_draft.csv` untouched on the branch, CSVs LF, suite green);
+`re/symbols.csv` merged as a union (869 rows after F3, one duplicate
+`tbl_crc32_ranges` row dropped). The XDF was regenerated once, after F4:
+**1,079 tables, 197 constants, 0 problems**. Final head: 731 tests OK,
+`bench_rehearsal.py --fresh-eeprom` 69/69, `ecu_sim.py --self-test` PASS.
+**The human merges `integration/wave-F` into `main` and pushes.** Results
+in one line each:
+
+* **F1** `patches/ff_counter` hooks both 10 ms rasters (0x432940 set A,
+  on-chip; 0x12067C set B) and records `ff_src_seen` (1/2/3); `HOOKS=both`
+  (default) and `HOOKS=external` (the pre-F1 patch byte for byte); nine-row
+  decision table in `test/procedure.md` §4; `patch.mk` now passes
+  `$(PATCH_JSON)` to `patch_gen`/`patch_apply` (variant builds were silently
+  regenerating the default descriptor). Patched image `3cd20443…6498`.
+* **F4** 259 → 359 named objects. **0x7FD066 is KWP adaptation channel 10**
+  (table 0x0A3AD8, 17 channels, 12 implemented, restored from EEP_CONF
+  block 8; channels 4/8/10 are ±10 % fuel trims a workshop basic setting
+  resets — flag for docs/05), and **this dataset has no lambda-setpoint
+  map** (`cand_KFMIXA`/`B` are 128 everywhere; the controller setpoint is
+  computed from the commanded `rk`). `zwdelta_load` 0x7FD338 (+7.5 °CA
+  cold term) found; `tools/cal_show.py`; #43 draft 2 with maps / logs /
+  limits and `logging/sessions/tuning_checklist.json`.
+* **F2** `logcmp.py --align-on VAR[:RATE]`, `--align-shift`, `--uncovered
+  {fail,report,ignore}`, `derive` sub-command; `bench_rehearsal.py` uses the
+  tool; `docs/07` §5.5 is the three-command E0 recipe with real output, §3.4
+  the Flash 1 two-hook note.
+* **F5** the RAM bootstrap loader speaks **QSMCM SCI1 (serial), not CAN**;
+  its address filter is a **blacklist** (0x0-0x1FFF, 0x10000-0x1FFFF,
+  0x400000-0x403FFF), so it alone can rewrite the programming module
+  0x080000-0x09FFFF; entry = 0x7F8000 software magic (automatic after a bad
+  `5A5A` marker) or a BDM-only door; **only the reset stub and the boot body
+  are BDM-only, and no firmware route can write them** (`ram_loader.md`,
+  decision section; `flash_segments.py --loader`).
+* **F3** the simulator's power-on runs ten firmware init entries; `27 01`
+  works through the real seed handler on a virtual time base
+  (`emu/time_base.py`); `nvm_mode` = 1; the flash CRC-32 task runs and the
+  **stock image publishes 0x5562139F** (a bench-checkable prediction,
+  `logging/sessions/flash_crc.json`; `flash_programming.md` §5.3 had the
+  halfwords swapped); **nothing in the image binds 0x7FAB70/74**
+  (`tools/store_xref.py`, `eeprom.md` §10.7).
+* **F6** the generic-OBD stack is in the image (`re/findings/obd.md`: modes
+  01-09 in the 0x2B820 table, sessions 4/6, request MB15 0x7C0-0x7FF,
+  response 0x7E8 on module C MB13) but all five mode-01 PID lists are
+  exactly full, so **PID 0x52 is designed, not implemented**;
+  `patches/ff_fuel` and FFCAL001 (v4, 332 B) unchanged, image
+  `193223e2…4a817`.
+
+Integration fixes worth knowing: `docs/06` §4 dated note (a patch may hook
+one word per task set); `boot.md` §3.2 pointer to `ram_loader.md`; the six
+`dwkrz_*` rows of `patches/ff_fuel/test/tolerance.json` widened from one to
+two LSB (F3 found the rehearsal failing about one run in three on a
+staircase interpolated across a step edge — the file says so); `can.md` §3
+correction (module C transmits exactly one id, 0x7E8).
+
+**Open after wave F (desk):** whether to spend seven stock instruction words
+on PID 0x52 (`obd.md` §6, the human's call); the unit of 0x7FD3E5 and of
+`cand_KFMIRLINV`; the second walker of the init array (0x0B4E24 → 0x7FC9D8,
+decides the real CRC-task period); who calls the mode-01 `h2` entry; the
+loader's SecurityAccess key; `zwdelta_load` belongs in `ignition.md`; the
+adaptation-channel hazard belongs in docs/05. **Open for the bench:**
+unchanged, plus two new one-sample checks — `ff_src_seen` on Flash 1 and
+the flash CRC 0x5562139F over KWP on a stock ECU.
 
 Wave F is the desk work that is still worth doing before an ECU exists. It
 does not add features to `patches/ff_fuel` (every Phase 5 feature is coded
@@ -264,7 +334,7 @@ termination (`logging/README.md` §6); then Flash 0 (#26) with the read-back
 checklist of `flash_programming.md` §7.2 and Flash 1 (#27) with F1's
 decision table.
 
-**Issue bookkeeping to post first** (the GitHub side is behind `main` since
+**Issue bookkeeping to post first** — *done 2026-09-22 before wave F started; the `work/` script no longer exists, its content is on GitHub* — (the GitHub side is behind `main` since
 2652ede; `work/issue_bookkeeping_after_wave_E.sh` has the exact `gh`
 commands, review before running):
 1. On #26 #27 #32 #34 #35 #36 #37 #38 #39 #41 #42 #44: wave E is merged

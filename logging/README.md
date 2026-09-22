@@ -85,9 +85,27 @@ JSON (recommended) or CSV with columns `var,max_abs,mean_abs,rel,interp`
 | `mean_abs` | limit on the mean absolute deviation — the one that catches a small constant offset |
 | `rel` | limit as a fraction of the largest absolute baseline value of that variable; the effective `max_abs` is the larger of the two |
 | `interp` | `linear` (default) or `hold`. Use `hold` for enumerations, bit flags and anything that steps rather than ramps. |
+| `max_abs: null` | **not compared** — "expected to differ, do not judge". The way a file says a variable was considered rather than forgotten (free-running counters, a patch's own state block on a stock run). |
 
 Tolerances belong next to the thing they judge: the bench tolerances for a
 patch live in `patches/<name>/test/`, not here.
+
+**Added 2026-09-22 (F2).** Two runs are two power-ups, so align them on the
+ECU's own clock before comparing, and derive the limits from two runs instead
+of guessing them (docs/07 §§5.4-5.5):
+
+```bash
+python3 tools/logcmp.py base.csv cand.csv -t tolerance.json \
+        --align-on raster_setA_10ms_count:100 --uncovered report
+python3 tools/logcmp.py derive stock1.csv stock2.csv -o tolerance.json \
+        --align-on raster_setA_10ms_count:100 --exclude 'raster_*' ff_ticks
+```
+
+`--uncovered {fail,report,ignore}` says what happens to variables the file does
+not name: judge them against `default` (`fail`, the historical behaviour),
+leave them out and list them (`report`), or leave them out silently. `derive`
+writes the `_derived` provenance block — the two runs, the factor, the
+alignment, the common time range, what was excluded — which the loader ignores.
 
 ## 3. Synthetic samples
 
@@ -100,12 +118,19 @@ step from 4 s to 8 s, idle) used by `tests/test_logcmp.py`:
 | `candidate_ok.csv` | a repeat run: sensor noise and a 17 ms time skew, inside tolerance |
 | `candidate_bad.csv` | the same run with `ti_1_w` deliberately +8 % |
 | `tolerance.json` | limits for this scenario |
+| `stock_run1.csv` | two runs of the same scenario on the same software, from two separate **power-ups**: each carries `raster_setA_10ms_count` from its own offset, and run 2's logger started 0.25 s of ECU time further into the scenario (added 2026-09-22, F2) |
+| `stock_run2.csv` | |
 
 ```bash
 python3 tools/logcmp.py logging/samples/baseline.csv logging/samples/candidate_ok.csv \
     -t logging/samples/tolerance.json          # RESULT: OK,     exit 0
 python3 tools/logcmp.py logging/samples/baseline.csv logging/samples/candidate_bad.csv \
     -t logging/samples/tolerance.json          # FAIL ti_1_w,    exit 1
+python3 tools/logcmp.py logging/samples/stock_run1.csv logging/samples/stock_run2.csv \
+    -t logging/samples/tolerance.json          # 5 of 7 fail on the offset alone
+python3 tools/logcmp.py logging/samples/stock_run1.csv logging/samples/stock_run2.csv \
+    -t logging/samples/tolerance.json \
+    --align-on raster_setA_10ms_count:100      # RESULT: OK,     exit 0
 python3 logging/make_samples.py                # regenerate them (byte-identical)
 ```
 
@@ -212,6 +237,7 @@ that spills onto the next id, which is then polled in the same sample; past
 | `sessions/can_bc_check.json` | do TouCAN modules B and C share one wire? (`can.md` section 3) |
 | `sessions/flash1_counter.json` | did Flash 1 run, and at what rate? (`patches/ff_counter/test/procedure.md`) |
 | `sessions/ram_snapshot.json` | the *ranges* for `dump`, from brief C2 |
+| `sessions/tuning_checklist.json` | the baseline log of issue #43 (brief F4): 36 variables in 28 DDLI chunks, taken before and after any hardware or calibration change and compared with `tools/logcmp.py`. It is the *logs* column of `re/findings/tuning_checklist_draft.md`, and it carries the six cells no measuring variable exposes — `zwdelta_load` 0x7FD338 and the three tester adaptation channels among them |
 
 ## 5. Where the protocol comes from, and the licences
 
@@ -491,10 +517,17 @@ budget in `patches/ff_fuel/test/tolerance.json` and says nothing about the
 software. Both logs carry the live raster counter, so the offset is
 **measurable**: shift the candidate's time axis by
 `(raster_cand - raster_base) / 100` before comparing.
-`bench_rehearsal.py::_align_on_raster` does it, and with that one step
+`bench_rehearsal.py::_align_on_raster` did it, and with that one step
 `tools/logcmp.py` passes on identical animation and fails on `rk_fuel_mass`
 alone when `rk` is perturbed by 3 %. A bench comparison of two drives needs
 the same step.
+
+**2026-09-22 (F2):** that step is now `tools/logcmp.py --align-on
+raster_setA_10ms_count:100`, with `--uncovered report` for the variables
+`tolerance.json` does not name and `logcmp.py derive run1 run2` for the
+tolerances themselves; `bench_rehearsal.py` calls the tool's `align_on` and
+`compare(..., uncovered="report")` instead of its own copies, and
+`--fresh-eeprom` is still **69/69** (docs/07 §§5.4-5.5).
 
 ### What the simulator now models, and what it still does not
 
@@ -508,4 +541,15 @@ the same step.
 | the EEP_CONF block manager's start-up read and its device pointers | same |
 | **not** the ignition stub at 0x41D40C | it is a mid-function trampoline; `ff_dzw_e` is produced by the 10 ms half anyway |
 | **not** any other OS task | the stock baseline runs only what the hook sites replace (`--sim-stock-tasks`) |
-| **not** the PowerPC time base | it never advances under Unicorn (`kwp.md` section 12.6) |
+| the firmware's own one-shot init entries at power-on | `ecu_sim.INIT_ENTRIES` (F3; `boot.md` section 6.5) |
+| a running PowerPC time base for `read_time_base` | `emu/time_base.py` (F3) — without it the real `27 01` never returns |
+| the firmware's flash CRC-32 task, one activation per simulated 10 ms raster | `ecu_sim.FlashCrcTask`, `--flash-crc` / `med9log --sim-flash-crc` (F3) |
+| **not** every other init-table entry | 1,028 of them, most touching peripherals the emulator does not model; the residue is a table in `ecu_sim.py`'s docstring |
+
+> **2026-09-22 (F3, #20/#38).** `power_on` no longer hand-seeds the KWP
+> security cells: it calls ten entries of the firmware's own init table, so
+> `kwp_sec_lfsr_rounds` is 0 until a real `27 01` writes 5 and `nvm_mode`
+> reads 1. `--flash-crc` runs the flash checksum task; for the stock dump it
+> publishes **0x5562139F** to 0x7F9178/0x7F917A after 24,627 activations
+> (246 simulated seconds), and `logging/sessions/flash_crc.json` logs the
+> cursor and the running register, which move every activation.
