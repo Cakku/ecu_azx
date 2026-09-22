@@ -89,6 +89,21 @@ fuel change) is the owner's responsibility and is not covered here.
 > *calibration* — the values in #34-#36 — needs the car and a wideband. The
 > next step of #42 is the bench dry-run, and it is the human's.
 
+> **Update 2026-09-22.** Wave E is merged into `main` (2652ede, 2026-09-17).
+> The hardware plan below was restructured the same day (M1/M1b/M1c,
+> `re/findings/hardware_prep.md` §1.4b): the recovery route comes before any
+> ECU purchase, and a cheap VR6 mule is enough for harness and KWP work. One
+> desk finding changes the first bench day: brief E1 showed **task set A is
+> live** (`scheduler.md` §11.8), and the Flash 1 counter (#27) hooks a
+> set-B raster, so as built it would never tick. **Wave F**
+> (`docs/agent_briefs/README.md`) fixes that first (F1: hook both sets, add
+> a source byte, rewrite the decision table), then closes the remaining desk
+> items — `logcmp` alignment (F2), the simulator's own init entries and the
+> NVM driver binding (F3), the lambda path and the #43 checklist columns
+> (F4), the RAM bootstrap loader and the "recoverable over the connector?"
+> question (F5) — with OBD PID 0x52 as a filler (F6). Nothing in wave F
+> needs the ECU.
+
 ## 3. Principles
 
 1. **Evidence before action.** A fact is used only at the level it has been

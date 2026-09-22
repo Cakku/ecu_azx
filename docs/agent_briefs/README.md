@@ -122,7 +122,17 @@ Issue bookkeeping after wave C (2026-09-16): #25 closed; #27, #20, #44 have
 their completed rows ticked; #11 carries the period correction; no milestone
 is complete yet (every remaining Phase 2/3 item needs the bench).
 
-## Wave E — done on `integration/wave-E` (2026-09-17): Phase 5 code, definition pass 2, simulator rehearsal, the on-chip question
+## Wave E — done, merged into `main` 2652ede (2026-09-17): Phase 5 code, definition pass 2, simulator rehearsal, the on-chip question
+
+**Update 2026-09-22.** `integration/wave-E` was merged into `main` on
+2026-09-17 (2652ede, including the `med9log --sim` pacing fix 086d663). The
+GitHub issues and milestone descriptions still say "on `integration/wave-E`;
+the human merges" — the bookkeeping list under wave F below brings them up
+to date. The same day's `docs/01_project_plan.md` change (6cd45b3) restructured
+the hardware plan: M1 is the BDM backup **plus a demonstrated route to write
+it back**, M1b any VR6 `03H906032` mule, M1c the software-matching spare,
+bought only when a flash is imminent (`re/findings/hardware_prep.md` §1.4b);
+first human action is the K-Suite Service Mode check (§2.3).
 
 **Status 2026-09-17 (late): all seven briefs ran and are merged on
 `integration/wave-E`** (E3 75ee087, E1 4b2c63d, E2 19aa6c2, E4 0ee67ce +
@@ -206,6 +216,78 @@ Still hardware-only (no brief): #1-#4, #22, #26-#28, #30-#31, #33, #40, #45,
 the runtime half of #23 and #44, the generator test of #29, the TunerPro
 check of #41, and the calibration values of #34-#36.
 
+## Wave F — next (planned 2026-09-22): make Flash 1 decisive, close the desk gaps, keep the bench un-blocked
+
+Wave F is the desk work that is still worth doing before an ECU exists. It
+does not add features to `patches/ff_fuel` (every Phase 5 feature is coded
+and disabled; their calibration needs a car). It (a) fixes the one thing that
+would have made the first bench day a wasted one — the Flash 1 counter hooks
+a task set that E1 showed is not the live one — (b) closes the desk items
+listed under "Open after wave E", and (c) answers the recovery question the
+2026-09-22 hardware plan asks before any purchase (can a damaged ECU be
+written back over the connector, or only over BDM). Every item is checked
+against the emulator, nothing is flashed. Still two agents at a time.
+
+| Pair | Brief | Issues | Needs | Owns (nobody else edits these while it runs) |
+|---|---|---|---|---|
+| 1 | [F1 Flash 1 hooks both task sets](F1_flash1_both_task_sets.md) | #27, #44 live-set row, prepares #26 | — | `patches/ff_counter/**`, `tests/test_patch_framework.py` (+ a new test file), `logging/sessions/flash1_counter.json`, `scheduler.md` §8 dated note |
+| 1 | [F4 Calibration naming pass 3: lambda path, #43 columns](F4_calibration_naming_pass3_lambda.md) | #41, #43 | — | `re/calibration_names.csv`, `calibration_names.md`, `tuning_checklist_draft.md`, `tools/draft_to_xdf.py`, `tests/test_draft_to_xdf.py`, dated notes in `injection.md`/`measuring_vars.md`, new `re/findings/lambda.md` if needed |
+| 2 | [F2 logcmp alignment and derived tolerances](F2_logcmp_alignment.md) | #42 gap, #32 E0 recipe, #27 compare step | F1 merged (for the ff_counter procedure wording; otherwise report only) | `tools/logcmp.py`, its tests, `logging/bench_rehearsal.py`, `docs/07_workflow.md` §5, `logging/README.md` §9 line, both `test/procedure.md` §4, `tools/README.md` row |
+| 2 | [F3 Simulator: firmware init entries, NVM binding](F3_simulator_init_table_and_nvm_binding.md) | #20 simulator, #38 open item, #22 prep | — | `logging/ecu_sim.py`, `logging/med9kwp/` (if needed), `emu/` (additive), `tests/test_ecu_sim_patch.py` + new, `boot.md` §6.5 marks, `kwp.md` §12.6, `eeprom.md` §7/§10 notes |
+| 3 | [F5 RAM bootstrap loader](F5_ram_bootstrap_loader.md) | #26, #28, #2 risk table; `flash_programming.md` §8 | — | new `re/findings/ram_loader.md`, `flash_programming.md` §8 marks + §10, `tools/flash_segments.py`, its test, one paragraph each in docs/01 §6 and docs/06 §6 |
+| 3 (filler) | [F6 OBD PID 0x52](F6_obd_pid_52.md) | #39 optional half | — | `patches/ff_fuel/**`, `emu/models/flexfuel.py`, `tests/test_ff_*`, `logging/sessions/ff_fuel.json`, docs/05 §3.7, new `re/findings/obd.md` |
+
+Why this order. **F1 first** because it is the only item that changes what
+the first bench day proves: with set A live (`scheduler.md` §11.8) the
+current Flash 1 counter never moves, and the day would end with an
+ambiguous zero. F4 is independent and long, so it fills pair 1's second
+slot. F2 and F3 both live in `logging/` but in disjoint files (F2:
+`bench_rehearsal.py` and `logcmp.py`; F3: `ecu_sim.py` and `emu/`); F3 runs
+the rehearsal as a check and does not edit it. F5 is research, like E6 was,
+and can move forward if a shop visit or a K-Suite check is scheduled — its
+decision section is what the human needs in hand when talking to a shop
+about a write-back route. F6 is optional and is the only wave-F brief
+allowed in `patches/ff_fuel`.
+
+**Deferred on purpose.** The torque/charge limiter on the injection window
+(#36 step 3) stays a design note (`patches/ff_fuel/test/procedure_e5.md` §6)
+until `procedure_e5.md` Part A has produced a margin table on a real engine —
+E5's argument, not repeated here. Calibration values for #34-#36 and every
+bench/road step need the ECU and the car.
+
+**Human side, in the order docs/01 §4 Phase 0 now gives it** (nothing an
+agent can do): image the K-Suite machine and check whether **Service Mode**
+covers MED9.1 (`hardware_prep.md` §2.3, #4); if not, a shop bench read with
+write-back capability (§2.7, #2); a cheap VR6 `03H906032` mule for harness
+and KWP work (§1.4b, #1, #3); a gs_usb-class CAN adapter with switchable
+termination (`logging/README.md` §6); then Flash 0 (#26) with the read-back
+checklist of `flash_programming.md` §7.2 and Flash 1 (#27) with F1's
+decision table.
+
+**Issue bookkeeping to post first** (the GitHub side is behind `main` since
+2652ede; `work/issue_bookkeeping_after_wave_E.sh` has the exact `gh`
+commands, review before running):
+1. On #26 #27 #32 #34 #35 #36 #37 #38 #39 #41 #42 #44: wave E is merged
+   into `main` 2652ede (2026-09-17); the "human merges" sentences are done.
+2. **#27**: E1's result (set A live) means the counter as built never runs
+   on the ECU; brief F1 planned. Without this note the issue reads as
+   "software half done", which is no longer true.
+3. **#22**: E4's `ethanol_frame_send.py`, `ecu_sim.py --sim-patch` and the
+   TouCAN model are the desk half of this issue; nothing on the issue says so.
+4. **#43**: E3's `re/findings/tuning_checklist_draft.md` exists (step 1
+   started, not ticked); F4 adds the logs and limits columns.
+5. **#20**: E4's two logger fixes (`%.6g` truncation, `ff_magic` decimal)
+   and the 086d663 `--sim` pacing fix; E7 ran every logging command.
+6. **#1, #2, #3, #4**: the 2026-09-22 restructure (M1/M1b/M1c, cheap-donor
+   strategy, Service Mode first, shop as the recovery route) is only in
+   `docs/01` and `hardware_prep.md` §1.4b; the issue bodies still describe
+   "one spare, same software" and "K-TAG BDM". A comment each, and #1/#2
+   bodies re-worded by the human.
+7. Milestone descriptions: Phases 2-6 say "on `integration/wave-E`" → merged
+   2652ede; Phase 0 gets the 2026-09-22 restructure. Counts are right
+   (Phase 1 13/13 closed; 4/2, 4/2, 4/1, 5/0, 7/0, 3/0 for the others), and
+   no issue is wrongly open or closed.
+
 ## How to launch one
 
 From Claude Code (Agent tool), one agent per brief, each in its own worktree
@@ -215,20 +297,20 @@ so parallel agents do not collide on `re/symbols.csv` and the docs:
 subagent_type: general-purpose
 model: opus
 isolation: worktree
-name: E1
+name: F1
 prompt: |
   You are working in a git worktree of /Users/carlo/ecu_azx. First run
-  `git branch -m agent/E1` and `ln -s /Users/carlo/ecu_azx/.venv .venv`, and
+  `git branch -m agent/F1` and `ln -s /Users/carlo/ecu_azx/.venv .venv`, and
   use ./.venv/bin/python3 for every Python command (bare python3 is the
   wrong interpreter). Read docs/agent_briefs/00_common_rules.md, then
-  docs/agent_briefs/E1_ignition_blend.md, and execute that brief completely.
+  docs/agent_briefs/F1_flash1_both_task_sets.md, and execute that brief completely.
   Commit on your branch after every finding; do not push; do not modify
   data/passat_azx_ori.bin. Run `./.venv/bin/python3 -m unittest discover -s
   tests` before you finish. End with the report format from the rules file.
 ```
 
 Or paste the same text into a fresh `claude` session started inside a
-worktree (`git worktree add ../ecu_azx-E1 -b agent/E1`).
+worktree (`git worktree add ../ecu_azx-F1 -b agent/F1`).
 
 ## After an agent finishes
 
