@@ -90,9 +90,9 @@ DZW_RL_AXIS = (416, 864, 1280, 1696, 2144, 2976, 3840, 4256)
 CORE_OFF = 0x08    # first checksummed byte of the state block
 CORE_LEN = 0x24    # +0x08..+0x2B; the annex above it has other writers
 CORE2_OFF = 0x40   # E2 (#35): the second checksummed range, past the annex
-CORE2_LEN = 0x0C   # +0x40..+0x4B; E5 (#36) grew it from 0x04
-STATE_LEN = 0x4C   # sizeof(struct ff_state); E2 0x40->0x44, E5 0x44->0x4C
-BLOCK_LEN = 0x4C
+CORE2_LEN = 0x10   # +0x40..+0x4F; E5 (#36) grew it from 0x04, G1 (#39) from 0x0C
+STATE_LEN = 0x50   # sizeof(struct ff_state); E2 0x40->0x44, E5 ->0x4C, G1 ->0x50
+BLOCK_LEN = 0x50
 
 # --- E2 (#35): the start enrichment -------------------------------------
 FST_N = 6              # ff_fst_map is FST_N ethanol rows x FST_N tmst columns
@@ -131,6 +131,16 @@ FMT_A_WIN = 225
 #: margin `KLWBHO1SMX` -> 0x7FD290 = 67 counts = 50.25 degCA.
 VMSVMX_STOCK = 5000
 WIN_MARGIN_REQ_STOCK = 67
+
+# --- G1 (#39): OBD mode 01 PID 0x52, ethanol fuel % ---------------------------
+OBD_PID52 = 0x52
+OBD_A_FULL = 255       # J1979: E% = A * 100 / 255, so A = 255 is E100
+OFF_OBD52 = 0x4C       # the {A, valid} record inside struct ff_state
+
+
+def obd52_a_of(e_filt: int) -> int:
+    """PID 0x52's byte A from `e_filt` (1/16 %): round half up, 0..255."""
+    return min((e_filt * OBD_A_FULL + E_FILT_MAX // 2) // E_FILT_MAX, OBD_A_FULL)
 
 # ---------------------------------------------------------------- the frame --
 def frame(e_pct: int = 0, t_fuel_c: int = 20, freq_hz: int = 100,
@@ -216,6 +226,9 @@ class Cal:
     prail_max: int = 3000          # 15.0 bar: KLPRMAX 22000 - KFPRSOLHOM 19000
     diag_window_ms: int = 1000
     prail_curve: list[int] = field(default_factory=lambda: [0] * PRAIL_N)
+    # --- G1 (#39): the OBD PID 0x52 gate, appended by FFCAL001 v5 ---------
+    pid52_enable: int = 0
+    obd_rsv: int = 0
 
     # The clamps the patch applies to whatever the calibration says.
     def tick(self) -> int:
@@ -258,7 +271,7 @@ class Cal:
 # ------------------------------------------------------------ the RAM state --
 @dataclass
 class State:
-    """`struct ff_state` — patches/ff_fuel/src/ff_state.h, 64 bytes."""
+    """`struct ff_state` — patches/ff_fuel/src/ff_state.h, 80 bytes since G1."""
     # header
     magic: int = 0
     length: int = 0
@@ -309,6 +322,9 @@ class State:
     win_margin_min: int = 0  # s16, E5: worst injection-window margin, angle LSB
     prist_min: int = 0       # u16, E5: worst prist this window, 0.005 bar
     diag_ticks: int = 0      # u16, E5: activations left of the current window
+    obd52_a: int = 0         # u8,  G1: OBD PID 0x52 record, byte A
+    obd52_valid: int = 0     # u8,  G1: the record's valid byte
+    obd_rsv: int = 0         # u16, G1: reserved 0
 
 
 @dataclass
@@ -459,7 +475,7 @@ class FlexFuelModel:
     LENGTH = BLOCK_LEN
 
     def init_state(self) -> None:
-        """What `ff_state_init()` does: zero the 64 bytes, then seed them."""
+        """What `ff_state_init()` does: zero the 80 bytes, then seed them."""
         c = self.cal
         self.state = State()
         st = self.state
@@ -510,14 +526,16 @@ class FlexFuelModel:
         return bytes(out)
 
     def core2_bytes(self) -> bytes:
-        """The second checksummed range, +0x40..+0x4B (E2, grown by E5)."""
+        """The second checksummed range, +0x40..+0x4F (E2, grown by E5, G1)."""
         st = self.state
         out = (st.fst_q10.to_bytes(2, "big")
                + bytes((st.zwst_add & 0xFF, st.msv_sat_ticks & 0xFF))
                + st.prail_add.to_bytes(2, "big")
                + (st.win_margin_min & 0xFFFF).to_bytes(2, "big")
                + st.prist_min.to_bytes(2, "big")
-               + st.diag_ticks.to_bytes(2, "big"))
+               + st.diag_ticks.to_bytes(2, "big")
+               + bytes((st.obd52_a & 0xFF, st.obd52_valid & 0xFF))
+               + st.obd_rsv.to_bytes(2, "big"))
         assert len(out) == CORE2_LEN
         return out
 
@@ -531,7 +549,7 @@ class FlexFuelModel:
         against, tick by tick.  The annex (+0x2C..+0x3F) is deliberately left
         out: the segment task and brief D2 write it, not the periodic tick.
         E2's second core (+0x40..+0x43) is not contiguous with this, so it has
-        its own `core2_bytes()`; `full_bytes()` shows all 0x44.
+        its own `core2_bytes()`; `full_bytes()` shows all 0x50.
         """
         st = self.state
         return struct.pack(">IHH", st.magic, st.length, st.csum) + self.core_bytes()
@@ -785,6 +803,7 @@ class FlexFuelModel:
         self.zw_update(nmot_w, rl_w)
         self.start_update(tmst)
         self.rail_update(rail if rail is not None else RailIn())
+        self.obd_update()
         self.diag_publish()
         self.seal()
 
@@ -885,6 +904,27 @@ class FlexFuelModel:
         st.f_q10 = self.f_of(st.e_filt)
         self._finish(nmot_w, rl_w, tmst, rail)
         return st
+
+    # -- OBD mode 01 PID 0x52 (brief G1, issue #39) ----------------------
+    def obd_update(self) -> None:
+        """`ff_obd_update()`: the {A, valid} record the grown B2 list points at.
+
+        `valid` = `ff_pid52_enable` && `cal_ok`; with it 0 the record is all
+        zero, the stock bitmap builder skips the entry and PID 0x52 answers
+        "not supported" exactly as on the stock image.  Every path, every
+        activation, like the other `_finish` producers.
+        """
+        st = self.state
+        if not self.cal.pid52_enable or not st.cal_ok:
+            st.obd52_a = st.obd52_valid = st.obd_rsv = 0
+            return
+        st.obd52_a = obd52_a_of(st.e_filt)
+        st.obd52_valid = 1
+        st.obd_rsv = 0
+
+    def obd_record(self) -> bytes:
+        """The two bytes the stock OBD code reads: {A, valid}."""
+        return bytes((self.state.obd52_a, self.state.obd52_valid))
 
     # -- the measuring block (brief D2, issue #39) ------------------------
     def diag_publish(self) -> None:
@@ -1005,7 +1045,7 @@ class FlexFuelModel:
         ]
 
     def full_bytes(self) -> bytes:
-        """All 76 bytes at PATCH_RAM: header, core, annex and core 2."""
+        """All 80 bytes at PATCH_RAM: header, core, annex and core 2."""
         st = self.state
         return self.block_bytes() + struct.pack(
             ">IHBBHHHHHH", st.rk_calls, st.e_persist, st.persist_state,

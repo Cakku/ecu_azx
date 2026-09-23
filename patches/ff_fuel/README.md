@@ -46,6 +46,19 @@ because `dwi` and `wbho1s` have no stock measuring id at all
 `KLPRMAX` raise are deliberately **out of scope**; the design note for the
 limiter is `test/procedure_e5.md` §6.
 
+Brief **G1** added **OBD mode 01 PID 0x52, "ethanol fuel %"** (2026-09-23,
+the optional half of issue #39): a generic scan tool that asks `01 52` gets
+`41 52 A` with `A = round(E% × 255 / 100)`, and `01 40` advertises it. The
+answer comes out of the **stock** mode-01 code, which reads a `{value, valid}`
+RAM record through a list in flash; G1 grows the smallest of those lists from
+three entries to four (seven stock instruction words, a 24-byte list and one
+class byte, below) and writes the record every 10 ms. It ships **disabled**:
+`ff_pid52_enable` = 0 keeps the record's `valid` byte 0, and with that the
+image is **observably identical to stock on OBD mode 01** — the support
+bitmaps and every PID answer — although it is not byte-identical. That
+distinction is the one to keep in mind: the seven words and the list are
+always there; what the enable byte gates is behaviour.
+
 > ## Do not flash yet — two blockers, both printed by `make apply`
 >
 > 1. **`"ram_status": "static"`.** `PATCH_RAM = 0x7FFB00` (0x100 B) is the block
@@ -88,10 +101,11 @@ built by the patch's own generator (`ffcal001.py`), and it has to exist before
 |---|---|
 | **Hooks** | eight, one word each — see the table below |
 | **Trampoline** | `HOOK_TAIL` for D1's three (`patches/common/hooks.S`): saves LR only, 16-byte frame. E1's, E2's and E5's five are hand-written in `src/hooks.S` and have no frame at all |
-| **RAM** | 92 bytes of the 0x100-byte block at `PATCH_RAM` = 0x7FFB00: the **76-byte** state block, `ff_persist_buf` (0x7FFB4C) and `ff_nvm_req` (0x7FFB50). E1 added no RAM at all; E2 added four bytes and **E5 eight more**, all appended past the annex so nothing moved |
-| **Flash** | 7,692 bytes at 0x152000 (free area 0x150000-0x1AFFFF, all 0xFF) |
-| **Calibration** | FFCAL001 **v4**, 332 bytes at 0x5E2510 (checksum block 0x5E0000-0x5EFFFF) |
-| **Stock tables edited** | `tbl_measuring_vars` ids 2196-2199 (0x0A78A8), 2192-2195 (0x0A7898), 2188-2191 (0x0A7888) and 2184-2187 (0x0A7878), 16 B each; `tbl_measuring_groups` groups 111, 108, 69 and 109 (four u16 each) |
+| **RAM** | 96 bytes of the 0x100-byte block at `PATCH_RAM` = 0x7FFB00: the **80-byte** state block, `ff_persist_buf` (0x7FFB50) and `ff_nvm_req` (0x7FFB54). E1 added no RAM at all; E2 added four bytes, **E5 eight more** and **G1 four more** (the OBD PID 0x52 record), all appended past the annex so nothing moved |
+| **Flash** | 7,828 bytes at 0x152000 (free area 0x150000-0x1AFFFF, all 0xFF), plus **G1**'s 24-byte OBD list in the blank block 0x160000-0x16FFFF |
+| **Calibration** | FFCAL001 **v5**, 334 bytes at 0x5E2510 (checksum block 0x5E0000-0x5EFFFF) |
+| **Stock code edited** | **G1**: seven instruction words in `obd_pid_support_build` (0x5CBE8) and `obd_pid_read` (0x5CED4), none of them a hook — see "Stock-instruction edits (PID 0x52)" |
+| **Stock tables edited** | `tbl_measuring_vars` ids 2196-2199 (0x0A78A8), 2192-2195 (0x0A7898), 2188-2191 (0x0A7888) and 2184-2187 (0x0A7878), 16 B each; `tbl_measuring_groups` groups 111, 108, 69 and 109 (four u16 each); **G1**: `tbl_obd_pid_class[0x52]` (0x0A3A06), one byte |
 | **Stock RAM written** | `rk` 0x803038 (only when F != 1024), `can_rx_shadow` slot 15 (0x803F98-0x803FA3, which nothing else uses) and — through the block manager, never directly — EEP_CONF block 8's mirror byte 0x7F9F80. **The ignition blend writes no stock RAM at all**: it adds its offset to a register inside `zwgru_build`, and the stock `stb` at 0x41D430 is what stores `zwgru`. **E2's three stubs write `ksta_adapted` 0x80302C and `zwstt` 0x802096** — but only because they *are* the stores the stock code would have executed; they replace a `sth`/`stb`, they perform it absolutely, and with both features off the byte pattern written is identical. **E5's stub writes `prsoll_raw` 0x8031F0** on the same terms: it *is* the store the stock code would have executed, it performs it absolutely, and with `prail_add` = 0 the halfword is identical |
 | **Stock RAM read** | `nmot_w` 0x7FEE74 and `rl_w` 0x7FEFB2 (the blend's two axis inputs), `dwkrz` 0x7FCE57-0x7FCE5C and the low-octane latch 0x7FD31B (block 108 fields 3 and 4), `tmst` 0x8021F6 (the start map's column axis, and block 69 field 3), `B_stend` 0x7FE921 (the S1 gate), `ksta_adapted` 0x80302C (block 69 field 4) and — **E5** — `wbho1s` 0x80307E, `dwi` 0x803088, the required margin 0x7FD290, `prist` 0x8031DA and the MSV volume 0x80316E, plus the stock calibration word `VMSVMX` 0x5D4BC6 |
 | **Stock code called** | `can_init_mb(15)` 0x135750 once, `can_rx_poll(15)` 0x4379C8 per activation, `measuring_result_emit` 0x38EB4 per measuring field, `nvm_block_request` 0x6131C at cold start and at most once a minute |
@@ -157,7 +171,7 @@ Plus **twenty-one** data edits:
 | Address | Old | New | What |
 |---|---|---|---|
 | **0x02BD8C** | `00 00 07 FF` | `00 00 00 EC` | the id word of `tbl_can_rx` slot 15 |
-| **0x5E2510** | 332 B of 0xFF | FFCAL001 v4 | the new calibration block |
+| **0x5E2510** | 334 B of 0xFF | FFCAL001 v5 | the new calibration block |
 | **0x0A78A8** | `00 03 8E C4` ×4 | the four handler addresses | `tbl_measuring_vars` ids 2196-2199 (D2) |
 | **0x5C55F6** | `00 00` | `08 94` | `tbl_measuring_groups` group 111 field 1 (D2) |
 | **0x5C57F4** | `00 00` | `08 95` | field 2 |
@@ -183,6 +197,128 @@ The TKMWL words are generated from the linker symbols (`"u32_syms"` in
 `patch.json`, docs/06 §1), so they follow the code instead of going stale; the
 four group words are inside the guarded stock calibration and carry
 `"calibration_edit": true`.
+
+**G1 adds twelve more `build.data` entries** — the seven instruction words,
+the class byte and four pieces of the relocated OBD list. They are listed in
+their own subsection below, because seven of them are edits to stock *code*
+and the hook table has to stay honest: it is still **eight** words.
+
+### Stock-instruction edits (PID 0x52) — brief G1, #39
+
+The stock generic-OBD code answers a mode-01 PID from one of five
+`(record_ptr, pid, support_mask)` lists and a dense class table
+(`re/findings/obd.md` §3-§4). All five lists are exactly full and their loop
+bounds are immediates, so a new PID needs a **longer list**: G1 grows the
+smallest one, **B2** (group B, one value byte), from three entries to four.
+None of these words is a trampoline — each is one instruction replaced by one
+instruction with the same destination register, so no register, no stack and
+no control flow changes — and they are `build.data` entries with their `old`
+bytes asserted, exactly like the table edits above.
+
+| Site | Function | Stock | Patched | Why |
+|---|---|---|---|---|
+| **0x05CCF4** | `obd_pid_support_build` | `38 82 BD DC` `addi r4,r2,-0x4224` | `3C 80 00 16` `lis r4,0x16` | record_ptr base → 0x160000 |
+| **0x05CD0C** | `obd_pid_support_build` | `39 82 BD E8` `addi r12,r2,-0x4218` | `3D 82 FF BA` `addis r12,r2,-0x46` | pid base → 0x169FF0 |
+| **0x05CD40** | `obd_pid_support_build` | `39 22 BD EB` `addi r9,r2,-0x4215` | `3D 2D FF 97` `addis r9,r13,-0x69` | support_mask base → 0x16FFF0 |
+| **0x05CD5C** | `obd_pid_support_build` | `2C 03 00 03` `cmpwi r3,3` | `2C 03 00 04` `cmpwi r3,4` | loop bound |
+| **0x05CFD4** | `obd_pid_read` | `38 C2 BD E8` `addi r6,r2,-0x4218` | `3C C2 FF BA` `addis r6,r2,-0x46` | pid base → 0x169FF0 |
+| **0x05CFE4** | `obd_pid_read` | `39 82 BD DC` `addi r12,r2,-0x4224` | `3D 80 00 16` `lis r12,0x16` | record_ptr base → 0x160000 |
+| **0x05D010** | `obd_pid_read` | `2C 08 00 03` `cmpwi r8,3` | `2C 08 00 04` `cmpwi r8,4` | loop bound |
+
+All seven are in Bosch checksum block `desc 0x0A0070` (0x058000-0x05FFFF).
+They are every reader of the three B2 arrays in the image: an r2-relative scan
+finds exactly these five base sites and no `lis` pair or pointer word
+(`obd.md` §9.4, re-run by `tests/test_ff_obd_patch.py`). The stock arrays at
+0x5C5DCC-0x5C5DDD are left untouched and are simply no longer read.
+
+**Where the grown list lives, and why there.** The brief's first choice was
+free calibration inside r2 ± 32 KB. There is none: every 0xFF run of 24 bytes
+or more in that window is a live map cell or the calibration segment header
+(`obd.md` §9.1 has the table and the reader of each). So the list went to the
+brief's fallback, the patch's own free flash — and because `addi rD,r2,d`
+cannot reach it and every site has to stay **one** instruction, each array
+sits at an address one instruction can form from a register the ABI keeps
+constant:
+
+| Array | Address | Formed by | Contents |
+|---|---|---|---|
+| `u32 record_ptr[4]` | **0x160000** | `lis rD,0x16` | 0x801A58, 0x801356, 0x801358 (stock, PIDs 0x13/0x1C/0x30) and **`ff_obd_pid52_rec`** = 0x7FFB4C |
+| `u8 pid[4]` | **0x169FF0** | `addis rD,r2,-0x46` (0x5C9FF0 − 0x460000) | 13 1C 30 **52** |
+| `u8 support_mask[4]` | **0x16FFF0** | `addis rD,r13,-0x69` (0x7FFFF0 − 0x690000) | 20 10 01 **40** |
+
+All three are inside the one blank Bosch block 0x160000-0x16FFFF
+(`desc 0x0A0260`), which nothing in the image references. The blob's own block
+was not used because its only `lis`-reachable word, 0x150000, is where
+`patches/ff_counter` links. The record pointer is not typed in: the Makefile
+exports `ff_state + 0x4C` to the linker as `ff_obd_pid52_rec`, `patch.json`
+names it in `"u32_syms"`, and `tools/patch_gen.py` (since G1) accepts a
+`u32_syms` name that resolves into the patch RAM block as a *data* pointer.
+The blob may grow to 0x15FFFF before it meets the list;
+`test_the_blob_ends_well_before_the_list_block` guards that.
+
+**The class byte is 0x02, not 0x82.** `tbl_obd_pid_class[0x52]` (0x0A3A06,
+`desc 0x0A0100`) goes 0x00 → **0x02**: bit 7 of that byte is what makes
+`obd_pid_read` scan the A lists instead of the B lists (0x5CEE4), and the
+three stock B2 PIDs carry 0x02. The 0x82 in `obd.md` §6 step 1 was right for
+F6's A2 control experiment and would be wrong here: the builder, which only
+tests the byte for non-zero, would advertise PID 0x52 while the reader looked
+for it in a list that does not hold it (`obd.md` §9.3). The mode-02 code that
+also reads the class table scans only the A lists and rejects a clear bit 7,
+so it cannot see the change.
+
+**The run-time gate, and what "identical" means here.** The enable byte cannot
+gate the instruction edits — they are always present — so it gates the
+record. `src/ff_obd.c` runs from `ff_finish()` on every activation and every
+path and writes
+
+    ff_state.obd52_a     (+0x4C) = min((e_filt * 255 + 800) / 1600, 255)
+    ff_state.obd52_valid (+0x4D) = ff_pid52_enable && cal_ok
+
+(both 0 when the switch is off). With `valid` = 0 the builder skips the fourth
+entry, so the bitmaps are exactly the stock ones, and `obd_pid_read` scans four
+entries instead of three, finds nothing for 0x52 and returns 0 — which is what
+the stock image returns, where 0x52 has no class byte at all. So with the
+shipped `ff_pid52_enable` = 0 the image is **observably identical to stock**
+on mode 01, not byte-identical. `tests/test_ff_obd_patch.py` proves both
+halves with the real handlers of the patched image and all 41 stock records
+valid:
+
+* **disabled** — every PID 0x00-0x58, three multi-PID requests and the three
+  bitmap requests answer byte for byte as on the stock image, and the whole
+  64 KB of SRAM matches outside our own block;
+* **enabled** (E 0/50/85/100 %) — the only differences are bit 0x40 of
+  0x80121F, the `01 40` answer that shows it, and `01 52` = `52 A`;
+  `A` = 0, 128, 217, 255. With only F6's five sparse records valid, PID 0x52
+  also switches on the `01 40` continuation bit, as J1979 requires.
+
+A cold start zeroes the record together with the rest of the block before
+anything else reads it (`ff_state_init()` clears it word by word). The one
+residue: in the first activation window after power-up, before the first
+10 ms tick has run, the record holds whatever RAM held — the same window every
+other field of the block has, and far shorter than the time a scan tool needs
+to open a session.
+
+**Cost.** Measured in the harness on the applied image
+(`TestPid52TwoProofs::test_the_builder_costs_one_loop_iteration` guards the
+bounds):
+
+| Path | Stock | Patched, off | Patched, on |
+|---|---|---|---|
+| `obd_pid_support_build`, all 41 records valid | 1,196 | 1,205 | 1,223 |
+| `obd_pid_read` for a B2 PID (0x13, 0x30) | 44 | 51 | 51 |
+| `obd_pid_read` for 0x52 | 16 (class byte 0) | 48, returns 0 | 51, returns 1 |
+| `obd_pid_read` for an A2 PID (0x05) | 163 | 163 | 163 |
+| `ff_obd_update()`, per 10 ms activation | — | 14 | 27 |
+
+Both stock functions run only when a tester asks, in the KWP task.
+`ff_obd_update()` is the only thing that runs in the raster, 14 instructions
+with the feature off.
+
+**What stays open.** Whether the car reaches internal session 6 at all (it
+needs channel type 4 and tester address 0x33, `obd.md` §8 item 4; session 4,
+`10 86`, reaches the OBD services regardless), and which walker calls the
+table entry's h2 — the bitmap builder — on the car (`obd.md` §8 item 2). Both
+are bench questions; neither changes the edit.
 
 ### Why both 10 ms rasters are hooked
 
@@ -248,7 +384,7 @@ The 0.02 %/activation slew is why `e_filt` has a companion `e_frac`: 0.02 % is
 0.32 counts of 1/16 %, which would truncate to zero and freeze the filter. The
 pair is one 26-bit value in 1/16384 %; `e_filt` alone is what everything reads.
 
-### The RAM block — `struct ff_state` at 0x7FFB00, 76 bytes
+### The RAM block — `struct ff_state` at 0x7FFB00, 80 bytes
 
 `src/ff_state.h` is the authority; `tests/test_ff_fuel_patch.py` and
 `logging/sessions/ff_fuel.json` are checked against it.
@@ -299,10 +435,13 @@ pair is one 26-bit value in 1/16384 %; `e_filt` alone is what everything reads.
 | **+46** | s16 | `ff_win_margin_min` | tick | **E5**, the worst `wbho1s − dwi − 0x7FD290×32` of the window, **3/128 °CA** |
 | **+48** | u16 | `ff_prist_min` | tick | **E5**, the worst `prist` of the window, **0.005 bar** |
 | **+4A** | u16 | `ff_diag_ticks` | tick | **E5**, activations left of the current window |
+| **+4C** | u8 | `ff_obd52_a` | tick | **G1**, OBD PID 0x52 record byte A, `round(e_filt × 255 / 1600)` — *core 2* |
+| **+4D** | u8 | `ff_obd52_valid` | tick | **G1**, the record's `valid` byte = `ff_pid52_enable && cal_ok` — *core 2* |
+| **+4E** | u16 | `ff_obd_rsv` | tick | **G1**, reserved 0, keeps the length a multiple of four — *core 2* |
 
-Above the 76-byte block, still inside the declared 0x100, sit two objects the
-state block deliberately does not contain: **`ff_persist_buf` at 0x7FFB4C**,
-the one byte a stage copies from, and **`ff_nvm_req` at 0x7FFB50**, the block
+Above the 80-byte block, still inside the declared 0x100, sit two objects the
+state block deliberately does not contain: **`ff_persist_buf` at 0x7FFB50**,
+the one byte a stage copies from, and **`ff_nvm_req` at 0x7FFB54**, the block
 manager's 9-byte request record. The manager keeps a *pointer* to that record
 in its own queue and dereferences it milliseconds after the call returns
 (`re/findings/eeprom.md` §8.2), so it cannot be a stack temporary — and its
@@ -325,8 +464,8 @@ Three things about this layout:
 * **The header is mandatory, not decoration.** Brief C2 proved the cold start
   does not fill 0x7FF770-0x7FFFEB, so the contents are undefined at power-on.
   `ff_state_init()` runs whenever magic, length or checksum do not describe our
-  block, zeroes all 76 bytes and re-seeds them. It clears the block a **word**
-  at a time, which is why `FF_LENGTH` has to stay a multiple of four — 0x4C is,
+  block, zeroes all 80 bytes and re-seeds them. It clears the block a **word**
+  at a time, which is why `FF_LENGTH` has to stay a multiple of four — 0x50 is,
   and a `_Static_assert` in `src/ff_fuel.c` says so.
 * **The checksum covers the core (+08..+2B) only.** It is recomputed at the end
   of every periodic activation, so it may only cover fields that activation
@@ -370,7 +509,18 @@ the block rather than sit in the rail-pressure path. The length went
 the safe direction again. **+0x43, the byte E2 reserved for this brief, is
 spent on `ff_msv_sat_ticks`**, which is what it was reserved for.
 
-### FFCAL001 v4 at 0x5E2510 — 332 bytes
+**G1 grew core 2 by four bytes** (2026-09-23): the OBD PID 0x52 record
+`{ff_obd52_a, ff_obd52_valid}` at +0x4C/+0x4D and a reserved halfword. Both
+bytes are written by the periodic tick and nothing else, so `FF_CORE2_LEN`
+went 0x0C → 0x10 and the checksum still sums two ranges; a corrupted `valid`
+byte re-initialises the block, which zeroes it — the "not supported" answer.
+The stock OBD code needs the record's address as a plain u32 in flash, which
+is why the Makefile exports `ff_state + 0x4C` as `ff_obd_pid52_rec`. The
+length went 0x4C → 0x50, so a block written by the E5 blob is rejected and
+re-initialised; `ff_persist_buf` and `ff_nvm_req` moved up by four bytes with
+the linker and are pinned by name as before.
+
+### FFCAL001 v5 at 0x5E2510 — 334 bytes
 
 Built by `ffcal001.py` from `ffcal001.json`; `src/ff_state.h` carries the same
 offsets and `tests/test_flexfuel_model.py` asserts the two agree.
@@ -378,19 +528,20 @@ offsets and `tests/test_flexfuel_model.py` asserts the two agree.
 **Every version appends and moves nothing.** Everything up to +0xE5 is exactly
 where v1 put it; E1's four parameters start at +0xE6, which is where v1's
 checksum used to be; E2's eight start at +0x108, which is where v2's checksum
-was; E5's five start at +0x122, which is where v3's checksum was; and the
-checksum follows the length each time. `ff_cal_ok()` accepts
-**the current version only**: a v1, v2 or v3 block flashed under a v4 blob
-reads as corrupt, which means mode 0 — `F = 1024`, no CAN, `dzw_e = 0`,
-`fst_q10 = 1024`, `zwst_add = 0` and `prail_add = 0` — the safe direction, and
+was; E5's five start at +0x122, which is where v3's checksum was; G1's two start
+at +0x14A, which is where v4's checksum was; and the checksum follows the
+length each time. `ff_cal_ok()` accepts **the current version only**: a v1 to
+v4 block flashed under a v5 blob reads as corrupt, which means mode 0 —
+`F = 1024`, no CAN, `dzw_e = 0`, `fst_q10 = 1024`, `zwst_add = 0`,
+`prail_add = 0` and PID 0x52 not supported — the safe direction, and
 `tests/test_ff_ign_patch.py`, `tests/test_ff_start_patch.py` and
 `tests/test_ff_rail_patch.py` all prove it on the applied image.
 
 | Off | Type | Name | Shipped | Unit |
 |---|---|---|---|---|
 | +00 | 8 B | magic | `FFCAL001` | |
-| +08 | u16 | version | **3** | |
-| +0A | u16 | length | 290 | B |
+| +08 | u16 | version | **5** | |
+| +0A | u16 | length | 334 | B |
 | +0C | u16 | `ff_can_id` | 0x0EC | — (documentation; also compared against the id echo at 0x803F98) |
 | +0E | u16 | `ff_timeout_ms` | 1000 | ms |
 | +10 | u16 | `ff_hold_s` | 60 | s |
@@ -427,7 +578,9 @@ reads as corrupt, which means mode 0 — `F = 1024`, no CAN, `dzw_e = 0`,
 | **+124** | u16 | `ff_prail_max` | 3000 | **E5**: `prail_add` ceiling = **15.0 bar**, exactly the headroom `KLPRMAX` 22000 leaves above `KFPRSOLHOM`'s 19000; code clamps to 6000 (30.0 bar) |
 | **+126** | u16 | `ff_diag_window_ms` | 1000 | **E5**: the window `win_margin_min`, `prist_min` and `msv_sat_ticks` are accumulated over |
 | **+128** | 17×u16 | `ff_prail_curve` | **0** | **E5**, 0.005 bar over E 0..100 step 6.25 % — the same grid as `ff_F_curve` |
-| +14A | u16 | crc | | `~sum16` of bytes [0, length-2) |
+| **+14A** | u8 | `ff_pid52_enable` | **0** | **G1**: 1 answers OBD `01 52` and advertises it in `01 40`; 0 keeps the record's `valid` byte 0, so mode 01 is observably stock |
+| **+14B** | u8 | `ff_obd_rsv` | 0 | **G1**: reserved; it exists only so the checksum stays 2-byte aligned |
+| +14C | u16 | crc | | `~sum16` of bytes [0, length-2) |
 
 The v1 reservation `ff_prail_add` at +0xDC is **superseded by
 `ff_prail_curve`** and left in place, neutral and unread, so that nothing in
@@ -446,7 +599,8 @@ bit-identical), any `ff_fst_map` cell below 1024 (`f_st` may only enrich) or
 above 2560, an `ff_fst_max` outside 1024..2560, an `ff_zwst_max` or an
 `ff_fzwst_curve` above 8 counts, an `ff_fzwst_curve[0]` that is not 0, an `ff_prail_curve[0]` that is
 not 0, a non-monotonic `ff_prail_curve`, a curve point or an `ff_prail_max`
-above 6000, an `ff_diag_window_ms` of 0, or a non-zero `ff_prail_rsv`.
+above 6000, an `ff_diag_window_ms` of 0, a non-zero `ff_prail_rsv`, an
+`ff_pid52_enable` other than 0 or 1, or a non-zero `ff_obd_rsv`.
 
 **Why the E5 code ceiling is the number it is.** `FF_PRAIL_HARD_MAX` = 6000 =
 30.0 bar is twice the shipped `ff_prail_max` and twice the whole headroom the
@@ -1039,27 +1193,29 @@ and `::TestProducer::test_the_cost_of_one_activation`, plus D1's
 
 ```
 $ make apply
-ff_fuel: 159 patch range(s) (7977 B), 18 descriptor range(s) (54 B), 0 unexpected
+ff_fuel: 176 patch range(s) (8157 B), 22 descriptor range(s) (66 B), 0 unexpected
 checksums: ALL OK (65 blocks); identification block unchanged
-sha256: 193223e2ea47c8274f97d961683466b168cf75f484adcaf0b92d4d856e94a817
+sha256: eea9e01412f0f2bc44b23146bdcce79333ac82e7bdf8cd1890bbbc2e473904a8
 WARNING: ff_fuel: "ram_status": "static" - ... Do not flash this image.
 WARNING: change at 0x42247c+0x4 writes the MPC561 on-chip flash ...
 WARNING: change at 0x432940+0x4 writes the MPC561 on-chip flash ...
 WARNING: change at 0x41d40c+0x4 writes the MPC561 on-chip flash ...
 ```
 
-159 patch ranges because many of the blob's and FFCAL001's own bytes are 0xFF,
-so they do not change and the ranges around them split. The 18 descriptor
-ranges are the sum/~sum words of the **ten** affected Bosch blocks, eight of
+176 patch ranges because many of the blob's and FFCAL001's own bytes are 0xFF,
+so they do not change and the ranges around them split. The 22 descriptor
+ranges are the sum/~sum words of the **twelve** affected Bosch blocks, ten of
 them described by the code table at file 0x0A0000 and two by the calibration
-table at 0x1C3300:
+table at 0x1C3300 (the output above is G1's build, 2026-09-23):
 
 | Descriptor | Table entry | Block it covers | Touched by |
 |---|---|---|---|
 | 0x0A0010 | code #1 | 0x020000-0x02FFFF | the CAN id word at 0x2BD8C |
-| 0x0A0100 | code #16 | the block holding 0x0A7888 / 0x0A7898 / 0x0A78A8 | the twelve TKMWL pointers (**D2**, **E1**, **E2**) |
+| 0x0A0070 | code #7 | 0x058000-0x05FFFF | **G1**'s seven OBD instruction words |
+| 0x0A0100 | code #16 | the block holding 0x0A7888 / 0x0A7898 / 0x0A78A8 | the sixteen TKMWL pointers (**D2**, **E1**, **E2**, **E5**) and **G1**'s class byte 0x0A3A06 |
 | 0x0A0200 | code #32 | the block holding 0x12067C | the set-B hook word |
 | 0x0A0250 | code #37 | the block holding 0x152000 | the blob |
+| 0x0A0260 | code #38 | 0x160000-0x16FFFF | **G1**'s relocated OBD list |
 | 0x0A02F0 | code #47 | the on-chip block holding 0x41A680 / 0x41A808 / 0x41D40C | the **start** hook words (**E2**) and the **ignition** hook word (**E1**) |
 | 0x0A0300 | code #48 | the on-chip block holding 0x42247C | the fuel hook word |
 | 0x0A0310 | code #49 | the on-chip block holding 0x431384 / 0x432940 | the **start-ignition** hook word (**E2**) and the set-A hook word |
@@ -1264,6 +1420,29 @@ With the shipped calibration field 1 reads 0.00 bar, because
 stock has to show.
 
 
+## What a tester sees — OBD mode 01 PID 0x52 (G1, #39)
+
+Any generic scan tool, over the OBD services of session 6 (tester address
+0x33) or session 4 (`10 86`):
+
+| Request | Shipped (`ff_pid52_enable` = 0) | Enabled |
+|---|---|---|
+| `01 40` | exactly the stock answer | the stock answer with bit 0x40 of its third byte set |
+| `01 52` | unsupported, exactly as stock | `41 52 A`, E% = `A × 100 / 255` |
+
+`A` is `ff_state.obd52_a`, i.e. `e_filt` rounded to the J1979 byte: E85 is
+`D9` (217 → 85.1 %), E100 is `FF`. The value follows `e_filt` in every mode,
+exactly as measuring block 111 field 1 does — in FAULT it is the held or
+decaying estimate, in mode 0 it is 0. Measuring block 111 stays the primary
+display (#39's exit criterion is met there); PID 0x52 is for a tool that only
+speaks J1979.
+
+Rehearse without an ECU: `tests/test_ff_obd_patch.py::TestPid52OverKwp`
+answers `01 52` through `logging/ecu_sim.py`'s KWP dispatch, which runs the
+real `obd_mode01_h1` under its dispatch-table session mask. The simulator
+speaks TP2.0, not ISO 15765-4 — the ISO-TP single-frame parser is not traced
+(`obd.md` §8 item 1) — so the 0x7DF/0x7E8 transport itself is a bench item.
+
 ## E% across power loss (#38)
 
 The estimate is kept in **EEP_CONF block 8, payload +2, one byte**, through
@@ -1426,6 +1605,16 @@ zero" side of the line and only the fuel factor is held.
   same activation the fuel factor is held** and the three window statistics
   over a synthetic `wbho1s`/`dwi`/`0x80316E`/`prist` stream; the two whole-SRAM
   proofs; and group 109 through the dispatcher and through `ecu_sim`'s `21 6D`.
+* `tests/test_ff_obd_patch.py` (43) — F6's stock facts and control
+  experiment, then G1's half over four more layers: the free-calibration
+  survey that forced the placement (every 0xFF run of the r2 window and its
+  reader), every reader of the B2 arrays, the class byte's group bit and the
+  blank block 0x160000; the applied image (the seven words, the class byte,
+  the relocated list, the linker's record pointer, still eight hook words);
+  **the two proofs** — disabled, every PID 0x00-0x58 and the whole SRAM
+  against the stock image; enabled, only the 0x52 bit, `01 40` and `01 52`
+  move — and the record from the real 10 ms tick against the model, plus
+  `01 52` through `ecu_sim`'s KWP route.
 * The E0 proof: `test_f_1024_leaves_rk_untouched` for `rk` in
   {0, 1, 0x7FFF, 0xFFFF}, and `test_one_activation_moves_only_our_own_ram`,
   which diffs the whole 64 KB of SRAM between the stock and the patched image

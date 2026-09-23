@@ -529,6 +529,16 @@
       "max_abs": null,
       "mean_abs": null,
       "_unit": "count, 0x7FFB4A; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_obd52_a": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "%, 0x7FFB4C; a patch state-block field (G1, #39). It reads 0 on a stock image (the address is plain RAM there), and with the shipped ff_pid52_enable = 0 it reads 0 on the patched image too, so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and tests/test_ff_obd_patch.py instead"
+    },
+    "ff_obd52_valid": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FFB4D; a patch state-block field (G1, #39). It reads 0 on a stock image (the address is plain RAM there), and with the shipped ff_pid52_enable = 0 it reads 0 on the patched image too, so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and tests/test_ff_obd_patch.py instead"
     }
   },
   "_open": [

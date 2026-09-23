@@ -9,8 +9,8 @@ re-checksums the block.
 
 Two outputs:
 
-  build/ffcal001.bin    the 332 bytes that go into the image
-                        (v4; v3 was 290, v2 266 and v1 232)
+  build/ffcal001.bin    the 334 bytes that go into the image
+                        (v5; v4 was 332, v3 290, v2 266 and v1 232)
   ffcal001_rows.csv     descriptor rows in the exact column format of
                         `re/calibration_draft.csv`, for the integrator to
                         append at merge time (brief D3 owns that file, so D1
@@ -62,9 +62,17 @@ It was the wrong shape for the job: eight u8 in 0.1 MPa with no axis at all,
 against seventeen u16 in the ECU's own 0.005 bar on the same ethanol grid as
 `ff_F_curve` and `ff_fzw_curve`.
 
-The ECU-side `ff_cal_ok()` accepts **the current version only**: a v1, v2 or
-v3 block flashed under a v4 blob is rejected exactly like a corrupt one, i.e.
-mode 0, F = 1024, dzw_e = 0, fst_q10 = 1024, zwst_add = 0 and prail_add = 0.
+Version 5 (brief G1, issue #39, 2026-09-23) APPENDED the OBD PID 0x52 gate
+and moved nothing: `ff_pid52_enable` (+0x14A, shipped **0**) and one reserved
+byte that keeps the checksum 2-byte aligned (+0x14B); the checksum moved from
++0x14A to +0x14C with the length.  With the enable at 0 the PID 0x52 record's
+`valid` byte stays 0, so the stock OBD code neither advertises nor answers the
+PID and the image is observably identical to stock on mode 01.
+
+The ECU-side `ff_cal_ok()` accepts **the current version only**: a v1 to v4
+block flashed under a v5 blob is rejected exactly like a corrupt one, i.e.
+mode 0, F = 1024, dzw_e = 0, fst_q10 = 1024, zwst_add = 0, prail_add = 0 and
+PID 0x52 not supported.
 
 Usage:
     ./.venv/bin/python3 patches/ff_fuel/ffcal001.py                # build both
@@ -92,8 +100,8 @@ from emu.models.flexfuel import (  # noqa: E402
 
 CAL_BASE = 0x005E2510
 MAGIC = b"FFCAL001"
-VERSION = 4                          # E5 (#36) appended the rail adder
-LENGTH = 0x014C                      # total, checksum included
+VERSION = 5                          # G1 (#39) appended the PID 0x52 gate
+LENGTH = 0x014E                      # total, checksum included
 
 # offset, name, struct code, count - must match patches/ff_fuel/src/ff_state.h
 SCALARS = (
@@ -138,6 +146,13 @@ SCALARS = (
     (0x126, "ff_diag_window_ms", "H", "ms", "E5: length of the window over which"
                                             " win_margin_min, prist_min and"
                                             " msv_sat_ticks are accumulated"),
+    (0x14A, "ff_pid52_enable", "B", "-", "G1 (#39): 1 = answer OBD mode 01 PID 0x52"
+                                         " (ethanol fuel %) and advertise it in"
+                                         " the 01 40 bitmap; 0 (shipped) keeps the"
+                                         " record's valid byte 0, so mode 01 is"
+                                         " observably identical to stock"),
+    (0x14B, "ff_obd_rsv", "B", "-", "G1: 0, reserved; it is here so that the"
+                                    " checksum stays 2-byte aligned"),
 )
 
 TABLES = (
@@ -348,6 +363,14 @@ def build(params: dict) -> bytes:
     if blk[0x123] != 0:
         raise CalError(f"ff_prail_rsv is reserved and must be 0, got {blk[0x123]}")
 
+    # --- G1 (#39): the OBD PID 0x52 gate -----------------------------------
+    if blk[0x14A] not in (0, 1):
+        raise CalError(f"ff_pid52_enable is {blk[0x14A]}; it is a switch, 0 or 1"
+                       " (the patch treats any non-zero byte as 1, so anything"
+                       " else says something the author did not mean)")
+    if blk[0x14B] != 0:
+        raise CalError(f"ff_obd_rsv is reserved and must be 0, got {blk[0x14B]}")
+
     crc = (~sum(blk[:CRC_OFF])) & 0xFFFF
     struct.pack_into(">H", blk, CRC_OFF, crc)
     return bytes(blk)
@@ -395,7 +418,7 @@ def rows(params: dict) -> list[dict]:
         })
 
     row(CAL_BASE + 0x08, "scalar", 1, "", 2, 0, "ff_cal_version",
-        "FFCAL001 header: format version, must be 1")
+        f"FFCAL001 header: format version, must be {VERSION}")
     row(CAL_BASE + 0x0A, "scalar", 1, "", 2, 0, "ff_cal_length",
         f"FFCAL001 header: block length, {LENGTH} B including the checksum")
     for off, name, code, unit, note in SCALARS:

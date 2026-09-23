@@ -320,12 +320,12 @@ class TestStartApply(tff.TestApply):
             self.assertEqual(bytes(self.data[off:off + 2]), b"\0\0")
 
     def test_ffcal001_still_ships_both_start_features_off(self):
-        """E5 (#36) bumped the block to v4; E2's offsets did not move."""
+        """E5 (#36) bumped the block to v4, G1 (#39) to v5; E2's offsets did not move."""
         off = m.cpu_to_file(tff.CAL_BASE)
         blk = bytes(self.data[off:off + ffcal001.LENGTH])
         ffcal001.check(blk)
-        self.assertEqual(struct.unpack_from(">H", blk, 0x08)[0], 4)
-        self.assertEqual(struct.unpack_from(">H", blk, 0x0A)[0], 0x014C)
+        self.assertEqual(struct.unpack_from(">H", blk, 0x08)[0], 5)
+        self.assertEqual(struct.unpack_from(">H", blk, 0x0A)[0], 0x014E)
         self.assertEqual(blk[0x108], 0, "ff_st_enable must ship 0")
         self.assertEqual(blk[0x109], 0, "ff_zwst_enable must ship 0")
         self.assertEqual(struct.unpack_from(">36H", blk, 0x94),
@@ -341,7 +341,7 @@ class TestStartApply(tff.TestApply):
         self.assertIn("ff_nvm_req", ram)
         self.assertGreaterEqual(syms["ff_nvm_req"], PATCH_RAM + ff.STATE_LEN,
                                 "the EEP_CONF record must start past the block")
-        self.assertEqual(ff.STATE_LEN, 0x4C)   # E5 (#36) grew it again
+        self.assertEqual(ff.STATE_LEN, 0x50)   # E5 (#36) and G1 (#39) grew it again
 
 
 # --------------------------------- 3. %ESSTT, patched against stock ---------

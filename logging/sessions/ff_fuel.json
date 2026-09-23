@@ -18,7 +18,7 @@
     "below.",
     "",
     "Checks, in order (procedure.md sections 2-5):",
-    "  1. ff_magic == 0x46463031 ('FF01') and ff_length == 76.  If they are",
+    "  1. ff_magic == 0x46463031 ('FF01') and ff_length == 80.  If they are",
     "     zero the hook never ran: look at ff_src_seen first.",
     "  2. ff_src_seen answers scheduler.md 11.7 in one sample: 1 = only the",
     "     task-set-A hook (0x432940) fires, 2 = only the set-B hook (0x12067C),",
@@ -112,7 +112,8 @@
     "vmsv_limited, wbho1s_w, dwi_inj_angle and the required margin",
     "0x7FD290.  ff_length is now 76 and the second checksummed range runs",
     "+0x40..+0x4B; see ff_state.h.",
-    "2026-09-17 (integration, after E7): three variables were declared twice after E5 (ti_sum as 4 B x 0.001 ms and as u16 us, dwi_inj_angle, prist_w); the first definition of each was dropped. ti_sum is the u16 at 0x8030C4 in microseconds (injection.md section 8, rail.md section 11)."
+    "2026-09-17 (integration, after E7): three variables were declared twice after E5 (ti_sum as 4 B x 0.001 ms and as u16 us, dwi_inj_angle, prist_w); the first definition of each was dropped. ti_sum is the u16 at 0x8030C4 in microseconds (injection.md section 8, rail.md section 11).",
+    "G1 (issue #39, 2026-09-23) appended the OBD PID 0x52 record ff_obd52_a / ff_obd52_valid at +0x4C/+0x4D (and a reserved halfword), so ff_length is now 80 and the second checksummed range runs +0x40..+0x4F. With ff_pid52_enable = 0 (shipped) ff_obd52_valid is 0 on every activation and OBD mode 01 is observably stock; with it 1, ff_obd52_a is what a generic scan tool reads as `41 52 A` (E% = A * 100 / 255). patches/ff_fuel/README.md 'Stock-instruction edits (PID 0x52)'."
   ],
   "ecu": "03H906032 / 1037382557",
   "dump_sha256": "b15590d3f1874ace3125c5d047c09a686db9b8bb498187663539ebab205609b3",
@@ -141,7 +142,7 @@
       "unit": "B",
       "patch_offset": 4,
       "source": "patches/ff_fuel/src/ff_state.h +0x04",
-      "notes": "76 since brief E5 (#36) grew the second core range; 68 under the E2 blob and 64 under D2/E1. Together with the magic and the csum it is the cold-start marker, and a block written by an older blob fails this check and is re-initialised"
+      "notes": "80 since brief G1 (#39) appended the OBD PID 0x52 record; 76 under the E5 blob, 68 under E2 and 64 under D2/E1. Together with the magic and the csum it is the cold-start marker, and a block written by an older blob fails this check and is re-initialised"
     },
     {
       "name": "ff_csum",
@@ -153,7 +154,7 @@
       "unit": "-",
       "patch_offset": 6,
       "source": "patches/ff_fuel/src/ff_state.h +0x06",
-      "notes": "bit-complement of the 16-bit byte sum of the TWO checksummed ranges, +0x08..+0x2B then +0x40..+0x4B (E2, grown by E5). The annex +0x2C..+0x3F is outside it"
+      "notes": "bit-complement of the 16-bit byte sum of the TWO checksummed ranges, +0x08..+0x2B then +0x40..+0x4F (E2, grown by E5 and G1). The annex +0x2C..+0x3F is outside it"
     },
     {
       "name": "ff_e_filt",
@@ -1046,6 +1047,30 @@
       "patch_offset": 74,
       "source": "patches/ff_fuel/src/ff_state.h +0x4A",
       "notes": "E5 (#36): activations left of the current diagnostic window (ff_diag_window_ms / ff_tick_ms, 100 as shipped). The window is TUMBLING, so the three statistics above restart when this reaches 0 - log it with them or a sample looks like a dropout"
+    },
+    {
+      "name": "ff_obd52_a",
+      "addr": "0x7FFB4C",
+      "size": 1,
+      "signed": false,
+      "scale": 0.39215686274509803,
+      "offset": 0,
+      "unit": "%",
+      "patch_offset": 76,
+      "source": "patches/ff_fuel/src/ff_state.h +0x4C",
+      "notes": "G1 (#39): OBD mode 01 PID 0x52 byte A = round(e_filt * 255 / 1600), scaled here as J1979 does (A * 100 / 255 %). 0 whenever ff_obd52_valid is 0"
+    },
+    {
+      "name": "ff_obd52_valid",
+      "addr": "0x7FFB4D",
+      "size": 1,
+      "signed": false,
+      "scale": 1,
+      "offset": 0,
+      "unit": "-",
+      "patch_offset": 77,
+      "source": "patches/ff_fuel/src/ff_state.h +0x4D",
+      "notes": "G1 (#39): the PID 0x52 record's valid byte = ff_pid52_enable && cal_ok. 0 (shipped) keeps PID 0x52 out of the 01 40 bitmap and unanswered, exactly as on the stock image"
     },
     {
       "name": "prsoll_raw",

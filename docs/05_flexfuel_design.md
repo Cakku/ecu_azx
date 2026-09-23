@@ -745,6 +745,35 @@ only switches the mode.
 > * **The #39 exit criterion does not depend on this.** Measuring block 111
 >   already publishes `E_filt`; PID 0x52 stays the optional half.
 
+> **2026-09-23 — brief G1, issue #39: PID 0x52 is implemented, run-time
+> gated.** The diagnostic is now **measuring block 111 _and_ OBD mode 01 PID
+> 0x52**. Evidence: `re/findings/obd.md` §9; patch side:
+> `patches/ff_fuel/README.md` "Stock-instruction edits (PID 0x52)"; proofs:
+> `tests/test_ff_obd_patch.py` (43 tests).
+>
+> * **What changed in stock.** F6's option 3 on the three-entry **B2** list:
+>   seven instruction words in `obd_pid_support_build` / `obd_pid_read`
+>   (external flash, Bosch block 0x058000-0x05FFFF) point the list at a
+>   relocated four-entry copy, and `tbl_obd_pid_class[0x52]` becomes **0x02**
+>   (a group-B byte; F6's 0x82 was the group-A value of its control).
+>   The list is **not** in calibration: every 0xFF run in the r2 window turned
+>   out to be a live map cell or the segment header (`obd.md` §9.1), so it
+>   sits in the blank flash block 0x160000-0x16FFFF, reached by `lis` /
+>   `addis r2` / `addis r13`, one instruction each. No hook word was added;
+>   the patch still has eight.
+> * **The gate.** `ff_pid52_enable` (FFCAL001 **v5**, +0x14A, 334 B) ships
+>   **0**. The patch writes the record `{A, valid}` at `ff_state` +0x4C every
+>   10 ms, with `A = round(E_filt × 255 / 100 %)` and
+>   `valid = ff_pid52_enable && cal_ok`; the stock builder turns `valid` into
+>   the `01 40` support bit and the stock reader into `41 52 A`. With the byte
+>   at 0 the image is **observably identical to stock on mode 01** (bitmaps
+>   and every PID answer, proven in the emulator against all 41 stock PIDs)
+>   but not byte-identical — the seven words and the list are always there.
+> * Still true: **no DTC is raised**, and measuring block 111 is the primary
+>   display. Open, bench-only: whether the car's scan-tool path reaches
+>   internal session 6 (`obd.md` §8 item 4) and which walker runs the bitmap
+>   builder (§8 item 2).
+
 ### 3.8 Persistence (Phase 5)
 Store `E_filt` in EEPROM via the ECU's own EEPROM block handler or in
 battery-backed RAM if the external SRAM is permanently powered (to be

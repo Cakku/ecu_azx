@@ -323,12 +323,13 @@ class TestRailApply(tff.TestApply):
             off = m.cpu_to_file(GROUP_TABLE + f * 0x1FE + (GROUP + 0x7F) * 2)
             self.assertEqual(bytes(self.data[off:off + 2]), b"\0\0")
 
-    def test_ffcal001_is_version_4_and_ships_the_adder_off(self):
+    def test_ffcal001_is_version_5_and_ships_the_adder_off(self):
+        """E5 made it v4; G1 (#39) appended the PID 0x52 gate as v5."""
         off = m.cpu_to_file(tff.CAL_BASE)
         blk = bytes(self.data[off:off + ffcal001.LENGTH])
         ffcal001.check(blk)
-        self.assertEqual(struct.unpack_from(">H", blk, 0x08)[0], 4)
-        self.assertEqual(struct.unpack_from(">H", blk, 0x0A)[0], 0x014C)
+        self.assertEqual(struct.unpack_from(">H", blk, 0x08)[0], 5)
+        self.assertEqual(struct.unpack_from(">H", blk, 0x0A)[0], 0x014E)
         self.assertEqual(blk[0x122], 0, "ff_prail_enable must ship 0")
         self.assertEqual(struct.unpack_from(">17H", blk, 0x128), (0,) * 17,
                          "ff_prail_curve must ship zero")
@@ -337,7 +338,7 @@ class TestRailApply(tff.TestApply):
         syms = {k: int(v, 0) for k, v in
                 tff.load_patch()["build"]["symbols"].items()}
         self.assertEqual(syms["ff_state"], PATCH_RAM)
-        self.assertEqual(ff.STATE_LEN, 0x4C)
+        self.assertEqual(ff.STATE_LEN, 0x50)      # G1 (#39) appended 4 bytes
         self.assertEqual(ff.CORE2_OFF + ff.CORE2_LEN, ff.STATE_LEN)
         self.assertEqual(ff.STATE_LEN % 4, 0,
                          "ff_state_init() clears the block a word at a time")

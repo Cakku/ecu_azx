@@ -35,7 +35,7 @@ full** (20 + 8 + 3 + 6 + 4 = 41 entries, every slot used) and each loop bound is
 an immediate in the code, so **PID 0x52 cannot be added by writing data words
 only** — §6 has the decision and the design that a follow-on brief would need.
 Per brief F6 task 2 this branch therefore stops after the decision and patches
-nothing.
+nothing. *(2026-09-23: brief G1 has since implemented it — §9.)*
 
 ---
 
@@ -319,7 +319,11 @@ Two routes that were considered and rejected:
   pattern, and it would not be covered by the eight hook words the patch README
   accounts for. Left for the follow-on brief to weigh against option 3 above.
 
-**Recommended for the follow-on brief:** option 3 on the **B2** list (7 words,
+**Recommended for the follow-on brief:** — **SETTLED (2026-09-23, G1, §9):
+implemented in `patches/ff_fuel` on the B2 list, run-time gated by
+`ff_pid52_enable`, with two corrections: the list lives in free flash
+0x160000 rather than calibration (§9.1-9.2), and the class byte is 0x02, not
+0x82 (§9.3).** Option 3 on the **B2** list (7 words,
 the smallest), because after it the feature is *fully* run-time gated — the
 enable byte drives the record's `valid` flag, which drives both the answer and
 the support bitmap, and with `valid = 0` the extra loop iteration is
@@ -365,6 +369,122 @@ plus a RAM record are enough, and both the answer and the support bitmap follow.
 |---|---|---|
 | 1 | The ISO 15765-2 single-frame parser: which function reads module C MB15 and hands the payload to `kwp_service_dispatch`. Traced as far as the ISR at 0x404000 kind-4 arm (0x4040C4) and the channel table `[0x7FDA7C] + idx*0x14` (0x1443C4). | OPEN |
 | 2 | Where the dispatch-table **h2** field (+0xC, 0x5CBE8 for mode 01) is called from. 0x5CBE8 is referenced only by the table word at 0x2B9BC, and the dispatcher itself (0x13E98C) only ever calls +0x8; the three `blrl`s at 0x13EB74/0x13EB90/0x13EBAC take handlers from the *config struct*, not the entry. So the bitmap builder runs from a second walker not yet found. | OPEN |
-| 3 | Whether the 0xFF runs at 0x5C2188 / 0x5C6AF6 / 0x5C8262 are genuinely free calibration. | HYPOTHESIS |
+| 3 | Whether the 0xFF runs at 0x5C2188 / 0x5C6AF6 / 0x5C8262 are genuinely free calibration. | **SETTLED (2026-09-23, G1, §9.1): EXCLUDED** — none is free: 0x5C6AF6 and 0x5C8262/0x5C8282 are live tables with r2-relative readers, 0x5C2188 is in the calibration segment header, and so are the other 0xFF runs of 24 B or more in the window |
 | 4 | Whether internal session 6 is actually reachable on the car: it needs `[0x803D6A] == 4` and `[0x7F804B] == 0x33`, and 0x7F804B has exactly one reader and no statically resolvable writer (it is inside the word written by `stw` at 0x15BB8/0x15C0C and possibly by the `stswi` at 0x1443A0). Session 4 (`10 86`) reaches the OBD services regardless. | OPEN |
 | 5 | Modes 0x02-0x09 handlers (0x37804, 0x37D2C, 0x37E1C, 0x427B50, 0x37EA0, 0x37FE0, 0x381B0) are named only from the dispatch table; none was read. | NOT DONE (out of scope) |
+
+---
+
+## 9. Brief G1 (2026-09-23): implementing PID 0x52 on the B2 list
+
+Brief **G1** implements §6's recommended option 3 in `patches/ff_fuel`. This
+section records what the implementation had to settle first; the patch side
+is `patches/ff_fuel/README.md` "Stock-instruction edits (PID 0x52)".
+
+### 9.1 No 0xFF run in the r2 window is free calibration (VERIFIED-STATIC)
+
+§6 and §8 item 3 named three erased runs as HYPOTHESIS-free. A whole-window
+scan (0x5C2010-0x5D1FEF, runs of 0xFF of at least 16 bytes) finds twelve, and
+**every run of 24 bytes or more is a live cell or sits in the calibration
+header**:
+
+| Run | Bytes | Evidence it is live | Verdict |
+|---|---|---|---|
+| 0x5C2020-0x5C207F, 0x5C20C0-0x5C217F, 0x5C2188-0x5C21BF | 96, 192, 56 | inside the calibration segment header 0x5C2000-0x5C223F (its own Bosch block, desc 0x1C3310): `5A5A5A5A CCCCCCCC` then a pointer table at 0x5C2008-0x5C2014 whose words 0x1C2040 / 0x1C20C0 / 0x1C2100 point **into** the first two runs, and the word at 0x5C2184 (0x1C2240) sits in front of the third | header, never a patch target |
+| 0x5C421A-0x5C4231 | 24 | three 8-byte tables: `addi r30,r2,-0x5dd6` at 0xFE4BC (= 0x5C421A), and r2-relative `addi` to 0x5C4222 (0xFE22C) and 0x5C422A (0xFE26C) | live |
+| 0x5C61B8-0x5C61E9 | 50 | the **value body of a 5 x 5 u16 map** whose header is at 0x5C61A0 (`00 05 00 05`, x axis 2400..24000, y axis 0..0x6400, then 25 x 0xFFFF = exactly these 50 bytes); `addi r3,r2,-0x3e50` at on-chip 0x42C248 passes 0x5C61A0 to the interpolator | live |
+| **0x5C6AF6**-0x5C6B25 | 48 | `addi r3,r2,-0x34fa` at on-chip 0x430498 (= 0x5C6AF6) loads it as a map argument; the next cell 0x5C6B26 is referenced by 0x430500 | live |
+| **0x5C8262**-0x5C82A1 | 64 | **two** 16-entry u16 tables: `addi r3,r2,-0x1d8e` at 0xF5BB8 (= 0x5C8262) and `addi r3,r2,-0x1d6e` at 0xF5BCC (= 0x5C8282), each indexed by `(word >> 16) * 2` and `lhzx` | live |
+
+So §8 item 3 is **excluded, not confirmed**: the three runs F6 listed (its
+lengths 56/72/65 were measured differently; the table above gives the exact
+bounds) are two live tables and a map body, and 0x5C2188 is the segment
+header. The "0xFF = erased" reading was wrong for a calibration area: these
+are real maps whose cells happen to hold 0xFF / 0xFFFF. The 0x00 runs were
+not considered, per §6.
+
+Reproduce: the r2-relative (`D-form` and `addi` with rA = 2, application base
+0x5C9FF0), `lis`-pair (`tools/find_abs_refs.py` `resolve()`) and pointer-word
+scan in `tests/test_ff_obd_patch.py::TestFreeCalibrationSurvey`, which
+re-derives the table on every run.
+
+### 9.2 The fallback: the grown list in the patch's own free flash
+
+Because no calibration run is free, the brief's fallback applies: the 24-byte
+list goes into free external flash. A `addi rD,r2,d` cannot reach it (r2 ±
+32 KB), and each of the five array-base sites must stay **one instruction**.
+Three one-instruction forms reach the free area, one per base register the
+ABI keeps constant:
+
+| Form | Value | Holds |
+|---|---|---|
+| `lis rD, 0x16` | **0x160000** | `u32 record_ptr[4]` (16 B) |
+| `addis rD, r2, -0x46` | 0x5C9FF0 - 0x460000 = **0x169FF0** | `u8 pid[4]` |
+| `addis rD, r13, -0x69` | 0x7FFFF0 - 0x690000 = **0x16FFF0** | `u8 support_mask[4]` |
+
+All three are inside the one Bosch block 0x160000-0x16FFFF (code descriptor
+0x0A0260), which is entirely 0xFF in the stock image and referenced by nothing
+(`tools/find_abs_refs.py --range 0x160000 0x16FFFF` prints nothing; the only
+aligned words with a value in the block are the descriptor itself at 0x0A0260
+and two map cells at 0x5DA4D8/0x5DACB0 whose values merely fall in range).
+The blob's own block 0x150000-0x15FFFF was not used because its one
+`lis`-reachable word, 0x150000, is where `patches/ff_counter` links.
+VERIFIED-STATIC.
+
+### 9.3 Correction to §6 step 1: the class byte for a B2 entry is 0x02, not 0x82
+
+`obd_pid_read` (0x5CED4) selects the list group from **bit 7** of the class
+byte: `rlwinm. r10,r8,0,0x18,0x18` at 0x5CEE4, `beq 0x5cfb0` — set means the
+**A** lists (0x5CEEC), clear means the **B** lists (0x5CFB0). The three stock
+B2 PIDs 0x13, 0x1C and 0x30 all carry class byte **0x02**
+(`test_every_list_slot_is_taken` asserts it). §6 step 1's `0x82` is what F6's
+*control experiment* needed, because it stole an **A2** slot; for the B2 route
+it would send PID 0x52 to the A2 lists, which do not contain it, while
+`obd_pid_support_build` — which only tests the class byte for non-zero — would
+still advertise it: `01 40` would say "supported" and `01 52` would answer
+nothing. **The B2 route writes `tbl_obd_pid_class[0x52]` = 0x02.**
+VERIFIED-STATIC (the disassembly above), VERIFIED-DYNAMIC (emulated) by
+`tests/test_ff_obd_patch.py`.
+
+The mode-02 users of the class table (0x37698, 0x3770C, 0x37B78, found with
+`tools/find_abs_refs.py --range 0x0A39B4 0x0A3A0C`) scan **only the A2/A3
+lists** for the freeze-frame bitmap and take the unsupported path at 0x37B88
+whenever bit 7 is clear. A class byte of 0x02 is therefore invisible to mode
+02, exactly as the stock 0x00 is. VERIFIED-STATIC.
+
+### 9.4 Nothing else reads the B2 arrays (VERIFIED-STATIC)
+
+The r2-relative scan of §9.1, restricted to 0x5C5D10-0x5C5E20, finds exactly
+five references to the three B2 arrays — 0x5CCF4 and 0x5CFE4 (pointers),
+0x5CD0C and 0x5CFD4 (ids), 0x5CD40 (masks) — and no `lis` pair and no pointer
+word. The seven edits of §6 therefore redirect every reader; the stock arrays
+at 0x5C5DCC-0x5C5DDD are left byte-for-byte as they are.
+
+Naming, for the record: §6 calls 0x5CCF4-0x5CD5C "the reader" and
+0x5CFD4-0x5D010 "the builder". It is the other way round —
+0x5CCF4/0x5CD0C/0x5CD40/0x5CD5C are in `obd_pid_support_build` (0x5CBE8) and
+0x5CFD4/0x5CFE4/0x5D010 in `obd_pid_read` (0x5CED4). The addresses in the
+table are right.
+
+### 9.5 The dynamic proof (VERIFIED-DYNAMIC, emulated)
+
+`tests/test_ff_obd_patch.py` layers 5-7 run the real `obd_pid_support_build`
+and `obd_mode01_h1` of the **patched** image (`tools/patch_apply.py` output)
+with all 41 stock records valid and the PID 0x52 record produced by the real
+10 ms tick:
+
+* `ff_pid52_enable` = 0 — the bitmaps and every answer to `01 00`..`01 58`
+  (plus three multi-PID requests) are byte-for-byte the stock image's, and a
+  whole-SRAM diff after the builder moves nothing outside `ff_state`;
+* `ff_pid52_enable` = 1 — the only SRAM byte outside `ff_state` that moves is
+  0x80121F (bit 0x40 added), `01 40` shows it, and `01 52` answers `52 A` with
+  A = 0 / 128 / 217 / 255 for E0 / E50 / E85 / E100;
+* with F6's five sparse records, PID 0x52 alone also sets the `01 40`
+  continuation bit (bitmaps `88102001 80000001 00004000`);
+* `01 52` answers `41 52 D9` through `logging/ecu_sim.py`'s KWP dispatch in
+  internal session 6, and is refused exactly as on the stock image with the
+  switch off.
+
+Cost: `obd_pid_support_build` 1,196 → 1,205 (off) / 1,223 (on) instructions
+with all records valid; `obd_pid_read` for a B2 PID 44 → 51. Nothing here
+settles §8 items 1, 2 or 4; they stay bench items.

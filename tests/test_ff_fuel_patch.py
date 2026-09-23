@@ -49,9 +49,9 @@ NOP_LEAF = 0x0BD9E4
 CLR_LEAF = 0x11F02C
 PATCH_FLASH = 0x152000
 PATCH_RAM = 0x7FFB00
-STATE_LEN = 0x4C                     # E2 0x40->0x44, E5 (#36) 0x44->0x4C
+STATE_LEN = 0x50                     # E2 0x40->0x44, E5 ->0x4C, G1 (#39) ->0x50
 CORE_END = 0x2C                      # header + FIRST core, what the model pins
-CORE2_OFF, CORE2_LEN = 0x40, 0x0C    # E2's second core, grown by E5
+CORE2_OFF, CORE2_LEN = 0x40, 0x10    # E2's second core, grown by E5 and G1
 RK = 0x803038
 CAN_SHADOW_ID = 0x803F98             # slot 15 id echo
 CAN_SHADOW_DATA = 0x803F9C           # slot 15 payload
@@ -116,7 +116,9 @@ def cal_from_block(blk: bytes) -> ff.Cal:
                   prail_enable=blk[0x122], prail_rsv=blk[0x123],
                   prail_max=struct.unpack_from(">H", blk, 0x124)[0],
                   diag_window_ms=struct.unpack_from(">H", blk, 0x126)[0],
-                  prail_curve=list(struct.unpack_from(">17H", blk, 0x128)))
+                  prail_curve=list(struct.unpack_from(">17H", blk, 0x128)),
+                  # --- G1 (#39) ---------------------------------------------
+                  pid52_enable=blk[0x14A], obd_rsv=blk[0x14B])
 
 
 @requires_dump
