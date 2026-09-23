@@ -1218,8 +1218,8 @@ points here.
 | tables/curves/axes without a sidecar row | 878 of 1,068 | **850 of 1,068** |
 
 (F4 quoted 876 of 1,066; the recount with the current draft gives 878 / 1,068
-before this pass, so the comparison uses that.) **103 new rows**, and 26
-earlier rows corrected in place (the five 0x7FD3E5 rows, `cand_KFMIRLINV`,
+before this pass, so the comparison uses that.) **103 new rows**, and 29
+earlier rows corrected in place (the six 0x7FD3E5 rows, `cand_KFMIRLINV`,
 `KFPSSRM` → `KFATMKRH`, `PSREF`, `TMSRMMN`, six `KFPRSOL*`, two `KFZWOP`
 deltas and their counts, `KFZWMNUM` → `cand_KFZWMNKH`, eight gear-keyed
 rows). The generator on a work copy:
