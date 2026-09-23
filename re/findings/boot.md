@@ -380,6 +380,17 @@ nothing else — no `lis`/`addi` pair anywhere resolves into
 of `nvm_set_sync_mode`, `nvm_set_normal_mode` and `ddli_init` that they "have
 no caller": their only caller is this walk.
 
+> **SETTLED (2026-09-23, G3, §6.8).** The 1,028 words are two things laid end
+> to end, not one list: indices **0-282** are the start-up process list (282
+> init functions, then `os_dispatch_loop` 0x475DE0 at index 282, which never
+> hands back), and indices **283-1027** (0x0B1ED4-0x0B2A74) are the twelve task
+> process lists C4 already named `tbl_os_process_lists` (scheduler.md §11.2).
+> The "second consumer" 0x0B4E14 → 0x0B2678 is the runtime-measurement module
+> choosing **task 0's** process list (index **772**, not 771) as its default
+> target; the list is re-walked by the ERCOSEK dispatcher every time the
+> background task 0 loops. The 1,028-count, the NULL at 0x0B2A78 and every
+> per-entry row of §6.4 stand.
+
 ### 6.2 Who walks it
 
 0x47901C is the **ERCOSEK application descriptor**: `app_init`'s tail does
@@ -420,6 +431,17 @@ first task ever runs**. The only word in the whole image whose value is
 to; that last link is the one runtime pointer in the chain, so the walk itself
 is **VERIFIED-STATIC** and its identification with *this* table is
 VERIFIED-STATIC + one-pointer inference.
+
+> **Correction (2026-09-23, G3, §6.8(a)).** The one runtime pointer resolves
+> differently. `[r13-0x1A64]` is written once, at 0x477874, as *record + 8* of
+> the type-1 record the TLV walker 0x477818 finds at 0x478E20, so the OS object
+> is **K = 0x478E28** and `[K+0x64]` = `[0x478E8C]` = **0x478E04**: a
+> NULL-terminated list of **six kernel functions** (0x4772FC, 0x4767F4,
+> 0x4765D4, 0x476874, 0x477C5C, 0x477CD4; NULL at 0x478E1C). That is what the
+> eight instructions at 0x477A2C-0x477A64 walk. `tbl_module_init` is walked by
+> the *next* loop, 0x477A6C-0x477A90, through the process cursor 0x7FE5A0,
+> which 0x477970/0x477978 seeds from descriptor +0 (= 0x0B1A68). Each entry is
+> still called once, in order, with no arguments — but only up to index 282.
 
 ### 6.3 What the 1,028 entries actually do
 
@@ -620,6 +642,19 @@ brief.
 > that is still seeded by hand is a table in `logging/ecu_sim.py`'s module
 > docstring. §6.7 has what running them showed.
 
+**(d) For the simulator's owner — the flash-CRC period (2026-09-23, G3,
+§6.8; brief G5 applies it, `logging/` was not touched by G3).** Index 75 stays
+right (it is a start-up entry, below index 282), but `flash_crc_task` is **not**
+a start-up entry and **not** a 10 ms raster: it is five processes of the
+background task 0, so one background loop T_bg hashes **500 bytes** (five
+activations of 0x64). **N = T_bg / 5 per activation; the value 0x5562139F
+appears in loop 4,926 = 4,926 × T_bg after `os_init`** — VERIFIED-STATIC bounds
+**0.51 ms ≤ T_bg ≤ 300.75 ms**, i.e. **2.5 s ≤ t_publish ≤ 1,481 s**. T_bg
+itself is set by the CPU's idle time and is a bench value (§6.8(e)). The
+current `--flash-crc` default (one activation per 10 ms, 246 s) is T_bg = 50 ms,
+inside the bounds; a simulator should take T_bg as a parameter and move
+0x7FB700 by 500 per loop, not by 100 per 10 ms.
+
 ### 6.6 Reproduction
 
 ```bash
@@ -731,6 +766,18 @@ is **open** — F3's time box went to the NVM question — and it is what decide
 how long a real ECU takes to publish its flash checksum.
 VERIFIED-STATIC for the references, HYPOTHESIS for the periodic reading.
 
+> **SETTLED (2026-09-23, G3, §6.8).** The periodic reading is right, the
+> "five times during the init walk" is not: the start-up walk stops at index
+> 282, so `flash_crc_task` is **never** called at start-up. Slots 775-779 belong
+> to the process list of **task id 0** (0x0B2678-0x0B26AC, priority 0, the
+> set-A background task), which runs all 13 processes back to back and then
+> re-activates itself. **N = T_bg / 5**, where T_bg is one background loop —
+> it is not a raster. T_bg is bounded **0.51 ms ≤ T_bg ≤ 300.75 ms**
+> (deadline timer 1, fatal code 0x74), so the CRC publishes after
+> **4,926 loops = 4,926 × T_bg, between 2.5 s and 1,481 s (24.7 min)** after
+> `os_init`. The bench reads T_bg from the slope of the cursor 0x7FB700
+> (500 bytes per loop). The (d) index "771" is 772.
+
 Reproduce:
 
 ```bash
@@ -739,3 +786,210 @@ Reproduce:
 ./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x11CB10 --addr 0x11CB10 --len 0x214
 ./.venv/bin/python3 -m unittest tests.test_ecu_sim_initstate
 ```
+
+## 6.8 The second walker of 0x0B1A68, and the flash-CRC period (G3, 2026-09-23, #20)
+
+Brief G3 task 1. Everything below is **VERIFIED-STATIC** unless tagged; the
+reproduction block is (f). r13 = 0x7FFFF0, r2 = 0x5C9FF0.
+
+### (a) The two start-up walks in `os_start`, and where the first one really points
+
+`os_start` (0x477990) has **two** loops, not one:
+
+```
+00477A2C  lwz  r11,-0x1A64(r13)    ; K = the OS object
+00477A34  lwz  r11,0x64(r11)       ; [K+0x64]
+00477A38..00477A64                 ; call every word until NULL          <- loop 1
+00477A6C  lwz  r12,-0x1A50(r13)    ; p = process cursor 0x7FE5A0
+00477A70  addi r12,r12,4 ; stw r12,-0x1A50(r13)
+00477A78  addi r12,r12,-4 ; lwz r12,0(r12) ; mtlr ; blrl   ; call *p
+00477A88  lwz  r11,-0x1A50(r13) ; cmpwi r11,0 ; bne 0x477A6C              <- loop 2
+```
+
+* **K** is written exactly once in the on-chip kernel: `addi r12,r3,8; stw
+  r12,-0x1A64(r13)` at **0x477870-0x477874**, the type-1 arm of the TLV walker
+  0x477818 that `os_start`'s helper 0x477918 runs over descriptor +8
+  (= 0x478E20, record header `00000001 0000007C`). So **K = 0x478E28**
+  (consistent with scheduler.md §11.4's "config +0x68 becomes K+0x60"), and
+  `[K+0x64]` = `[0x478E8C]` = **0x478E04** = `{0x4772FC, 0x4767F4, 0x4765D4,
+  0x476874, 0x477C5C, 0x477CD4, 0}`. Loop 1 is the kernel's own init hooks.
+* **Loop 2** is the one that walks `tbl_module_init`: 0x477970/0x477978 (`lwz
+  r9,0(r30); stw r9,-0x1A50(r13)`, r30 = the descriptor 0x47901C) seed the
+  cursor 0x7FE5A0 with descriptor +0 = **0x0B1A68**.
+
+### (b) The start-up walk ends at index 282, inside the dispatcher
+
+Index 282 (0x0B1ED0) is **0x475DE0**, `os_dispatch_loop`: it loads SIMASK2/3
+from `[K+0x4C]` (0x478E6C → interrupts on), then loops
+
+```
+00475E34  [0x7FE5A4] = [0x7FE5A8]
+00475E3C  r31 = [0x7FE59C]              ; next-process pointer
+00475E40  [0x7FE5A0] = r31              ; current-process slot
+00475E48  [0x7FE59C] = r31 + 4
+00475E50  call *[0x7FE5A0]
+00475E60  lwz r31,-0x1A3C(r13) ; cmplwi r31,0xFF ; ble 0x475E30
+```
+
+so it overwrites the start-up cursor with whatever the scheduler picks and
+returns only when 0x7FE5B4 exceeds 0xFF. The only store that does that is
+`ori r12,r12,0xFF00` at **0x478560-0x478564**, in the shutdown/restart branch
+of the idle process 0x4784D4 (0x7FE59C is seeded with the idle list
+0x803A1C = `{0x4784D4, 0}` at 0x477778-0x4777F4). **Indices 283-1027 are never
+reached by the start-up walk.** They are exactly the twelve task process lists
+(`tbl_os_process_lists`, 0x0B1ED4-0x0B2A74, each `{0x0B5878, procs…, 0x0B5978,
+os_TerminateTask}` or, for set B's lists, without the two wrappers), which this
+sweep re-derives from the 37 descriptors:
+
+| idx | list | task | prio | period |
+|---|---|---|---|---|
+| 283-286 | 0x0B1ED4 | 20 | 9 | event |
+| 287-341 | 0x0B1EE4 | 25 | 4 | 50 ms |
+| 342-556 | 0x0B1FC0 | 18 | 3 | 100 ms |
+| 557-668 | 0x0B231C | 22 | 2 | 200 ms |
+| 669-771 | 0x0B24DC | 17 | 1 | 1000 ms |
+| **772-785** | **0x0B2678** | **0** | **0** | **background (re-activates itself)** |
+| 786-909 | 0x0B26B0 | 8 | 1 | event |
+| 910-1027 | 0x0B28A0 … 0x0B2A40 | 37, 31, 34, 30, 29 | | set B |
+
+### (c) Task 0 is the set-A background loop, and `flash_crc_task` is five of its processes
+
+Task 0 (handle 0x478870, `[0x478888]` = 0x478870) has priority 0, the lowest,
+and the list
+
+```
+0x0B2678  0x0B5878  rtm_list_enter  (runtime-measurement prologue, (d))
+0x0B267C  0x11D9F0
+0x0B2680  0x11CD5C
+0x0B2684  0x11CD24 ┐
+0x0B2688  0x11CD28 │
+0x0B268C  0x11CD2C │ five `b 0x11CB10` thunks = flash_crc_task, 0x64 bytes each
+0x0B2690  0x11CD30 │
+0x0B2694  0x11CD34 ┘
+0x0B2698  0x11D654
+0x0B269C  0x11CE20
+0x0B26A0  0x11E63C
+0x0B26A4  0x11DA64  bg_task_tail
+0x0B26A8  0x0B5978  rtm_list_exit
+0x0B26AC  0x4764FC  os_TerminateTask
+```
+
+* **Activated once**, by `os_init` at 0x11B0EC-0x11B0F4 (`lwz r3,[0x478888];
+  bl os_ActivateTask`), straight after `os_set_deadline_timer(1, 0x100FD7)` at
+  0x11B0E8. `tools/find_abs_refs.py --range 0x478868 0x47888C` finds no other
+  loader of the handle than the thunk 0x0B09E8, which nothing calls.
+* **Re-activates itself.** `bg_task_tail` 0x11DA64 increments the loop counter
+  **0x7FD70C** (`-0x28E4(r13)`), re-arms `os_set_deadline_timer(1, 0x100FD7 =
+  1,052,631 ticks = 300.75 ms)` at 0x11DA8C, and — while the set-B request byte
+  0x7FEB5E is 0 — ends in `bl 0x11CD38; bl 0x477B48` (0x11DB30-0x11DB34).
+  0x477B48 looks up the *current* task (`[K+0x68] + [0x7FE5A4]*0xC`) and sets
+  the byte after its activation counter to 1 (`stb r11,1(r12)` at 0x477B94):
+  `os_reactivate_self` (name and exact OSEK semantics HYPOTHESIS). The set-B
+  twin, task 29, ends the same way (`b 0x477B48` at 0x124854, deadline 1 at
+  0x124844).
+* **Why it must loop — the ceiling.** Deadline timer 1 is armed at exactly
+  three sites (0x11B0E8 `os_init`, 0x11DA8C task 0, 0x124844 task 29 — every
+  `bl 0x477204` in the image, scanned) and checked at exactly one, 0x40BDE8 in
+  `os_deadline_supervisor`, which the set-A 10 ms task reaches every 10 ms
+  (0x432BC0 `bl 0x4328B4` → `b 0x40BDC0` at 0x4328E0). On expiry it bumps
+  0x7F849C and calls the fatal handler `0xBA444(0x74)`. So in set A a
+  background loop that does not come round within **300.75 ms** (plus at most
+  one 10 ms check interval) ends in fatal code 0x74: **T_bg ≤ 300.75 ms** on
+  any ECU that keeps running. This argument does not depend on what 0x477B48
+  does — a task 0 that ran once would trip it 300 ms after `os_init`.
+* **The floor.** Running the eleven non-wrapper processes back to back in the
+  emulator (method in (f)) takes **28,560 instructions per loop** in steady
+  state (0x11D654 18,044; 0x11E63C 2,624; each CRC thunk 1,533) and moves the
+  CRC cursor 0x7FB700 by **0x1F4 = 500 bytes per loop** (0x20190 → 0x20384 →
+  0x20578 …), VERIFIED-DYNAMIC (emulated). At most one instruction per 56 MHz
+  clock (the RCPU dispatches one per cycle — HYPOTHESIS about the core, not
+  measured) makes that **T_bg ≥ 0.51 ms**, before any preemption by the
+  1/2/5/10/20 ms rasters.
+
+**Result.** `flash_crc_task` runs **5 × per background loop**, so
+**N = T_bg / 5** and the publish of 0x5562139F happens in loop
+⌈24,627 / 5⌉ = **4,926**:
+
+| | T_bg | N | t_publish = 4,926 × T_bg |
+|---|---|---|---|
+| floor (no preemption, 1 IPC) | 0.51 ms | 0.10 ms | **2.5 s** |
+| `ecu_sim --flash-crc` today | 50 ms | 10 ms | 246 s |
+| ceiling (deadline timer 1) | 300.75 ms | 60.2 ms | **1,481 s = 24.7 min** |
+
+So **the stock task always reaches state 2 within 24.7 min of `os_init`** on a
+set-A ECU that does not reset, i.e. within a normal drive. A realistic idle
+fraction puts it much nearer the floor (seconds to a minute), but that is a
+HYPOTHESIS until the bench reads T_bg. On set B (never live, scheduler.md
+§11.8) the CRC would not run at all: task 29's list has no CRC thunk.
+
+### (d) What 0x0B4E24 and 0x0B5878 are: a runtime-measurement module, not a walker
+
+The code F3 found is an ETAS-style runtime measurement of one process list,
+built on the debug comparators (SPR 144 CMPA, 158 ICTRL, 149 DER; exception
+entry 0x0B5610 through the `b` at 0x0B4458, ends in `rfi`):
+
+| Address | Name (HYPOTHESIS) | Where it runs | What it does |
+|---|---|---|---|
+| 0x0B5140 | `rtm_init` | start-up index 0 | defaults: 0x7FC9F7 = 6, the min/max cells = 0xFFFFFFFF |
+| 0x0B4DD0 | `rtm_ctrl_update` | called by 0x0B5188 (0x0B5194) | on the rising edge of the cal enable byte 0x5C8BAA (= 1 in this dump; `lbz r12,-0x1446(r2)`) writes **0x7FC9D8 = 0x0B2678** (0x0B4E14-0x0B4E24), 0x7FC9F7 = cal 0x5C8BA8 (= 4), 0x7FC9FB = 2; other modes select `[0x5C8BB4]` or the CPU-burn loop 0x0B5864 instead |
+| 0x0B5188 | `rtm_task_100ms` | task 18 list slot 0x0B2310 (idx 554), **100 ms** | control / statistics step |
+| 0x0B5878 | `rtm_list_enter` | slot 0 of every set-A/common multi-process list | if the mode bit is on, compares the **current process slot** `[0x7FE5A0]` with 0x7FC9D8 (0x0B588C-0x0B5894) — equal exactly when the list being entered is task 0's — and arms the measurement |
+| 0x0B5978 | `rtm_list_exit` | second-last slot of the same lists | closes it |
+
+So 0x7FC9D8 (`rtm_target_list`) holds a **process-list address** chosen as the
+measurement target, and 0x7FE5A0 is the dispatcher's current-process slot
+((b)), not a time-table cell. Nothing walks the init array "from index 771":
+the ERCOSEK dispatcher walks task 0's list each loop and the measurement module
+watches it by default. Its results sit in 0x7FC9CC-0x7FCA58, in no measuring
+block (`tools/measuring_vars.py --all` lists none of them).
+
+### (e) The dynamic check that turns the bounds into one number
+
+Any one of these on the bench (all readable with DDLI `2C F0 03 …` in session
+0x89, kwp.md §4; `logging/sessions/flash_crc.json` already logs the first):
+
+1. **The CRC cursor 0x7FB700** (u32): T_bg = 500 bytes / (slope in bytes/s).
+2. **The background loop counter 0x7FD70C** (u32): T_bg = 1 / (slope in
+   counts/s). Independent of the CRC state machine, and keeps counting after
+   state 7.
+3. Or time-stamp the first read of 0x7F9178 ≠ 0 after power-on:
+   T_bg = t_publish / 4,926.
+
+T_bg is the CPU's idle time, so expect it to vary with engine speed; log it at
+key-on/engine-off and at idle.
+
+### (f) Reproduction
+
+Note: §6.6's `--file-off 0x277990` for `os_start` is a typo that disassembles
+erased flash; the on-chip file offset is CPU − 0x204000 (0x273990), as below.
+
+```bash
+# the kernel object K and the six-hook list that loop 1 walks
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x273818 --addr 0x477818 --len 0x100
+./.venv/bin/python3 -c "import struct;d=open('data/passat_azx_ori.bin','rb').read();f=lambda a:hex(struct.unpack('>I',d[a-0x204000:a-0x204000+4])[0]);print([f(a) for a in (0x478E20,0x478E8C)],[f(0x478E04+4*i) for i in range(7)])"
+# os_start's two loops, the dispatcher (start-up index 282) and the idle process
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x273918 --addr 0x477918 --len 0x178
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x271DE0 --addr 0x475DE0 --len 0xAC
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x2744D4 --addr 0x4784D4 --len 0x98
+# task 0: descriptor, list, the one activation and the self re-activation
+./.venv/bin/python3 tools/ercosek_tasks.py data/passat_azx_ori.bin --tasks
+./.venv/bin/python3 tools/find_abs_refs.py data/passat_azx_ori.bin --range 0x478868 0x47888C
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x11B0D8 --addr 0x11B0D8 --len 0x20
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x11DA64 --addr 0x11DA64 --len 0xE4
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x273B48 --addr 0x477B48 --len 0x6C
+./.venv/bin/python3 tools/sda_xref.py data/passat_azx_ori.bin --code 0x477B48 0x477204 0x47736C
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x207DC0 --addr 0x40BDC0 --len 0xC8
+# the runtime-measurement module
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x0B4DD0 --addr 0x0B4DD0 --len 0x130
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x0B5878 --addr 0x0B5878 --len 0x50
+./.venv/bin/python3 tools/find_branch_refs.py data/passat_azx_ori.bin 0x0B5188 0x0B5140 0x0B5610
+```
+
+The per-loop instruction count and the 500-byte cursor step (method stated in
+full rather than kept as a tool): build `logging/ecu_sim.py`'s
+`Med9Handlers(animate=False)` (which runs the ten start-up entries), read the
+13 words at 0x0B2678, `emu.call(p, reset=False)` each one except
+0x0B5878/0x0B5978, repeat five times, and print `Result.insns` and the u32 at
+0x7FB700 after each loop. `bg_task_tail` 0x11DA64 stops in the emulator after
+153 instructions (at an OS call the harness does not model); it is counted as
+153, which changes the total by well under 1 %.
