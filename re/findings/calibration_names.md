@@ -831,3 +831,90 @@ export GHIDRA_INSTALL_DIR=/usr/local/Cellar/ghidra/12.1.3/libexec
 either descriptive (`axis_*`, `mix_*`, `rl_*`, `zwdelta_*`, `tol_*`, `krke_*`,
 `esstt_*`, `esnswl_*`, `N_*`, `CW_*`, `adap_*`) or an existing `cand_` label,
 so no new FR-module category was needed and no new Bosch label is claimed.
+
+---
+
+## 11. Pass 4 (brief G4, 2026-09-23, issues #41 and #43)
+
+Brief `docs/agent_briefs/G4_calibration_naming_pass4.md`. Dump unchanged
+(`tools/checksum.py verify -q` -> `ALL OK (65 blocks)` before and after). The
+Ghidra work was done read-only in a private copy at `/tmp/ghidra_G4` (recipe
+in §11.9); the read-outs use `tools/cal_show.py`.
+
+### 11.1 0x7FD3E5 is the intake-air temperature, not a battery voltage (VERIFIED-STATIC; label COMMUNITY)
+
+§10.4 left it at "probably a battery voltage at 1/16 V per LSB" and named the
+three writers. All three sit in two functions, and both say the same thing:
+
+```
+FUN_000F8A44 (cyclic, 0x0F8A44-0x0F90C3)
+  0x8021CC = lookup_1d_u8(struct 0x5D727A -> curve 0x5D728F, 0x7FD427)   ; 0x0F8A64
+  ... plausibility / fault debouncing, substitute 0x5D7276 on a fault ...
+  0x8021D0 = FUN_004116A4(0x5D72B8, v, 0x8021D0)          ; u16 low-pass, 0x0F8FC4
+  0x0F8FCC  lbz   r8,0x21E0(r13)        ; high byte of 0x8021D0
+  0x0F8FD0  rlwinm r9,r8,5,0,26         ; v << 5
+  0x0F8FD4  stb   r8,-0x2C0B(r13)       ; 0x7FD3E5 = v            <- writer 1
+  0x0F8FD8  addi  r4,r9,0x2586          ; v*32 + 9606
+  0x0F8FDC  sth   r4,0x21E4(r13)        ; 0x8021D4
+FUN_0011A898 (init, 0x11A898-0x11AA23)
+  0x7FD3E5 = lookup_1d_u8(0x5D727A, 0x7FD427)             ; writer 2, 0x11A990
+  if (v > 0x5D7278 || 0x7F9DFA & 1) 0x7FD3E5 = 0x5D7276   ; writer 3, 0x11A998
+  0x8021D4 = 0x7FD3E5 * 32 + 0x2586
+```
+
+and `FUN_000BDC4C` fills the input: `0x7FD427 = ADC channel 6 >> 2`
+(`FUN_0046CEE0(6)`, store at 0x0BDD08). The unit follows from four
+independent facts, none of which is a guess about another:
+
+1. **The curve 0x5D728F is an NTC linearisation.** Over the ADC byte
+   8 … 230 (axis 0x5D727B) it falls monotonically from 251 to 0. Under the
+   proved `tmot` unit that is **140.25 °C … −48 °C**; as a voltage at 1/16 V it
+   would be a 15.7 V … 0 V *decreasing* function of the sensor voltage, which
+   no battery input is.
+2. **The measuring handler says so.** 0x8021CC (the unfiltered value) is VCDS
+   measuring id **85**, handler 0x039C20, and that handler is instruction for
+   instruction the `tmot` handler 0x039BA4 (`mulli 3; srwi 2; addi 0x34` →
+   formula 0x05 `A = 0x0A`, measuring_vars.md §7.1), i.e. **0.75 °C/LSB − 48**.
+   The battery voltage of the same groups is id 81 (0x80345E, formula 0x15).
+3. **The absolute-temperature companion is exact.** 0x8021D4 = v × 32 +
+   0x2586: at 3/128 K per LSB, 0x2586 = 9606 × 3/128 = **225.14 K = −48.0 °C**
+   and 32 counts = 0.75 K, i.e. the same temperature in kelvin. It is consumed
+   by the exhaust-temperature block of §11.2, where the cap 0x5D179E = 54321
+   reads **1000.0 °C** under the same unit.
+4. **The calibration around it is an intake-air calibration.** The substitute
+   value 0x5D7276 = 91 = **20.25 °C** (a coolant substitute would be hot), and
+   the axes over the cell read as air temperatures: 0x5D5FF1 = −24.75 … 80.25 °C,
+   0x5C7BA5 = −18 … 132 °C in 30 °C steps, 0x5D3612 = 30 … 80.25 °C.
+
+The label: id 85 sits in groups **004.4, 006.3 and 011.3** (with rpm, the
+battery voltage id 81 and `tmot` id 80), which is where every public VAG
+measuring-block list puts the **intake-air temperature**. That makes 0x7FD3E5
+`tans` (FR name) — the *unit* VERIFIED-STATIC, the *meaning* COMMUNITY, and one
+VCDS group-004 read on the bench confirms it.
+
+Consequences, all applied to `re/calibration_names.csv` in place with a dated
+correction in the evidence column:
+
+| row | was | now |
+|---|---|---|
+| 0x5D7942 | `axis_ubatt_5D7942`, 1/16 V | `axis_tans_5D7942`, −9.75, 0, 19.5, 79.5 °C |
+| 0x5D7947 | `axis_ubatt_5D7947`, 8.19 … 14.00 V | `axis_tans_5D7947`, 50.25 … 120 °C |
+| 0x5C7BAB `cand_KLZWSTT` | axis unscaled | x = `tans` −18 … 132 °C |
+| 0x5D361B `mix_801D01_map` | y = "battery voltage 6.5 … 10.7 V" | y = `tans` 30 … 80.25 °C, x = 0x7FD3F7 60/75/90 °C |
+| 0x5D5FFB `zwdelta_7FD338_map` | x raw counts | x = `tans` −24.75 … 80.25 °C |
+
+So `zwdelta_7FD338_map` is an **intake-air-temperature ignition correction**
+(−6.0 … +2.25 °CA over `tans` and speed) — the classic hot-air knock
+protection — and `cand_KLZWSTT` is the start angle's `tans` term.
+
+**0x7FD3F7, the other half of the `start.md` §8 row, is settled by the same
+read.** `FUN_000F90C8` (0x0F9F24, 0x0F9FC4) and `tmot_init` 0x11AA28
+(0x11ADD0) write it as the high byte of the low-pass state 0x802214 =
+`FUN_004116A4(0x0A0A, 0x8021F3, …)`, where 0x8021F3 is the modelled engine
+temperature of `start.md` §2 (itself `tmot` or the substitute 0x8021EB); at
+init it is `cand_mw_tmot` 0x8021EF directly. So **0x7FD3F7 is a filtered engine
+(coolant) temperature in the `tmot` unit**, VERIFIED-STATIC, which is what
+every row that already used it at 0.75 °C − 48 assumed.
+
+> **§10.4 bullet 2 — SETTLED (2026-09-23, G4, §11.1).** 0x7FD3E5 is the
+> intake-air temperature at 0.75 °C/LSB − 48, not a voltage.
