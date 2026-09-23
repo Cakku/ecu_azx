@@ -421,6 +421,23 @@ calibration criterion is readable in one group.
 **Still open (the road half of #34):** every cell of `ff_dzw_map` is 0 and only
 a car with real fuel can fill them in. `procedure_e1.md` §B3 is the recipe.
 
+> **2026-09-23 — brief G2 (doc debt of #34): the ethanol advance shares its
+> budget with a stock term.** VERIFIED-STATIC by F4 (`re/findings/calibration_names.md`
+> §10.5). Moved into `re/findings/ignition.md` §14, which has the evidence;
+> nothing here is new. `zwdelta_load` (RAM **0x7FD338**, s8, 0.75 °CA/LSB,
+> written by `FUN_00459334`) is added in `zwbas_per_bank` 0x41D10C at
+> 0x41D120. That is after `zwgru` (and so after `dzw_e`) and before the knock
+> retard and the ZWMIN/ZWOUT clamp. It is `zwdelta_7FD338_weight_map` 0x5D5F81
+> (0 below 47 % charge) × `zwdelta_7FD338_map` 0x5D5FFB (−6.0 … +2.25 °CA over
+> nmot and `tans`) + `zwdelta_7FD338_add_map` 0x5D6075 (−3.75 … +7.5 °CA over
+> `tmot_filt` and rl, **largest cold at load**).
+> The `KFZWOP − KFZW` headroom this section and `procedure_e1.md` §B4 read
+> against `ff_dzw_map` **does not include this term**. On a cold engine at
+> load, part of that headroom is already used before the ethanol offset is
+> added. Calibrate `ff_dzw_map` warm, read the headroom minus the live
+> 0x7FD338 (DDLI, `logging/sessions/tuning_checklist.json`), and keep
+> `dwkrz` / 0x7FD31B & 3 as the acceptance signals through the warm-up too.
+
 ### 3.5 Start and warm-up
 Ethanol needs roughly twice the cranking fuel around 10 C and barely ignites
 below ~10 C without heating. Scale the start quantity and the afterstart /
