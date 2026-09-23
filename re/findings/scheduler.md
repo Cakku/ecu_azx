@@ -1087,7 +1087,8 @@ of §11. VERIFIED-STATIC unless tagged.
   kernel object ptr" for 0x7FE5A0 (and `tools/ram_survey.py`'s
   `os_stack_ptr_chain_ext`) is superseded for that word; the OS object pointer
   is 0x7FE58C (K = 0x478E28).
-* **Runtime measurement is live in every set-A/common multi-process list.**
+* **Runtime measurement is live in the set-A lists** (ids 20, 25, 18, 22, 17, 0;
+  not task 8, not set B).
   0x0B5878 / 0x0B5978, the "wrappers" §11.8's reachability walk removed, are
   `rtm_list_enter` / `rtm_list_exit` of a debug-comparator runtime measurement
   whose control step 0x0B5188 runs in the **100 ms** task 18 (slot 0x0B2310).

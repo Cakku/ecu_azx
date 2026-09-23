@@ -838,7 +838,8 @@ of the idle process 0x4784D4 (0x7FE59C is seeded with the idle list
 0x803A1C = `{0x4784D4, 0}` at 0x477778-0x4777F4). **Indices 283-1027 are never
 reached by the start-up walk.** They are exactly the twelve task process lists
 (`tbl_os_process_lists`, 0x0B1ED4-0x0B2A74, each `{0x0B5878, procs…, 0x0B5978,
-os_TerminateTask}` or, for set B's lists, without the two wrappers), which this
+os_TerminateTask}` for ids 20, 25, 18, 22, 17 and 0; task 8 and the five set-B
+lists have no wrappers), which this
 sweep re-derives from the 37 descriptors:
 
 | idx | list | task | prio | period |
@@ -933,7 +934,7 @@ entry 0x0B5610 through the `b` at 0x0B4458, ends in `rfi`):
 | 0x0B5140 | `rtm_init` | start-up index 0 | defaults: 0x7FC9F7 = 6, the min/max cells = 0xFFFFFFFF |
 | 0x0B4DD0 | `rtm_ctrl_update` | called by 0x0B5188 (0x0B5194) | on the rising edge of the cal enable byte 0x5C8BAA (= 1 in this dump; `lbz r12,-0x1446(r2)`) writes **0x7FC9D8 = 0x0B2678** (0x0B4E14-0x0B4E24), 0x7FC9F7 = cal 0x5C8BA8 (= 4), 0x7FC9FB = 2; other modes select `[0x5C8BB4]` or the CPU-burn loop 0x0B5864 instead |
 | 0x0B5188 | `rtm_task_100ms` | task 18 list slot 0x0B2310 (idx 554), **100 ms** | control / statistics step |
-| 0x0B5878 | `rtm_list_enter` | slot 0 of every set-A/common multi-process list | if the mode bit is on, compares the **current process slot** `[0x7FE5A0]` with 0x7FC9D8 (0x0B588C-0x0B5894) — equal exactly when the list being entered is task 0's — and arms the measurement |
+| 0x0B5878 | `rtm_list_enter` | slot 0 of the lists of ids 20, 25, 18, 22, 17, 0 (not 8, not set B) | if the mode bit is on, compares the **current process slot** `[0x7FE5A0]` with 0x7FC9D8 (0x0B588C-0x0B5894) — equal exactly when the list being entered is task 0's — and arms the measurement |
 | 0x0B5978 | `rtm_list_exit` | second-last slot of the same lists | closes it |
 
 So 0x7FC9D8 (`rtm_target_list`) holds a **process-list address** chosen as the
