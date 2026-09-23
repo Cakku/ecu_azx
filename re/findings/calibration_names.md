@@ -1081,8 +1081,8 @@ the rpm.
 
 **For this engine**: the 3.2 FSI runs `bdemod` = HOM in normal driving
 (`fr_index.md` §0), so the live rail setpoint is **`KFPRSOLHOM` (+ `KFPRSOLOFF`)
-and `KFPRSOLKH` during catalyst heating after a cold start**. E5's hook and
-`docs/05` §3.5 name `KFPRSOLHOM`, which is unchanged; nothing that was built
+and `KFPRSOLKH` during catalyst heating after a cold start**. E5's rail hook (on `prsoll_raw`) and
+`docs/05` (the rail section) name only `KFPRSOLHOM` and `KFPRSOLOFF`, which are unchanged; nothing that was built
 depends on the four corrected labels. Two things outside this brief's files
 still carry the old labels and are listed for their owners: the draft's
 `name_or_blank` column (the sidecar wins, so the XDF is right) and the
