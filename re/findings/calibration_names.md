@@ -988,8 +988,8 @@ as temperatures:
 | 0x5D178C / 0x5D17A0 | unnamed | the block's code word (3) and the unused substitute of 0x8015D8 |
 
 Three exact round numbers (225.15 K, 1000.0 °C, 1100.0 K) under one unit are
-the confirmation, and the map itself is the fourth: under 3/128 K − 273.15 most
-of its 64 cells land within ±0.01 °C of a **whole degree Celsius** (315.01,
+the confirmation, and the map itself is the fourth: under 3/128 K − 273.15, 35
+of its 64 cells land within ±0.01 °C of a **whole degree Celsius** (a random table would give about one; 315.01,
 575.01, 623.01, 656.01, 601.00, 683.01, 722.01, 802.00, 839.01, 886.00 …) —
 the calibrator typed integer °C, which no other reading of the counts
 reproduces. **This is the exhaust-gas temperature model that F4's §10.2
@@ -1003,6 +1003,12 @@ none of these cells reaches `rk`.
 > **§10.6 bullet 3 — SETTLED (2026-09-23, G4, §11.2).** The value unit of
 > `cand_KFMIRLINV` is a relative charge at 100/4096 %/LSB; 0x8015AF is an
 > ignition efficiency at 1/200 (200 = 1.0).
+
+> **Refined later in this pass (§11.6):** the exhaust-gas temperature model
+> proper is `FUN_001043C8` (`%ATM`); the block above is a second user of its
+> manifold map, which is FR **`KFATMKRH`** (the row `temp_exh_nmot_rl_map` was
+> renamed). Its x input in `%ATM` is the fuel mass `rkg` 0x803034, so
+> `cand_KFMIRLINV` >> 1 plays the role of an `rkg` estimate here.
 
 Commands:
 

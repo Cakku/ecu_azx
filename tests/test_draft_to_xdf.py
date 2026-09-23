@@ -393,10 +393,14 @@ class TestCommittedSidecar(DumpUnchanged):
                         "y_offset"):
                 if row[key]:
                     self.assertIsInstance(x.parse_number(row[key]), float)
-            # a sidecar name must never silently contradict the draft
-            if draft[addr]["name_or_blank"]:
-                self.assertEqual(row["name"], draft[addr]["name_or_blank"],
-                                 "%s: sidecar and draft disagree on the name" % addr)
+            # a sidecar name must never *silently* contradict the draft: a
+            # rename is allowed only when the evidence says "RENAMED from
+            # <the draft's label>" (brief G4 relabelled draft-named maps; the
+            # integrator carries the new label into the draft at merge time)
+            old = draft[addr]["name_or_blank"]
+            if old and row["name"] != old:
+                self.assertIn("RENAMED from " + old, row["name_evidence"],
+                              "%s: sidecar and draft disagree on the name" % addr)
 
     @unittest.skipUnless(NAMES.is_file() and DRAFT.is_file(), "CSV missing")
     def test_the_committed_pair_builds_and_validates(self):
