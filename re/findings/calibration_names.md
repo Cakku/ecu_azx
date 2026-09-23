@@ -784,7 +784,8 @@ Two fixed points fall out of the grids:
   BDE engine; which value is which mode is **not** established, and VCDS
   measuring id 130 (groups 051.3 / 068.3, format 0x36) displays it directly,
   so one drive log would settle that too.
-* **`cand_KFMIRLINV` 0x5C9938's value unit — still open.** What was tried:
+* **SETTLED (2026-09-23, G4, §11.2): relative charge at 100/4096 %/LSB; 0x8015AF is an
+  ignition efficiency at 1/200.** **`cand_KFMIRLINV` 0x5C9938's value unit — still open.** What was tried:
   `FUN_000E069C` evaluates it at 0x8034FA and at `0x8034FA × 200 / 0x8015AF`
   and writes 0x8015D0, whose only readers are three sites inside
   `FUN_000E06F8` (0x0E0720, 0x0E07E0, 0x0E0838) where it is a *breakpoint
@@ -920,3 +921,87 @@ every row that already used it at 0.75 °C − 48 assumed.
 
 > **§10.4 bullet 2 — SETTLED (2026-09-23, G4, §11.1).** 0x7FD3E5 is the
 > intake-air temperature at 0.75 °C/LSB − 48, not a voltage.
+
+### 11.2 `cand_KFMIRLINV` outputs a relative charge, and 0x8015AF is an ignition efficiency (VERIFIED-STATIC)
+
+§10.6 left the value unit of 0x5C9938 open with one lead, the divisor
+0x8015AF. Decompiling its two writers settled the divisor, and following the
+map's output one step further than F4 did settled the map.
+
+**0x8015AF.** `FUN_000E0A0C` (store 0x0E0D5C) and `FUN_00104110` (store
+0x104224) both compute
+
+```
+0x8015B0 = min(0x802661 + etazw_offset_nmot_curve(nmot_w), 255)     ; 0x0E0C40
+0x8015AF = (0x7FD305 & 0x40) ? min(0x8015B0 * 0x80265C / 200, 255) : 0x8015B0
+```
+
+and `FUN_00436B24` makes every u8 of that family from a u16 as
+`u8 = u16 * 25 >> 12` (0x436B24-0x436B8C), which maps 32768 to exactly 200.
+The u16s are Q15 factors: 0x802632 = `FUN_0043619C(zwopt, zwmin)` (0x436890),
+the same efficiency function B7 found behind `etazwb` (`ignition.md` §9), used
+as a `mul_shr15_sat` operand at the end of `FUN_00436838`; 0x802620 is
+`(0x10000 − curve(nmot) × 0x801D8A) >> 1`, 1.0 when the curve is zero. So
+**0x8015AF is an ignition efficiency at 1/200 per LSB, 200 = 1.0**, and the
+"reference value 200" of §10.6 is simply 1.0 in that unit. The second
+evaluation of the map, at `0x8034FA × 200 / 0x8015AF`, is at **the charge
+divided by the ignition efficiency** — the charge the engine would need to make
+the same work at the efficiency of the latest permitted angle — which is the
+textbook input of an exhaust-temperature model (a retarded angle heats the
+exhaust).
+
+**The map's output.** Nothing in `FUN_000E06F8` fixes it (§10.6 was right
+about that), but `FUN_000E0A0C` does, twice:
+
+```
+0x0E0D90  0x8015D2 = cand_KFMIRLINV(nmot_w, 0x8034FA * 200 / 0x8015AE)
+0x0E0E64  0x8015CC = mul_div_sat(0x8015B4, 0x1BC, 0x8015C0)
+0x0E0E98  compare 0x8015CC < 0x8015D2          ; a compare needs one unit
+0x0E0EC8  0x8015C6 = lookup_2d_u16(cand_KFMIOP 0x5CA218, nmot_w, 0x8015CC)
+```
+
+and `cand_KFMIOP`'s x axis is `rl_w` at **100/4096 %/LSB** (E3, 10.4 … 104.2 %).
+Independently, `FUN_000E06F8` forms `0x8015BA = 0x8015D0 × 0x8015C0 / 0x1BC`
+and the caller undoes exactly that factor (`× 0x1BC / 0x8015C0`) before the
+KFMIOP lookup, so the round trip cannot change the unit. **`cand_KFMIRLINV`'s
+values are a relative charge at 100/4096 %/LSB: 0 … 5103 = 0 … 124.6 %**, about
+1.2 × its input at every speed (e.g. 2000 rpm: 10 % → 12.4 %, 50 % → 57.9 %,
+100 % → 123.4 %). The label stays `cand_` and `hypothesis`; the unit is
+`static`.
+
+**What the block is.** With the unit known, the rest of `FUN_000E06F8` reads
+as temperatures:
+
+| object | before | now (unit VERIFIED-STATIC) |
+|---|---|---|
+| 0x5D1CBA | `cand_KFPSSRM`, manifold pressure, unit unknown | `temp_exh_nmot_rl_map`: `0x8015D6 = map(nmot_w, 0x8015D0 >> 1) − tans_kelvin` — a **subtraction of 0x8021D4 (K at 3/128)**, so the map is 3/128 K: **315 … 886 °C** over 650 … 6000 rpm and 15.6 … 104.2 % charge (x at 100/2048 %) |
+| 0x5D179E | unnamed | `temp_exh_max_5D179E` = 54321 = **1000.0 °C**, the cap of the block |
+| 0x5D17A2 | `cand_PSREF`, unit unknown | `dtemp_ref_5D17A2`, subtracted *from* by `ΔT >> 1`, so 3/64 K: **1100.0 K** |
+| 0x5D179A / 0x5D1790 | unnamed | `etazw_offset_nmot_curve` (+0.02 … 0 over 1500 … 2700 rpm) and its count |
+| 0x5D178D | unnamed | `etazw_offset_8015AE` = +0.05 |
+| 0x5D178C / 0x5D17A0 | unnamed | the block's code word (3) and the unused substitute of 0x8015D8 |
+
+Three exact round numbers (225.15 K, 1000.0 °C, 1100.0 K) under one unit are
+the confirmation. **This is the exhaust-gas temperature model that F4's §10.2
+time-boxed as lead (b)** — not `FUN_00108950`, which is a different soak
+model — and its output turns back into a charge 0x8015CC and a torque
+0x8015C6 through `cand_KFMIOP`, which is the shape of a *component-protection
+charge limit*. The meaning ("exhaust", "component protection") is HYPOTHESIS;
+every unit in the table is VERIFIED-STATIC. §10.2's conclusion is untouched:
+none of these cells reaches `rk`.
+
+> **§10.6 bullet 3 — SETTLED (2026-09-23, G4, §11.2).** The value unit of
+> `cand_KFMIRLINV` is a relative charge at 100/4096 %/LSB; 0x8015AF is an
+> ignition efficiency at 1/200 (200 = 1.0).
+
+Commands:
+
+```bash
+./.venv/bin/python3 tools/sda_xref.py data/passat_azx_ori.bin --var 0x8015AE 0x8015B0
+./.venv/bin/python ghidra_scripts/decompile.py --project-dir /tmp/ghidra_G4 --project-name med9 \
+    0x0E0D5C 0x104224 0x0E069C 0x0E06F8 0x0E0900 0x436B38 0x4362C8 0x436890 \
+    --asm 0x0E0D84 --count 70
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin 0x5C9938 --scale 100/4096
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin 0x5D1CBA --scale 3/128 --offset -273.15 --x-scale 100/2048
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin --raw 0x5D179A 6 u16
+```
