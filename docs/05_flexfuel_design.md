@@ -991,12 +991,13 @@ Three things follow:
   having put the block, the offset and the rate limit in FFCAL001 in the first
   place.
 
-#### Hazard, added 2026-09-23 (brief G2, issue #38) — block 8 is also the adaptation-channel block, and payload +2 appears to be channel 1
+#### Hazard, added 2026-09-23 (brief G2, issue #38) — block 8 is also the adaptation-channel block, and payload +2 is channel 1
 
 The fuel side of this hazard is in §3.3, note of 2026-09-23. Here is the
-persistence side. The inputs are VERIFIED-STATIC facts that are already on
-record. Putting them together is G2's reading and is **not yet proved in the
-emulator**, so the conclusion is tagged **HYPOTHESIS (conflict to resolve)**.
+persistence side. **The layout is VERIFIED-STATIC**: it rests on F4's
+`re/symbols.csv` row for 0x12E3F8 and on the descriptor bytes below, and the
+integrator confirmed the reading on 2026-09-23. **The consequences, (a) and
+(b) below, are HYPOTHESIS**: neither has been run in the emulator.
 
 * F4 (`re/symbols.csv` `adaptation_restore_all` 0x12E3F8; `calibration_names.md`
   §10.1): at every power-up the loop runs
@@ -1013,8 +1014,9 @@ emulator**, so the conclusion is tagged **HYPOTHESIS (conflict to resolve)**.
 * D2/E4: `ff_persist_offset` = **2**, so the patch stages and commits the
   ethanol percent to block 8 **+2**.
 
-If that reading holds, E4's "free payload offsets +2..+13" is wrong and the
-ethanol store **shares its byte with adaptation channel 1**. Channel 1 is
+So E4's "free payload offsets +2..+13" is wrong: +2 … +18 are the 17
+channel slots, and the ethanol store **shares its byte with adaptation
+channel 1** (VERIFIED-STATIC, layout). Channel 1 is
 0x7FD06B, limits 0/0, signed, read at 0x46B0BC, with no known meaning. Two
 consequences to check before a bench flash of `ff_persist_enable` = 1:
 (a) at power-up the stock restore copies the stored E % into 0x7FD06B, a
@@ -1028,7 +1030,8 @@ the lean direction on an E85 tank. The same pattern as E4's 8 % bug.
 `adaptation_restore_all` against the QSPI device model of `eeprom.md` §10.5,
 and then a choice of an offset outside +2 … +18 (block 8 has +19 … +28 left
 before the manager's +29), or channel-free space in block 24 (Fallback A).
-Filed for the integrator in `docs/agent_briefs/README.md` wave-G notes.
+Filed for the integrator in `docs/agent_briefs/README.md` wave-G notes. The
+integrator decides where `ff_persist_offset` moves, in a follow-up brief.
 
 ## 4. New calibration data
 
