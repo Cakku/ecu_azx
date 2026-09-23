@@ -731,7 +731,9 @@ Two fixed points fall out of the grids:
 * **0x8022A2 is a Q15 signed fraction.** `axis_q15_8022A2_5D79CA` 0x5D79CA is
   −32768, −24576, −16384, −3277, 3277, 16384, 24576, 32767 = **−1.0, −0.75,
   −0.5, −0.1, +0.1, +0.5, +0.75, +1.0** at 1/32768 exactly.
-* **0x7FD3E5 is *probably* a battery voltage at 1/16 V per LSB, and this is
+* **SETTLED (2026-09-23, G4, §11.1): 0x7FD3E5 is the intake-air temperature
+  at 0.75 °C − 48, not a voltage; the text below is F4's reasoning, kept for
+  history.** **0x7FD3E5 is *probably* a battery voltage at 1/16 V per LSB, and this is
   NOT settled.** For it: the axis 0x5C7BA5 that `start.md` §5 recorded without
   a unit is 40, 80, 120, 160, 200, 240, i.e. **2.5, 5.0, 7.5, 10.0, 12.5,
   15.0 V** exactly, and `axis_ubatt_5D7947` 0x5D7947 reads 8.19…14.00 V.
