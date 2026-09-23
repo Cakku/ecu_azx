@@ -500,6 +500,6 @@ function while naming its calibration (`calibration_names.md` §11.5):
 For flex fuel this matters in one way: the purge fuel is modelled as
 *gasoline*. With E85 in the tank the canister vapour is ethanol-rich, so the
 subtraction is slightly wrong in the rich direction during purge; the lambda
-controller absorbs it (it is at most a few percent in normal running).
+controller has to absorb the error while purge is active (HYPOTHESIS: how large it gets on E85 is a bench question — log id 171 against the lambda controller output).
 **VERIFIED-STATIC** for the dataflow and the clamp; the `%TEB` labels are
 `static` where the FR's inputs and mode split match (see the sidecar rows).
