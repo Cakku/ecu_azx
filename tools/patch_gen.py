@@ -23,7 +23,10 @@ A `data` entry is a flat byte range that is not code: a new calibration block
 (`file`, built by the patch's own generator), a small table edit (`bytes`), or
 a list of pointers into our own blob (`u32_syms`, resolved from the linker's
 `.sym` exactly as a hook target is, so a table of handler pointers cannot go
-stale when the code moves).  Its `old` is read from the stock image;
+stale when the code moves).  A `u32_syms` name may also resolve into the
+patch's own RAM block: that is a *data* pointer, e.g. a stock list entry that
+points at a record the patch writes (`patches/ff_fuel`'s OBD PID 0x52 entry,
+brief G1 2026-09-23); a code pointer must be in the blob and 4-byte aligned.  Its `old` is read from the stock image;
 `expect_blank` additionally asserts that the stock bytes are all 0xFF, and an
 explicit `old` is compared against what is really there.  Unlock flags
 (`calibration_edit`, `onchip_edit`) are copied through to the change so
@@ -260,12 +263,17 @@ def generate(patch_dir: Path, stock_path: Path = DEFAULT_STOCK) -> tuple[dict, l
                 if name not in syms:
                     raise PatchError(f"data #{i}: {sym_path} has no symbol {name!r}")
                 value = syms[name]
-                if not flash <= value < flash + len(blob):
+                if flash <= value < flash + len(blob):
+                    if value % 4:
+                        raise PatchError(f"data #{i}: {name} ({value:#x}) is not "
+                                         f"4-byte aligned; the CPU branches to it")
+                elif not ram <= value < ram + ram_size:
+                    # A pointer into the patch's own RAM block is a DATA
+                    # pointer (a stock table that points at a record the patch
+                    # owns, brief G1 2026-09-23); nothing else is ours to point at.
                     raise PatchError(f"data #{i}: {name} resolves to {value:#x}, "
-                                     f"which is outside the blob")
-                if value % 4:
-                    raise PatchError(f"data #{i}: {name} ({value:#x}) is not "
-                                     f"4-byte aligned; the CPU branches to it")
+                                     f"which is outside the blob and outside the "
+                                     f"patch RAM block {ram:#x}+{ram_size:#x}")
                 resolved[name] = f"{value:#08x}"
                 words += value.to_bytes(4, "big")
             new = bytes(words)

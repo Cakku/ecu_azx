@@ -9,6 +9,16 @@
 # Nothing here writes to an ECU.  See README.md and docs/06_patch_pipeline.md.
 
 NAME := ff_fuel
+# G1 (#39): the relocated OBD B2 list in flash carries the address of PID
+# 0x52's RAM record as a plain u32 (patch.json build.data, "u32_syms"), so the
+# linker has to know it by name.  It is a field of struct ff_state, not an
+# object of its own, hence the expression; src/ff_obd.c _Static_asserts that
+# FF_OFF_OBD52 (0x4C) is the field's offset, and tests/test_ff_obd_patch.py
+# checks the exported value against ff_state + FF_OFF_OBD52.  It has to be set
+# BEFORE the include: patch.mk expands EXTRA_LDFLAGS into a simply-expanded
+# LDFLAGS at include time.
+EXTRA_LDFLAGS += --defsym=ff_obd_pid52_rec=ff_state+0x4C
+
 include ../common/patch.mk
 
 # FFCAL001 is data, not code: it is built by the patch's own generator and
@@ -23,3 +33,4 @@ $(CAL_BIN): $(CAL_GEN) $(CAL_JSON) | $(BUILD)
 
 all: $(CAL_BIN)
 gen: $(CAL_BIN)
+

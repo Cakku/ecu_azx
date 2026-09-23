@@ -18,7 +18,7 @@
  *   off  size  field            owner     meaning
  *   ---- ----  ---------------  --------  ------------------------------------
  *   +00   4    magic            tick      0x46463031 "FF01" when valid
- *   +04   2    length           tick      0x0040, the size of this struct
+ *   +04   2    length           tick      0x0050 (G1), the size of this struct
  *   +06   2    csum             tick      ~sum16 of the CORE bytes (+08..+2B)
  *   --- core: written only by the periodic tick, covered by csum -------------
  *   +08   2    e_filt           tick      filtered ethanol, 1/16 %, 0..1600
@@ -57,7 +57,7 @@
  *   +3A   2    persist_wait     D2        activations left of the commit rate limit
  *   +3C   2    persist_writes   D2        commits that finished OK (saturating)
  *   +3E   2    persist_fails    D2        commits that failed (saturating)
- *   --- core 2: appended by E2, grown by E5, checksummed like the first core -
+ *   --- core 2: appended by E2, grown by E5 and G1, checksummed like core 1 --
  *   +40   2    fst_q10          tick      E2: f_st(E, tmst), 1/1024, 1024..2560
  *   +42   1    zwst_add         tick      E2: start-ignition advance, s8, 0.75 degCA
  *   +43   1    msv_sat_ticks    tick      E5: MSV-saturated activations this window
@@ -65,7 +65,13 @@
  *   +46   2    win_margin_min   tick      E5: s16 worst injection-window margin
  *   +48   2    prist_min        tick      E5: worst prist this window, 0.005 bar
  *   +4A   2    diag_ticks       tick      E5: activations left of the window
- *   --- 0x4C -----------------------------------------------------------------
+ *   +4C   1    obd52_a          tick      G1: OBD PID 0x52 record byte A,
+ *                                         round(e_filt * 255 / 1600)
+ *   +4D   1    obd52_valid      tick      G1: the record's `valid` byte, 1 =
+ *                                         ff_pid52_enable && cal_ok
+ *   +4E   2    obd_rsv          tick      G1: reserved 0, keeps the length a
+ *                                         multiple of four
+ *   --- 0x50 -----------------------------------------------------------------
  *
  * D2 (issue #38/#39, 2026-09-16) took the three reserved words at +3A..+3F for
  * the rate-limit counter and two saturating counters.  No offset D1 defined
@@ -127,6 +133,21 @@
  * (re/findings/rail.md section 12.1) -- three mechanisms, none of which the
  * patch can switch off.
  *
+ * G1 (issue #39, 2026-09-23) GREW core 2 once more, by four bytes: the stock
+ * OBD mode-01 code reads a PID's value through a `{value, valid}` RAM record
+ * that a list in flash points at (re/findings/obd.md sections 3-4), and PID
+ * 0x52's record is `obd52_a` / `obd52_valid` at +0x4C / +0x4D.  They are
+ * written only by the periodic tick (`ff_obd_update()` from ff_finish()), so
+ * they belong in the checksummed core by the same rule as E5's fields, and a
+ * corrupted `valid` byte re-initialises the block -- which zeroes it, i.e. the
+ * safe "PID 0x52 not supported" answer.  +0x4E is a reserved halfword so that
+ * FF_LENGTH stays a multiple of four; FF_CORE2_LEN goes 0x0C -> 0x10 and the
+ * length 0x4C -> 0x50, so a block written by an E5 blob is rejected by the
+ * length check and re-initialised on the first activation, as before.  The
+ * record's address is exported to the linker as `ff_obd_pid52_rec`
+ * (patches/ff_fuel/Makefile) because the relocated B2 list in flash has to
+ * carry it as a plain u32.
+ *
  * The EEP_CONF request record is NOT part of this block.  The block manager
  * keeps a pointer to it for milliseconds after the call returns
  * (re/findings/eeprom.md section 8.2), so it has to be stable storage, but it
@@ -175,7 +196,7 @@
 
 /* ------------------------------------------------------------ RAM state --- */
 #define FF_MAGIC   0x46463031u        /* "FF01" */
-#define FF_LENGTH  0x004Cu            /* E2 grew it 0x40 -> 0x44, E5 -> 0x4C */
+#define FF_LENGTH  0x0050u            /* E2 0x40 -> 0x44, E5 -> 0x4C, G1 -> 0x50 */
 
 /*
  * Byte offsets inside `struct ff_state` that src/hooks.S addresses directly.
@@ -187,6 +208,9 @@
 #define FF_OFF_FST_Q10  0x40          /* E2, read by the two S1 stubs */
 #define FF_OFF_ZWST_ADD 0x42          /* E2, read by the Z1 stub      */
 #define FF_OFF_PRAIL_ADD 0x44         /* E5, read by the R1 stub      */
+#define FF_OFF_OBD52     0x4C         /* G1, the PID 0x52 record {A, valid};
+                                         patches/ff_fuel/Makefile exports
+                                         ff_state + this as ff_obd_pid52_rec */
 
 #define FF_MODE_INIT      0u
 #define FF_MODE_OK        1u
@@ -302,12 +326,15 @@ struct ff_state {
     volatile s16 win_margin_min;      /* +46  E5 */
     volatile u16 prist_min;           /* +48  E5 */
     volatile u16 diag_ticks;          /* +4A  E5 */
+    volatile u8  obd52_a;             /* +4C  G1, PID 0x52 record: A      */
+    volatile u8  obd52_valid;         /* +4D  G1, PID 0x52 record: valid  */
+    volatile u16 obd_rsv;             /* +4E  G1, reserved 0              */
 };
 
 #define FF_CORE_OFF   0x08u           /* first checksummed byte */
 #define FF_CORE_LEN   0x24u           /* +08 .. +2B inclusive   */
 #define FF_CORE2_OFF  0x40u           /* E2: the second checksummed range */
-#define FF_CORE2_LEN  0x0Cu           /* +40 .. +4B inclusive (E5 grew it) */
+#define FF_CORE2_LEN  0x10u           /* +40 .. +4F inclusive (E5, G1 grew it) */
 
 extern struct ff_state ff_state;
 
@@ -385,8 +412,8 @@ void ff_diag_publish(void);
 
 /* ------------------------------------------------------ FFCAL001 layout --- */
 #define FF_CAL_BASE        0x005E2510u
-#define FF_CAL_VERSION     4u         /* E5 appended the rail adder         */
-#define FF_CAL_LENGTH      0x014Cu    /* what ffcal001.py emits today       */
+#define FF_CAL_VERSION     5u         /* G1 appended the OBD PID 0x52 gate  */
+#define FF_CAL_LENGTH      0x014Eu    /* what ffcal001.py emits today       */
 
 #define FF_CAL_MAGIC0      (FF_CAL_BASE + 0x00u)   /* "FFCA" */
 #define FF_CAL_MAGIC1      (FF_CAL_BASE + 0x04u)   /* "L001" */
@@ -432,7 +459,10 @@ void ff_diag_publish(void);
 #define FF_CAL_O_PRAIL_MAX    0x124u  /* u16, prail_add ceiling, 0.005 bar   */
 #define FF_CAL_O_DIAG_WIN_MS  0x126u  /* u16, ms of the diagnostic window    */
 #define FF_CAL_O_PRAIL_CURVE  0x128u  /* 17 x u16, 0.005 bar, on the E grid  */
-#define FF_CAL_O_CRC         0x14Au   /* u16 at length-2 */
+/* --- appended by G1 (issue #39); v4 ended at 0x14C with the checksum ----- */
+#define FF_CAL_O_PID52_ENABLE 0x14Au  /* u8, 0 = PID 0x52 is never advertised */
+#define FF_CAL_O_OBD_RSV      0x14Bu  /* u8, 0; keeps the checksum 2-aligned  */
+#define FF_CAL_O_CRC         0x14Cu   /* u16 at length-2 */
 
 #define FF_CURVE_N     17u
 #define FF_CURVE_STEP  100u           /* 6.25 % in 1/16 % units */
@@ -549,6 +579,20 @@ void ff_start_update(void);
 
 /* src/ff_rail.c; called from ff_finish() at the end of every activation. */
 void ff_rail_update(void);
+
+/* ----------------------------------- G1: OBD mode 01 PID 0x52 (#39) ---- */
+/*
+ * PID 0x52 is "ethanol fuel %", one byte, A * 100 / 255 (SAE J1979).  The
+ * stock mode-01 code answers it from the record {obd52_a, obd52_valid} once
+ * the grown B2 list (patch.json, re/findings/obd.md section 9) points there;
+ * `valid` = 0 makes both the answer and the support bit disappear, which is
+ * how the feature is gated at run time.
+ */
+#define FF_OBD_PID52       0x52u
+#define FF_OBD_A_FULL      255u        /* A at 100 % ethanol                  */
+
+/* src/ff_obd.c; called from ff_finish() at the end of every activation. */
+void ff_obd_update(void);
 
 /* ---------------------------------- E5: the measuring block 109 (#36) ---- */
 /*
