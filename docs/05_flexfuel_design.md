@@ -991,6 +991,45 @@ Three things follow:
   having put the block, the offset and the rate limit in FFCAL001 in the first
   place.
 
+#### Hazard, added 2026-09-23 (brief G2, issue #38) — block 8 is also the adaptation-channel block, and payload +2 appears to be channel 1
+
+The fuel side of this hazard is in §3.3, note of 2026-09-23. Here is the
+persistence side. The inputs are VERIFIED-STATIC facts that are already on
+record. Putting them together is G2's reading and is **not yet proved in the
+emulator**, so the conclusion is tagged **HYPOTHESIS (conflict to resolve)**.
+
+* F4 (`re/symbols.csv` `adaptation_restore_all` 0x12E3F8; `calibration_names.md`
+  §10.1): at every power-up the loop runs
+  `nvm_block_request(*(u8*)0x0A3AD8, n + *(u8*)0x0A3AD9, 1, 1, PTR[0x0A3ADC + 4n], 0)`
+  for n = 0 … 0x10. The two descriptor bytes are **0x08 0x02**
+  (`xxd -s 0x0A3AD8 -l 4 data/passat_azx_ori.bin` → `0802 0100`), and
+  `PTR[0]` = **0x7FD06B**, adaptation **channel 1**. So channel *k* is block 8
+  payload **+(k + 1)**, and the 17 channel slots cover **+2 … +18**.
+* E4 (above): block 8's default record is
+  `08 01 | 00 80 80 80 80 00 00 80 00 80 80 FF`. From +2 on, these are the
+  channel defaults of §10.1's table in order (ch1 0, ch2-5 128, ch6 unimpl.,
+  ch7 0, ch8 128, ch9 0, ch10 128, ch11 unimpl., ch12 255). The "one stock
+  client at +14" of `eeprom.md` §4 is then channel 13's slot.
+* D2/E4: `ff_persist_offset` = **2**, so the patch stages and commits the
+  ethanol percent to block 8 **+2**.
+
+If that reading holds, E4's "free payload offsets +2..+13" is wrong and the
+ethanol store **shares its byte with adaptation channel 1**. Channel 1 is
+0x7FD06B, limits 0/0, signed, read at 0x46B0BC, with no known meaning. Two
+consequences to check before a bench flash of `ff_persist_enable` = 1:
+(a) at power-up the stock restore copies the stored E % into 0x7FD06B, a
+cell the calibration pins to 0; what 0x46B0BC does with it is not traced.
+(b) a workshop adaptation reset (sub-function 0x82, channel 0) followed by a
+commit may write 0 to the store. The patch accepts 0 as a valid E0, which is
+the lean direction on an E85 tank. The same pattern as E4's 8 % bug.
+
+**Not fixed here.** It needs `patches/ff_fuel/ffcal001.py` and
+`re/findings/eeprom.md`, which G2 does not own. The check is an emulator run of
+`adaptation_restore_all` against the QSPI device model of `eeprom.md` §10.5,
+and then a choice of an offset outside +2 … +18 (block 8 has +19 … +28 left
+before the manager's +29), or channel-free space in block 24 (Fallback A).
+Filed for the integrator in `docs/agent_briefs/README.md` wave-G notes.
+
 ## 4. New calibration data
 
 All new parameters live in one block inside 0x5E2510-0x5EFFFF (all 0xFF
