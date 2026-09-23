@@ -357,6 +357,13 @@ limited to `tmst` below about 40 °C.
 
 ### 5.1 Warm-up ignition: an efficiency request, not a `dzwwl` map
 
+> **Note 2026-09-23 (G4, #41, calibration_names.md §11.8):** 0x803046 / 0x803044
+> are very probably per-bank **lambda** setpoints, not efficiency setpoints:
+> 0x803046 becomes 0x80304A (`FUN_0041AF2C`), which `gk_rk` divides the fuel
+> mass by, and `%ATM` keys its lambda correction `KFATLAMS` with it. The
+> dataflow below is unchanged; read "efficiency demand" as "lambda setpoint"
+> (HYPOTHESIS until the inputs of `eta_coordinator` are traced).
+
 The FR's `ZWWL` (`dzwwl`, `KFZWWLNM`, `KFZWWLRL`) has no direct equivalent.
 Once the start has finished, the warm-up / catalyst-heating retard reaches
 `zwgru` through the **torque-coordinator efficiency demand**:
@@ -471,7 +478,7 @@ Two calibration notes that fall out of the numbers:
 | Question | Status |
 |---|---|
 | The physical meaning of RAM 0x800EEC (the x axis of the 0x5D3745 and 0x5D3568 weightings, 4 breakpoints 45/51/58/61) and of 0x80218C (the 0x5C6E8C axis). Both weightings are ≤ 1.0 and are 1.0 at the top of their range, so they only reduce `ksta`. | open; they do not block S1, which is downstream of both |
-| Whether 0x7FD3E5 and 0x7FD3F7 are `tans` and a modelled `tmot`. They have no r13-relative writer (only reads), i.e. they are written through a pointer or an indexed store; `decompile.py --refs` shows the tester pointer table at 0x0A3AE0 for their neighbours. They feed the (all-zero) 1D `zwstt` term and the `0x5D3610` map. | open; time-boxed after 30 min |
+| Whether 0x7FD3E5 and 0x7FD3F7 are `tans` and a modelled `tmot`. They have no r13-relative writer (only reads), i.e. they are written through a pointer or an indexed store; `decompile.py --refs` shows the tester pointer table at 0x0A3AE0 for their neighbours. They feed the (all-zero) 1D `zwstt` term and the `0x5D3610` map. | **SETTLED (2026-09-23, G4, calibration_names.md §11.1).** Both do have r13 writers (the search above missed them): **0x7FD3E5 is the intake-air temperature `tans`**, 0.75 °C/LSB − 48 (VERIFIED-STATIC unit; the label is COMMUNITY via VCDS group 004.4), written at 0x0F8FD4 / 0x11A990 / 0x11A998 from the NTC curve 0x5D728F over ADC channel 6, and **0x7FD3F7 is a low-pass-filtered engine temperature** in the `tmot` unit, written at 0x0F9F24 / 0x0F9FC4 / 0x11ADD0 from 0x8021F3. So the 1D term 0x5C7BAB is over `tans` −18 … 132 °C, and it is not a battery voltage (calibration_names.md §10.4 had guessed 1/16 V) |
 | The FR names of the 0x419DA4 / 0x4302DC / 0x430448 / 0x10C874 sub-factor cascade (§4.2). Structure and scaling are VERIFIED-STATIC; the module names are not. | open |
 | `KFWKSTT`'s x axis is "injections since start" (`anztist` = 0x7FD298 - 0x7FD26B) — VERIFIED-DYNAMIC as an index, COMMUNITY that the FR calls it `anztib`/`anztist`. | naming only |
 | **Added 2026-09-17 (E2, #35):** the tick PERIOD of the after-start timer `tnst_w` 0x8011D8. `afterstart_timer` (0x0D0DFC) increments it while 0x7FE91F is set, but its task is not established, so §4's "time since the engine started turning" has no unit. | open; `procedure_e2.md` §5 asks for its slope against `raster_setB_1ms_count` in the first bench log |

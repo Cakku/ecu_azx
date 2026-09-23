@@ -476,5 +476,30 @@ all 4061 cases match
 | Physical unit of `dp` / `prist`. The axis runs 400..24000 and the values obey `k/sqrt(dp)` exactly, so it is a pressure; **0.01 bar/LSB** (4..240 bar) is the natural reading but unproven. | open — log the rail pressure measuring block against the RAM cell 0x8031DA |
 | Absolute scaling of `rk` (hence `KRKATE` in ms/%) | open — follows from the two above |
 | Exact periods of `task_100ms_int` (0x4328E4) and `task_1000ms_int` (0x45CAC4), which drive `frt` | **SETTLED 2026-09-16 (C4, #44): 10 ms and 20 ms** (the symbol names are wrong and kept only for cross-reference). VERIFIED-STATIC from the activation chain — ERCOSEK alarm 1 has a 35087-tick = 10 ms cycle and activates 0x4328E4; the /2 counter of the divider chain 0x40BEF0 that 0x4328E4 runs activates 0x45CAC4 — and VERIFIED-DYNAMIC from `emu/os_clock.py`. `scheduler.md` §11. Option C/D latency is therefore at most one 20 ms period, not one second |
-| Is `FUN_00455C60` really the EGAS level-2 fuel monitor (`%UFRKTI`)? | HYPOTHESIS — shape matches; not matched to the FR page |
+| Is `FUN_00455C60` really the EGAS level-2 fuel monitor (`%UFRKTI`)? | **SETTLED — it is not (2026-09-23, G4, calibration_names.md §11.5).** It is the purge-fuel block of `%TEB`: its output **0x80315C is `rkte_w`**, the canister fuel that `gk_rk` subtracts from `rk` (the "component/diagnostic subtraction" of §9), clamped to [`FRKTEMN` −0.08, `FRKTEMX` +0.50] × `rk`; the 8-bit maps are `KFFTEVFX` / `FTEVFXHM` / `FTEVFXS` (the maximum purge-valve opening, selected by the `bdemod_w` mode bits). §7's conclusion still holds — nothing reads the post-`ZGST` `rk` — but its reading of this function as a monitor does not |
 | Battery-voltage dependence of the dead time. In this dataset `tv` is a curve over `dp` only. A `TVUB`-style voltage term may live in the output stage (`KT_ES`) rather than in `%RKTI`. | open — B7/B9 territory |
+
+---
+
+## 12. Correction (2026-09-23, G4, issue #41): 0x80315C is the purge fuel `rkte`, not a diagnostic term
+
+§7 read `FUN_00455C60` as the level-2 fuel monitor and §9 listed
+`- 0x80315C` as a "component/diagnostic subtraction". Brief G4 decompiled the
+function while naming its calibration (`calibration_names.md` §11.5):
+
+* it computes the maximum purge-valve opening from `KFFTEVFX` (engine speed ×
+  a pressure ratio) and, in the lean and stratified modes, `FTEVFXHM` /
+  `FTEVFXS`, passes the purge mass through a transport delay and two mixing
+  filters, and writes **0x80315C = the fuel that arrives through the canister
+  purge**, clamped to `FRKTEMN` × `rk` … `FRKTEMX` × `rk` = −8 % … +50 %;
+* `gk_rk` subtracts exactly that value from the bank fuel mass (skipped when
+  0x8033FA bit 2 is set), so the injected fuel is the demand *minus* the purge
+  fuel — the FR's `rkte_w`. VCDS measuring id 171 displays it (formula 0x14,
+  a percentage).
+
+For flex fuel this matters in one way: the purge fuel is modelled as
+*gasoline*. With E85 in the tank the canister vapour is ethanol-rich, so the
+subtraction is slightly wrong in the rich direction during purge; the lambda
+controller has to absorb the error while purge is active (HYPOTHESIS: how large it gets on E85 is a bench question — log id 171 against the lambda controller output).
+**VERIFIED-STATIC** for the dataflow and the clamp; the `%TEB` labels are
+`static` where the FR's inputs and mode split match (see the sidecar rows).

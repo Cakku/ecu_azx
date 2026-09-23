@@ -87,5 +87,72 @@ class TestAgainstTheDump(DumpUnchanged):
         self.assertEqual(c.main([str(IMAGE), "0x5FFFFE"]), 1)
 
 
+def kelvin_3_128_to_degc(raw):
+    return raw * 3.0 / 128.0 - 273.15
+
+
+class TestPass4Units(DumpUnchanged):
+    """The fixed points brief G4 settled (calibration_names.md section 11),
+    read back out of the dump with the same helper the pass used."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.data = m.load_dump(str(IMAGE)) if IMAGE.is_file() else None
+
+    def setUp(self):
+        if self.data is None:
+            self.skipTest("dump missing")
+
+    def test_tans_curve_is_an_ntc_linearisation_in_the_tmot_unit(self):
+        # section 11.1: 20 points over the ADC byte, falling, 140.25 .. -48 degC
+        axis = c.read_elems(self.data, 0x5D727B, 20, 1, False)
+        vals = c.read_elems(self.data, 0x5D728F, 20, 1, False)
+        self.assertEqual(axis, sorted(axis))
+        self.assertEqual(vals, sorted(vals, reverse=True))
+        self.assertEqual(vals[0] * 0.75 - 48, 140.25)
+        self.assertEqual(vals[-1] * 0.75 - 48, -48.0)
+        # the substitute is a plausible intake-air value, not a coolant one
+        self.assertEqual(c.read_elems(self.data, 0x5D7276, 1, 1, False)[0] * 0.75 - 48, 20.25)
+
+    def test_tans_kelvin_offset_is_minus_48_degc(self):
+        # 0x0F8FD8: addi r4,r9,0x2586 -> tans_kelvin = tans * 32 + 0x2586
+        word = c.read_elems(self.data, 0x0F8FD8, 1, 4, False)[0]
+        self.assertEqual(word >> 16, 0x3889)          # addi r4,r9
+        self.assertEqual(word & 0xFFFF, 0x2586)
+        self.assertAlmostEqual(kelvin_3_128_to_degc(0x2586), -48.0, delta=0.02)
+
+    def test_the_3_128_kelvin_constants_land_on_whole_degrees(self):
+        # section 11.2 / 11.6: KTMOTW, TAVHKEMN, TAVVKEMN, TAVVKGEMN, TATMKRSA,
+        # the default start temperature and the block cap
+        expect = {0x5D1E96: 95.0, 0x5D1EA6: 230.0, 0x5D1EA8: 244.0,
+                  0x5D1EAA: 250.0, 0x5D1EA4: 275.0, 0x5D1EB4: 20.0,
+                  0x5D179E: 1000.0}
+        for addr, degc in expect.items():
+            raw = c.read_elems(self.data, addr, 1, 2, False)[0]
+            self.assertAlmostEqual(kelvin_3_128_to_degc(raw), degc, delta=0.02,
+                                   msg="0x%06X" % addr)
+
+    def test_kfatmkrh_was_calibrated_in_whole_degrees(self):
+        vals = c.read_elems(self.data, 0x5D1CBA, 64, 2, False)
+        near = [v for v in vals if abs(kelvin_3_128_to_degc(v) - round(kelvin_3_128_to_degc(v))) < 0.01]
+        self.assertGreaterEqual(len(near), 32)      # 35 of 64; a random table gives about 1
+
+    def test_kfatlams_is_neutral_at_lambda_one(self):
+        lam = c.read_elems(self.data, 0x5D1BFE, 10, 2, False)
+        row = lam.index(4096)
+        vals = c.read_elems(self.data, 0x5D1C1E + row * 6 * 2, 6, 2, False)
+        self.assertEqual(vals, [32768] * 6)
+
+    def test_gear_windows_are_ordered(self):
+        # section 11.7: NVQUOTgO / NVQUOTgU, upper above lower, falling with the gear
+        hi = [c.read_elems(self.data, 0x5D77F0 + 4 * g, 1, 2, False)[0] for g in range(6)]
+        lo = [c.read_elems(self.data, 0x5D77F2 + 4 * g, 1, 2, False)[0] for g in range(6)]
+        for h, l in zip(hi, lo):
+            self.assertGreater(h, l)
+        self.assertEqual(hi, sorted(hi, reverse=True))
+        self.assertEqual(lo, sorted(lo, reverse=True))
+
+
 if __name__ == "__main__":
     unittest.main()
