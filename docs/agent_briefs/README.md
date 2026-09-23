@@ -358,6 +358,83 @@ commands, review before running):
    (Phase 1 13/13 closed; 4/2, 4/2, 4/1, 5/0, 7/0, 3/0 for the others), and
    no issue is wrongly open or closed.
 
+## Wave G — planned 2026-09-23: finish the OBD diagnostic, close the last desk facts, and hand the human a bench-day playbook
+
+Wave F merged into `main` (a264682, 2026-09-23). Wave G is the desk work still
+worth doing before an ECU exists — it is deliberately the *last* desk wave: once
+these six land, the remaining open items all need the bench or the car. It (a)
+implements the one flex-fuel feature F6 designed and stopped short of (OBD PID
+0x52, now that F6 proved it is a run-time-gated seven-word edit), (b) settles the
+last two open calibration units and continues the naming pass, (c) closes the two
+"second walker" static questions the last waves left (which fixes the flash-CRC
+period the simulator guesses), (d) clears the documentation debt (an ignition
+term and a workshop hazard filed in the wrong place), and (e) turns the scattered
+first-day procedures into one ordered runbook the human follows when hardware
+arrives. Nothing in wave G needs the ECU; nothing is flashed. Still two agents at
+a time.
+
+**Baseline (`main` a264682):** 731 tests OK, `checksum.py verify` → `ALL OK (65
+blocks)`, dump SHA-256 unchanged.
+
+| Pair | Brief | Issues | Needs | Owns (nobody else edits these while it runs) |
+|---|---|---|---|---|
+| 1 | [G1 Implement OBD PID 0x52](G1_obd_pid52_implement.md) | #39 optional half | — | `patches/ff_fuel/**`, `emu/models/flexfuel.py`, `tests/test_ff_obd_patch.py` (+`test_ff_*`), `logging/sessions/ff_fuel.json`, docs/05 §3.7, `re/findings/obd.md` §6/§8 marks. **The only wave-G brief in `patches/ff_fuel`** |
+| 1 | [G4 Calibration naming pass 4](G4_calibration_naming_pass4.md) | #41, #43 | — | `re/calibration_names.csv`, `calibration_names.md`, `tuning_checklist_draft.md`, dated notes in `injection.md`/`rail.md`/`start.md`/`measuring_vars.md`, `tests/test_draft_to_xdf.py`, `tests/test_cal_show.py` |
+| 2 | [G3 The two table walkers](G3_init_array_walkers.md) | #20 (CRC timing), #39 (completeness) | — | `boot.md` §6.5/§6.1 marks, `obd.md` §8 marks, `scheduler.md` dated note, `re/symbols.csv` rows. **Does not edit `logging/ecu_sim.py`** |
+| 2 | [G2 Documentation consistency](G2_docs_consistency.md) | doc debt of #34/#38/#41 | — | `re/findings/ignition.md`, `docs/05` §3.4/§3.7, `docs/06`, non-flashing `docs/07`. **Does not touch `calibration_names.*`, `rail.md`, `patches/ff_fuel/**`, `boot.md`, `logging/`** |
+| 3 | [G5 Simulator fidelity round 3](G5_simulator_fidelity_pass3.md) | #20, #22 prep, #37 rehearsal | **G3 merged** (for the CRC period) | `logging/ecu_sim.py`, `logging/bench_rehearsal.py`, `emu/` (additive), `logging/sessions/flash_crc.json`, `tests/test_ecu_sim_*` |
+| 3 (filler) | [G6 Bench-day playbook](G6_bench_day_playbook.md) | #20 #23 #26 #27 #44 desk half | — | new `docs/08_bench_playbook.md`, `docs/README.md` row, one dated note in `docs/07` §3 |
+
+Why this order and split. **G1 first in pair 1** because it is the only feature
+work and it owns `patches/ff_fuel` alone (the "one patch grows" rule); it takes
+FFCAL001 to **v5**, so the integrator regenerates the XDF once after it merges.
+**G4** is independent and long, so it fills pair 1's second slot and owns the
+calibration CSVs. **G3** is pure static RE and feeds **G5** the flash-CRC period,
+so G3 is in pair 2 and G5 waits for it (like E1→E2). **G2** is docs-only and
+disjoint from every code file, so it fills pair 2 safely (it explicitly does not
+touch `calibration_names.*`, which G4 owns, nor `boot.md`, which G3 owns). **G6**
+is docs-only and independent, the pair-3 filler beside G5. The file-ownership
+columns are drawn so no two concurrently-running briefs share a file; the one
+cross-brief hand-off (the procedure.md §1 hook-count drift, which lives under
+`patches/ff_fuel`) is routed to G1, and the one dependency (G5←G3) is stated in
+both briefs with a fallback if G3 is not merged yet.
+
+**Deferred on purpose (not agent briefs).**
+* **The RAM bootstrap loader's serial protocol and its SecurityAccess key**
+  (F5, `re/findings/ram_loader.md` §3-§4, §4.3). Turning F5's static map into a
+  working connector-side recovery route is genuinely dual-use, and F5 already
+  showed it needs a **bench capture on the SCI1 line** to settle the key
+  (§4.3 is HYPOTHESIS as a procedure) and a wiring check for which pin SCI1 is
+  bonded to. It is the human's decision whether to pursue a connector-side
+  write-back route at all versus the shop/BDM route `docs/01` §6 already
+  recommends; it is not desk work an agent should carry further alone. Left as a
+  bench/human item.
+* **The torque/charge limiter on the injection window** (#36 step 3) stays a
+  design note (`patches/ff_fuel/test/procedure_e5.md` §6) until a real-engine
+  margin table exists — unchanged from wave F.
+* **The eight operating modes behind index 0x80223B**, the lambda path (closed
+  as an exclusion — this dataset has no lambda-setpoint map), and every
+  calibration *value* for #34-#36: all need a car and a wideband.
+
+**Human side, unchanged from wave F** (`docs/01` §4 Phase 0): the K-Suite
+Service Mode check, then a shop bench read with write-back, a cheap VR6 mule, a
+gs_usb CAN adapter, then Flash 0 (#26) and Flash 1 (#27) with G6's playbook and
+F1's decision table in hand.
+
+**Issue bookkeeping for wave G** (post when the wave starts, mirroring the wave-F
+list; do not close any issue — every remaining item keeps a bench half):
+1. On #26 #27 #32 #34 #35 #36 #37 #38 #39 #41 #42 #44: wave F is merged into
+   `main` (a264682, 2026-09-23); the "human merges `integration/wave-F`"
+   sentences are done.
+2. **#39**: F6 decided PID 0x52 is a seven-word edit, not data-only; G1
+   implements it run-time-gated on the B2 list. Note this so the issue does not
+   read as "optional half abandoned".
+3. **#20 / #22**: G3 settles the flash-CRC period and G5 applies it and adds the
+   DTC read-back to the rehearsal — the simulator half of both issues grows.
+4. **#41 / #43**: G4 is naming pass 4 and tuning-checklist draft 3.
+5. Milestone descriptions: add a 2026-09-23 line noting wave F merged and wave G
+   planned. Counts unchanged; no issue wrongly open or closed.
+
 ## How to launch one
 
 From Claude Code (Agent tool), one agent per brief, each in its own worktree
@@ -367,20 +444,20 @@ so parallel agents do not collide on `re/symbols.csv` and the docs:
 subagent_type: general-purpose
 model: opus
 isolation: worktree
-name: F1
+name: G1
 prompt: |
   You are working in a git worktree of /Users/carlo/ecu_azx. First run
-  `git branch -m agent/F1` and `ln -s /Users/carlo/ecu_azx/.venv .venv`, and
+  `git branch -m agent/G1` and `ln -s /Users/carlo/ecu_azx/.venv .venv`, and
   use ./.venv/bin/python3 for every Python command (bare python3 is the
   wrong interpreter). Read docs/agent_briefs/00_common_rules.md, then
-  docs/agent_briefs/F1_flash1_both_task_sets.md, and execute that brief completely.
+  docs/agent_briefs/G1_obd_pid52_implement.md, and execute that brief completely.
   Commit on your branch after every finding; do not push; do not modify
   data/passat_azx_ori.bin. Run `./.venv/bin/python3 -m unittest discover -s
   tests` before you finish. End with the report format from the rules file.
 ```
 
 Or paste the same text into a fresh `claude` session started inside a
-worktree (`git worktree add ../ecu_azx-F1 -b agent/F1`).
+worktree (`git worktree add ../ecu_azx-G1 -b agent/G1`).
 
 ## After an agent finishes
 
