@@ -1,8 +1,14 @@
-# Per modification type: which maps, which logs, which limits — draft 2 (issue #43)
+# Per modification type: which maps, which logs, which limits — draft 3 (issue #43)
 
 Draft 1: agent E3, 2026-09-17, prose only. **Draft 2: agent F4, 2026-09-22** —
 same content, restructured into the three columns issue #43 asks for, plus the
-objects the naming passes added since.
+objects the naming passes added since. **Draft 3: agent G4, 2026-09-23** — the
+objects of naming pass 4 (`calibration_names.md` §11) added to the rows they
+belong to, marked **G4**, and four draft-2 statements corrected in place: the
+rail-pressure mode maps were mislabelled (§11.4), 0x80223B is the **gear**, not
+an operating mode (§11.7), `cand_KFPSSRM` is the exhaust-temperature map
+`KFATMKRH` (§11.2, §11.6), and `gk_rk` has a **lambda-setpoint divisor** that
+draft 2's "no stock enrichment" did not know about (§11.8).
 
 **Everything here is HYPOTHESIS and a reading list, not a calibration
 procedure.** Nothing in it has been tried on an engine. Issue #43 exists to
@@ -61,6 +67,14 @@ python3 tools/logcmp.py logs/…_baseline.csv logs/…_after.csv
 mentioned — up to **+7.5 °CA** cold and **−6.0 °CA** hot, gated to above 47 %
 relative charge (`calibration_names.md` §10.5). Log **0x7FD338** over DDLI
 before and after any ignition change; it is not a measuring variable.
+**G4:** its x input 0x7FD3E5 is now known to be the **intake-air temperature**
+`tans` (0.75 °C − 48; §11.1), so `zwdelta_7FD338_map` **0x5D5FFB** is the
+hot-air ignition correction (−6.0 … +2.25 °CA over `tans` −24.75 … 80.25 °C and
+speed). Log `tans` as id **85** (0x8021CC, **VCDS 004.4**) next to it.
+
+| maps | logs | limits to watch |
+|---|---|---|
+| **G4:** the intake-air sensor chain — `tans_ntc_curve` **0x5D728F** (the NTC linearisation), `tans_subst` **0x5D7276** = 20.25 °C, `tans_plaus_min/_max` **0x5D7277/0x5D7278** = −45.0 / 138.75 °C. A sensor change is the only reason to touch them | id **85** (unfiltered, VCDS 004.4 / 006.3 / 011.3) and 0x7FD3E5 (filtered) over DDLI. Check: they agree in steady state, and the filtered value lags by the 0.04/activation of `tans_filter_k` **0x5D72B8** | the substitute: a plausibility fault (debounced 5 activations, `tans_debounce` **0x5D72A9**) silently replaces `tans` by 20.25 °C, which moves every `tans`-keyed ignition and charge term |
 
 ---
 
@@ -81,7 +95,9 @@ before and after any ignition change; it is not a measuring variable.
 | maps | logs | limits to watch |
 |---|---|---|
 | `KFZW` **0x5C75FE** and `KFZWOP` **0x5CA3F1** — less residual gas moves the knock limit *and* the optimum angle. Both, not one | ignition id **9** (VCDS 003.4) and `dwkrz` **0x7FCE57[6]** (ids 88-93). Check: retard must not grow after the change | `cand_KFZWMN` **0x5D5BCB** (`%ZWMIN`) — see §5 |
-| `cand_KFPSSRM` **0x5D1CBA** and the rest of `FUN_000E06F8` — the manifold/residual-gas chain. **Read before you touch:** its value unit is still open (`calibration_names.md` §9.6, §10.6) | 0x8015D0 over DDLI (the key into `KFPSSRM`) | — |
+| **G4 (replaces draft 2's `cand_KFPSSRM` row):** `KFATMKRH` **0x5D1CBA** — the stationary exhaust-manifold temperature, **315 … 886 °C** over (speed, fuel mass); `KFATLAMS` **0x5D1C1E** (λ correction, 0.80 … 1.00) and `KFATZWMS` **0x5D1E4E** (ignition-retard correction, up to +53 %) on top. It is a **model**, not a sensor: an exhaust change makes it wrong, it does not recalibrate itself | no measuring id; over DDLI the model temperatures 0x801764 (manifold) and 0x8017AC / 0x80179A (in front of / in the catalyst), all u16 K at **3/128 K per LSB** (°C = x·3/128 − 273.15). Check against a thermocouple if one is fitted, never against the display (143 °C saturation) | `temp_exh_max_5D179E` **0x5D179E** = **1000.0 °C** caps the block; see the next row for what the block does with it |
+| **G4:** the cat-heating block `FUN_000E0A0C` / `FUN_000E06F8` evaluates `KFATMKRH` a second time at the charge `cand_KFMIRLINV` **0x5C9938** makes of `rl` (a relative charge, **100/4096 %/LSB**, §11.2) and at that charge divided by an ignition efficiency (0x8015AF, 200 = 1.0), and turns the result back into a charge 0x8015CC and a torque 0x8015C6 through `cand_KFMIOP` | 0x8015CC and 0x8015C6 over DDLI; 0x80156F bit 0 (homogeneous cat heating, HYPOTHESIS) | **HYPOTHESIS: a component-protection charge/torque limit.** Whether 0x8015C6 limits anything in normal running was not followed. Log it on any exhaust change |
+| **G4:** the main-catalyst model — `TAVHKEMN` **0x5D1EA6** = 230.0 °C light-off, `cand_FATMEHK` **0x5D18F6** (+76 … +135 K exotherm), `FEXOLAHK` **0x5C6A0C** (0.70 at λ 0.70 → 1.00); the pre-catalyst terms (`EAVK*`, `MATMAVK/BVK`, `FEXOLAVK`) are all neutral, i.e. **no pre-catalyst is modelled** | 0x80179A over DDLI | a different catalyst (metal / sports cat) means different masses and light-off — `cand_MATMAHK/BHK` **0x5D1E98 / 0x5D1E9E**, `TAVHKEMN` |
 | `KLPRMAX` **0x5D5546** stays at 110 bar: an exhaust change is no reason to raise it | `prist` id **500** | itself |
 | the stock low-octane detector `cand_KFSWKFZK` **0x5D5A3E**, `cand_KFSWKFZKR` **0x5D5AFE**, `cand_KFDZK` **0x5D597E** | `dwkrz` ids 88-93 and, over DDLI, the detector's own state | the knock window `cand_NKRMN` **0x5D611C** (3000 rpm) and `cand_DRLKR` **0x5D6124** decide where it may look at all. A cat-back change should not move them |
 | **new:** the knock block's own enable, `TKRBB` **0x5D6122** = 130 → 49.5 °C, and `CW_KRKE_BB` **0x5D611A** = 0 | `tmot` id **80** (VCDS 001.2) — but see the 143 °C saturation warning | `CW_KRKE_BB` = 0 means a **knock-sensor fault alone arms 0x7FEA84**, which arms `cand_KLRLMXNRED` — §3 |
@@ -96,7 +112,7 @@ before and after any ignition change; it is not a measuring variable.
 | `cand_KFMIRL` / `cand_KFMIOP` — cam timing moves volumetric efficiency at every point, so this is a large change | ids **8** and **375** | `cand_RLSOLMX` **0x5C8C0C** |
 | `cand_KFRLSOLDY` **0x5C8FAE** — the step size with which the charge setpoint chases the request. More overlap, slower manifold | `rlsol_w` **0x803508** and `rlsol_req` id **375** over DDLI. Check: no overshoot on a throttle step | `cand_DRLSOLMX` **0x5C91F0** = 1.00 %/step, the per-activation ceiling in `%MDFUE` |
 | `KFPU*` — the pulsation at the HFM is a function of valve events; expect to re-measure | raw HFM **0x7FEF9E** | — |
-| **new:** the six `rl_*` thresholds of `rl_thresholds_per_mode` 0x0C7DD0 (**0x5D9018, 0x5D90D8, 0x5D9138, 0x5D9198, 0x5D9010, 0x5D9216**) are maps over (engine speed, **operating mode**) | the operating-mode index id **130** (0x80223B, **VCDS 051.3 / 068.3**). Check: which mode the engine actually sits in, before and after | — |
+| **new:** the six `rl_*` thresholds of `rl_thresholds_per_mode` 0x0C7DD0 (**0x5D9018, 0x5D90D8, 0x5D9138, 0x5D9198, 0x5D9010, 0x5D9216**) are maps over (engine speed, **gear** — **corrected by G4**: 0x80223B is `gangi`, 0 = none, 1 … 6, 7 = reverse, §11.7) | the gear, id **130** (0x80223B, **VCDS 051.3 / 068.3**). Check: the logged gear matches the lever | **G4:** the gear itself comes from the n/v windows `NVQUOT1O` … `NVQUOT6U` **0x5D77F0 … 0x5D7806**; a **different final drive or tyre size moves n/v out of them** and the ECU then reports gear 0 |
 | — | — | **`cand_KLRLMXNRED` 0x5D7EAE**, the one calibrated charge limiter: 100 % to 3520 rpm, then 71, 60, 55, 52, **50 %** at 4000…6520 rpm. Armed by the debounced flag **0x7FEA84**. Log the arbitrated limit id **2051** (0x80235A) on every run |
 
 ---
@@ -112,8 +128,9 @@ documents; this is the index.
 | `KLTIKRPR` **0x5C72F8** (flow vs. rail pressure) and `TVUB` **0x5C7310** (dead time vs. dp) — injector-specific, from the data sheet, not from a guess | `ti` id **595** against `prist` id **500** | `TIMINP`; too large a value breaks `%ZGST` (fr_index §1.1) |
 | `KLHDEV` **0x5C729C** — linearisation of small injection times. Idle quality is won or lost here | `ti` id **595** at idle; the per-cylinder `%ZGST` factors **0x801D8C[cyl]** over DDLI | `TIMINP` |
 | `FKKVS` **0x5C71F8** — rail-pulsation correction over (`ti`, `nmot`) | `ti` id **595**, `prist` id **500** | — |
-| `KFPRSOLHOM` **0x5D5324** / `KLPRMAX` **0x5D5546** — +15 bar of headroom exists (19000 → 22000) and buys about **7.6 % more flow at the same `ti`**. A mixture-preparation measure, **not** a way to make fuel mass (rail.md §12.1) | `prsoll` id **501**, `prist` id **500**. Check: `prist` reaches `prsoll` at the new level at full load | `KLPRMAX` **0x5D5546** = 110.0 bar, and the **pump**: 0x80316E is clamped at `VMSVMX` **0x5D4BC6** = 5000 (rail.md §12.2). Log 0x80316E over DDLI before and after |
+| `KFPRSOLHOM` **0x5D5324** / `KLPRMAX` **0x5D5546** — +15 bar of headroom exists (19000 → 22000) and buys about **7.6 % more flow at the same `ti`**. A mixture-preparation measure, **not** a way to make fuel mass (rail.md §12.1). **G4:** after a cold start the setpoint is **`KFPRSOLKH` 0x5D53A4** (catalyst heating, 60 … 95 bar), not `KFPRSOLHOM` — draft 2 and rail.md §3.2 had that map as `KFPRSOLHMM`; the four non-homogeneous labels were swapped (§11.4) | `prsoll` id **501**, `prist` id **500**. Check: `prist` reaches `prsoll` at the new level at full load | `KLPRMAX` **0x5D5546** = 110.0 bar, and the **pump**: 0x80316E is clamped at `VMSVMX` **0x5D4BC6** = 5000 (rail.md §12.2). Log 0x80316E over DDLI before and after |
 | `KFKSTT` **0x5C6E24**, `KFWKSTT` **0x5C6C7C**, `KFWKSTN` **0x5C6C50** — cranking quantity and its decay | `ksta` **0x803028** and `ksta_adapted` **0x80302C** over DDLI, with `tmst` id **80** | `TIMINP` again: a bigger injector plus a cold start is where the minimum pulse bites |
+| **G4:** the canister purge fuel `rkte_w` **0x80315C** is *subtracted* from `rk` by `gk_rk`, clamped to `FRKTEMN` **0x5D4888** … `FRKTEMX` **0x5D488A** = −0.08 … +0.50 × `rk`; the purge valve opening is limited by `KFFTEVFX` **0x5D479E** (§11.5). A bigger injector changes nothing here, but purge is a disturbance to separate from injector errors | `rkte` id **171** (formula 0x14, %), with `fr` ids **29 / 28**. Check: compare injector-change logs with purge inactive (id 171 at 0) | the clamp itself: up to half the fuel may come from the canister |
 | **new:** adaptation channel **8** (0x7FD067) multiplies `ksta` by 0.50…1.10 and channel **4** (0x7FD065) multiplies the running mixture by the same range, both tester-writable and EEPROM-persistent (`calibration_names.md` §10.1) | 0x7FD067 / 0x7FD065 over DDLI | their own calibration limits **0x5C6086/0x5C6087** and **0x5C6082/0x5C6083** = 141/64. **A workshop "basic setting" resets them to 128** and silently changes the fuelling |
 
 ---
@@ -126,11 +143,12 @@ Separated from §4 in draft 2, because the two changes need different columns:
 | maps | logs | limits to watch |
 |---|---|---|
 | the `FFCAL001` block **0x5E2510** (`patches/ff_fuel/ffcal001.py`, 22 objects) — `ff_F_curve`, `ff_fst_map`, `ff_fzw_curve`, `ff_dzw_map`, `ff_prail_add` and the per-feature enable bytes, all defaulting to **off** | the patch's own measuring groups **111 / 108 / 69 / 109** (ids 2196-2199 / 2192-2195 / 2188-2191 / 2184-2187) and `logging/sessions/ff_fuel.json`. Check: `ff_magic` = 'FF01' and `ff_ticks` rises ~100/s | every feature's enable byte is 0 and its table neutral until the bench says otherwise |
-| the `rk` hook (injection.md §3, the `mullw` at 0x0AC39C) — **this is where the ~30 % more fuel comes from**. §10.2 of `calibration_names.md` is the reason it has to: this dataset has **no stock enrichment to lean out** and `cand_KFMIXA` / `cand_KFMIXB` are λ = 1 everywhere | commanded lambda id **320** (0x802CDE) against sensor lambda id **45** (0x802BEA), and `fr_w` ids **29 / 28** (0x802DF8 / 0x802E00, **VCDS 001.3 / 001.4**). **Check: on a fuel change the *request* (320) must move and `fr` (29) must stay near 1.0.** If `fr` is doing the work, the patch factor is wrong | `fr` itself: the controller's authority is finite, and `frm` ids **33 / 34** (**VCDS 032.2 / 032.4**) will adapt the error away and hide it |
-| **cold start**: `mix_801CF5_map` **0x5D3580** (12 × 12 over `tmst`, up to **+34 %**) is the warm-up enrichment of this software — the only non-neutral term in `mixture_running` — and `KFKSTT` / `KFWKSTT` act during cranking only | `ksta` 0x803028 and `mixture_running` **0x803020** (Q12, 4096 = 1.0) over DDLI, with `tmst` id **80**. Check: the E85 start needs more of both, and 0x803020 is where "more" shows up after start end | 0x803020 saturates at 0xFFFF = 16.0; long before that, `TIMINP` and the injector's linear range |
-| **ignition**: the ethanol advance goes in at `zwgru_build` 0x41D38C (ignition.md §11) | ignition id **9**, `dwkrz` ids 88-93. Check: `dwkrz` must stay at 0 — if the knock controller is pulling timing, the advance is too much for the actual blend | `zwdelta_load` **0x7FD338** (new, §0) already spends up to +7.5 °CA cold; `%ZWMIN` limits retard, not advance, so **nothing in the stock software limits added advance** |
+| the `rk` hook (injection.md §3, the `mullw` at 0x0AC39C) — **this is where the ~30 % more fuel comes from**. §10.2 of `calibration_names.md` is the reason it has to: `cand_KFMIXA` / `cand_KFMIXB` are λ = 1 everywhere. **G4 correction (§11.8):** `gk_rk` *does* divide the fuel mass by a lambda setpoint, `lamsbg_w` **0x80304A** (4096 = 1.0, from `eta_coordinator` 0x442C18); whether any stock input ever asks for λ < 1 (component protection) was not traced, so "no stock enrichment" is now **unproven**, not disproven | commanded lambda id **320** (0x802CDE) against sensor lambda id **45** (0x802BEA), and `fr_w` ids **29 / 28** (0x802DF8 / 0x802E00, **VCDS 001.3 / 001.4**). **Check: on a fuel change the *request* (320) must move and `fr` (29) must stay near 1.0.** If `fr` is doing the work, the patch factor is wrong. **G4:** add the lambda setpoint, id **43** (0x80304A, formula 0x1F like id 45) — it must read 1.000 on the bench; anything else is a stock enrichment the patch factor sits on top of | `fr` itself: the controller's authority is finite, and `frm` ids **33 / 34** (**VCDS 032.2 / 032.4**) will adapt the error away and hide it |
+| **cold start**: `mix_801CF5_map` **0x5D3580** (12 × 12 over `tmst`, up to **+34 %**) is the warm-up enrichment of this software — the only non-neutral term in `mixture_running` — and `KFKSTT` / `KFWKSTT` act during cranking only. **G4:** the start ignition's 1-D term `cand_KLZWSTT` **0x5C7BAB** is over the **intake-air temperature** (axis −18 … 132 °C), all zero; it is the natural place for a cold-air E85 start-advance term. After start the rail setpoint is `KFPRSOLKH` **0x5D53A4** (cat heating), not `KFPRSOLHOM` | `ksta` 0x803028 and `mixture_running` **0x803020** (Q12, 4096 = 1.0) over DDLI, with `tmst` id **80**. Check: the E85 start needs more of both, and 0x803020 is where "more" shows up after start end | 0x803020 saturates at 0xFFFF = 16.0; long before that, `TIMINP` and the injector's linear range |
+| **ignition**: the ethanol advance goes in at `zwgru_build` 0x41D38C (ignition.md §11). **G4:** the exhaust model sees the result through `KFATZWMS` **0x5D1E4E** — more advance, higher efficiency, cooler modelled exhaust — so an E85 advance *lowers* the model's exhaust temperature by itself | ignition id **9**, `dwkrz` ids 88-93. Check: `dwkrz` must stay at 0 — if the knock controller is pulling timing, the advance is too much for the actual blend | `zwdelta_load` **0x7FD338** (new, §0) already spends up to +7.5 °CA cold; `%ZWMIN` limits retard, not advance, so **nothing in the stock software limits added advance** |
 | **rail**: `ff_prail_add` on top of `KFPRSOLHOM` | `prsoll` id **501**, `prist` id **500**, pump volume 0x80316E | `KLPRMAX` 110.0 bar and `VMSVMX` 5000 — both hard |
 | the stock low-octane detector `cand_KFSWKFZK` **0x5D5A3E** / `cand_KFSWKFZKR` **0x5D5AFE** / `cand_KFDZK` **0x5D597E** | `dwkrz` ids 88-93 and the detector state over DDLI | **with E85 it must never latch** (ignition.md §13.2) |
+| **G4:** purge fuel `rkte_w` **0x80315C** is modelled as gasoline vapour; with E85 in the tank the canister gas is ethanol-rich | `rkte` id **171** against `fr` ids **29 / 28** during purge | `FRKTEMX` **0x5D488A** = 0.50 × `rk` |
 | — | the arbitrated charge limit id **2051** (0x80235A) | `cand_KLRLMXNRED` **0x5D7EAE**: if a flex-fuel calibration ever provokes the fault that arms 0x7FEA84, the engine loses **half its charge above 6000 rpm** (`calibration_names.md` §9.3) |
 
 ---
@@ -161,10 +179,15 @@ is expensive.
 * The *limits* column is complete only where a findings file established the
   clamp. Where it says "—" the honest statement is "no clamp was found", not
   "there is none".
-* Component-protection enrichment: `calibration_names.md` §10.2 shows it
-  cannot reach `rk` in this dataset, so no row watches an exhaust temperature.
-  If `%ATM` is ever named (`FUN_00108950` is the candidate module), this
-  document needs a row for it.
-* The operating-mode index id **130** has eight values and nobody knows which
-  is which. One drive log with 051.3 next to `rlsol_req` would settle it and
-  would make the §3 row usable.
+* Component-protection enrichment: draft 2 said it cannot reach `rk`.
+  **G4:** `%ATM` is named now (`FUN_001043C8`, not `FUN_00108950`; §11.6) and
+  §2 has rows for it, and `gk_rk` divides by the lambda setpoint 0x80304A
+  (§11.8). What is still missing is the link between the two: which input of
+  `eta_coordinator` (0x803058, 0x801CC6 / 0x801CC4 are the candidates) is the
+  temperature-driven enrichment request, and whether it is calibrated at all.
+  Until then, log id **43** on every run.
+* ~~The operating-mode index id **130** has eight values and nobody knows which
+  is which.~~ **Settled by G4 (§11.7): id 130 is the gear.**
+* **G4:** the objects this draft adds are desk results like the rest; the
+  temperatures of §2 are a model's, and none of the `tans` / `%ATM` / `%TEB`
+  rows has been compared with a measurement.
