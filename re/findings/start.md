@@ -357,6 +357,13 @@ limited to `tmst` below about 40 °C.
 
 ### 5.1 Warm-up ignition: an efficiency request, not a `dzwwl` map
 
+> **Note 2026-09-23 (G4, #41, calibration_names.md §11.8):** 0x803046 / 0x803044
+> are very probably per-bank **lambda** setpoints, not efficiency setpoints:
+> 0x803046 becomes 0x80304A (`FUN_0041AF2C`), which `gk_rk` divides the fuel
+> mass by, and `%ATM` keys its lambda correction `KFATLAMS` with it. The
+> dataflow below is unchanged; read "efficiency demand" as "lambda setpoint"
+> (HYPOTHESIS until the inputs of `eta_coordinator` are traced).
+
 The FR's `ZWWL` (`dzwwl`, `KFZWWLNM`, `KFZWWLRL`) has no direct equivalent.
 Once the start has finished, the warm-up / catalyst-heating retard reaches
 `zwgru` through the **torque-coordinator efficiency demand**:

@@ -648,6 +648,11 @@ them as maps**. The evidence, all VERIFIED-STATIC:
    controller, 0x440A3C-0x442037) subtracts the sensor value 0x802E0C from it.
    So the loop tracks whatever `rk` asks for; the request is implicit in `rk`.
 
+> **CORRECTED 2026-09-23 (G4, §11.8):** point 1 above misses a divisor —
+> `gk_rk` also computes `rk = (rk << 12) / 0x80304A`, and 0x80304A is very
+> probably the lambda setpoint `lamsbg_w`. The sentence below is F4's, kept for
+> history; it holds only until the inputs of 0x803046 are traced.
+
 **So there is no full-load or component-protection enrichment on the fuel path
 of this dataset.** `%LAMBTS` may exist as code — nothing here proves it does
 not — but it cannot reach `rk`, because every term that can is named and none
@@ -775,7 +780,8 @@ Two fixed points fall out of the grids:
   number of activations it is blended out over afterwards (§9.2). The CAN id
   and the slot are VERIFIED-STATIC; "gearbox" is COMMUNITY and one bench trace
   of 0x440 would confirm it.
-* **0x80223B — SETTLED (VERIFIED-STATIC).** It has its own axis,
+* **CORRECTED 2026-09-23 (G4, §11.7): 0x80223B is the gear `gangi` (FR `%BBGANG`), not an
+  operating mode; 7 = reverse.** **0x80223B — SETTLED (VERIFIED-STATIC).** It has its own axis,
   `axis_opmode_5C887B` 0x5C887B = 0, 1, 2, 3, 4, 5, 6, 7, searched by
   `cal_axis_key_process` into 0x7FD7A0, and exactly one writer, 0x45C064. Four
   of the six charge thresholds of §10.5 are maps over it. It is the
@@ -1087,3 +1093,172 @@ depends on the four corrected labels. Two things outside this brief's files
 still carry the old labels and are listed for their owners: the draft's
 `name_or_blank` column (the sidecar wins, so the XDF is right) and the
 comments of `tests/test_ff_rail_patch.py` lines 124-129.
+
+### 11.5 `FUN_00455C60` is the purge-fuel block (`%TEB`), and 0x80315C is `rkte_w` (12 objects)
+
+`injection.md` §7 took `FUN_00455C60` for the EGAS level-2 fuel monitor and §9
+listed `− 0x80315C` as a "component/diagnostic subtraction". It is neither:
+the function limits the purge-valve opening, delays and mixes the purge gas,
+and writes **0x80315C, the canister fuel that `gk_rk` then subtracts from
+`rk`** — the FR's `rkte_w` (VCDS id 171 shows it as a percentage). The FR's
+`%TEB` names fit where the inputs and the mode split are unique:
+
+| object | FR label | evidence in the code |
+|---|---|---|
+| 0x5D479E | **`KFFTEVFX`** | 4 × 4 over (`nmot`, the pressure ratio 0x7FEFAE / 0x800EED) — FR "nmot, pspu" |
+| 0x5D46F0 | **`FTEVFXHM`** | curve over `nmot`, min()'d in when `bdemod_w` bit 1 (HMM) |
+| 0x5D46F9 | **`FTEVFXS`** | the same, bit 3 (SCH) |
+| 0x5D4888 / 0x5D488A | **`FRKTEMN` / `FRKTEMX`** | `rkte` clamped to [−0.08, +0.50] × `rk`, clamp flag = `B_rkteb` |
+| 0x5D4982, 0x5D4828, 0x5D4705, 0x5C732B | `cand_NVERZMN`, `cand_DSTEMIN`, `cand_FVERMN`, the 5-point `qmsdyn` axis | transport delay and mixing, HYPOTHESIS |
+| 0x5D4807, 0x5D46C3, 0x5D497E | descriptive | release debounce, code word, mass-flow floor |
+
+For flex fuel: the subtraction assumes gasoline vapour. It is a tuning-checklist
+item (log id 171 during purge on E85), not a patch item. `injection.md` has
+the dated correction (§12) and its §11 row is marked SETTLED.
+
+### 11.6 `FUN_001043C8` is the exhaust-gas temperature model `%ATM` (53 objects)
+
+The second consumer of the §11.2 map is the two-bank `%ATM` (0x1043C8-0x1081FF;
+every object has one load site per bank). Its temperatures are u16 K at
+3/128 K — the unit §11.1 found for `tans_kelvin` — and the calibration lands on
+whole °C under it everywhere: `KTMOTW` 95.0, `TAVHKEMN` 230.0, `TAVVKEMN`
+244.0, `TAVVKGEMN` 250.0, `TATMKRSA` 275.0, the default start temperature 20.0,
+the manifold maps on whole degrees, the main-catalyst exotherm on whole kelvin.
+`bdemod_w` bits 3|2|4 (the stratified family) select the S variants, which is
+what fixes the S/H labels.
+
+| group | objects | label status |
+|---|---|---|
+| manifold | **`KFATMKRH`** 0x5D1CBA (was `temp_exh_nmot_rl_map`, over `nmot_w` × `rkg` 0x803034), **`KFATMKRS`** 0x5D1D5E (stratified: 800-3600 rpm, half load, 216-625 °C), **`KFATLAMS`** 0x5D1C1E (λ 0.75-1.40 axis, 1.0 at λ = 1), **`KFATZWMS`** 0x5D1E4E (ignition-efficiency axis 0.30-1.00, 1.0 at η = 1, up to +53 %) + its HSP twin, `cand_FATMDKS`, **`TATMKRSA`** and the overrun rate curve | static except `FATMDKS` |
+| pre-catalyst (feeds the chain) | **`EAVKH`, `EAVKS`, `EBVKH`, `EBVKS`** + counts, **`MATMAVK`, `MATMBVK`**, **`TAVVKEMN`, `TOEXTVK`**, **`FEXOLAVK`** (λ axis 0.70-4.0) | static — and **all neutral**: zero exotherm, zero mass, zero λ factor, i.e. no pre-catalyst is modelled |
+| parallel reference section | `cand_EAVKG(H)`, `cand_EBVKG(H)`, `cand_MATMA/BVKG`, `cand_TAVVKGEMN`, `cand_TOEXTVKG` + counts | hypothesis: its outputs feed nothing downstream, which is what the FR's *Grenzkat* (the catalyst-diagnosis reference) is |
+| main catalyst | **`FEXOLAHK`** (0.70 at λ 0.70 … 1.00), **`TAVHKEMN`**, **`TOEXTHK`**, `cand_FATMEHK` (+76 … +135 K), `cand_FATMEBHK` (−35 … −14 K), two stratified twins, `cand_MATMA/BHK` | static / hypothesis as marked |
+| general | **`KTMOTW`**, the default start temperature, the HSP enable temperature, `cand_SOPOV` | static / hypothesis |
+
+For flex fuel the one object that matters is **`KFATZWMS`**: the model heats
+the exhaust as the ignition efficiency falls, so an E85 calibration that runs
+*more* advance (higher efficiency) lowers the modelled exhaust temperature by
+itself, and one that is knock-limited later raises it. Whether anything
+enriches on the modelled temperature is the open question of §11.8.
+
+### 11.7 0x80223B is the gear, not an operating mode (`%BBGANG`)
+
+§10.6 settled 0x80223B as "the operating-mode index, 0..7". Its one writer
+(0x45C064) is `FUN_0045BD00`, and that function is textbook FR `%BBGANG`
+(the FB text): `nvquot_w` 0x80223E = `nmot_w · 4096 / 0x802260` (engine speed
+over vehicle speed); keep the last gear while `nvquot_w` stays inside its
+window, else test gears 1 … 6 upwards against **`NVQUOT1O` … `NVQUOT6U`**
+(0x5D77F0 … 0x5D7806, twelve new rows), 0 when none fits, **7 from the
+reverse flag** 0x7FEBD7, and the CAN gear 0x7FD17C with an automatic. So:
+
+* **0x80223B is `gangi`** (VERIFIED-STATIC for the dataflow, the FR labels
+  `static`); `re/symbols.csv` renames `opmode_index` with a dated note, the
+  sidecar renames `axis_opmode_5C887B` → **`axis_gangi_5C887B`**, and the
+  four `rl_*_map` rows of §10.5 plus `cand_KFRLMXBTS` / `cand_KFFRLMXN` are
+  maps over **gear**, not mode (descriptions corrected in place);
+* `%MDFUE`'s "`== 7` → 0x5C94F2" is **reverse gear**, so the FR's `KFMIRLS`
+  (stratified) is no longer a candidate: the row is now the descriptive
+  **`rl_mdfue_gear7_map`**;
+* one VCDS log of id 130 while shifting confirms it outright.
+
+> **§10.6 bullet 2 — CORRECTED (2026-09-23, G4, §11.7).** The variable is the
+> gear `gangi`, not an operating-mode index; everything else in that bullet
+> (one writer, the 0..7 axis, id 130) stands.
+
+### 11.8 A lambda divisor in `gk_rk` that §10.2 missed (a lead, not a closed item)
+
+While naming `KFATLAMS` this pass read `gk_rk` again: after the base mass and
+before `fr`, it computes **`rk = (rk << 12) / 0x80304A` whenever 0x7FEA33 is
+set** (set at 0x41AE3C on the 0x7FE920 branch). `injection.md` §9 lists the
+step as "per-injection normalisation (mode-dependent)"; §10.2's statement
+"`gk_rk` multiplies exactly four things … there is no fifth factor" overlooked
+it. What is VERIFIED-STATIC:
+
+* `lamsbg_select` `FUN_0041AF2C` writes 0x80304A = 0x803046 in homogeneous
+  mode (`bdemod_w` bit 0), else 0x80340C clamped to [0x802AC0, 0x802ABE];
+* 0x803046 / 0x803044 are built per bank by B8's `eta_coordinator` 0x442C18
+  from a list of candidates — a base value (0x803050: 1.0, or
+  `lamsbg_mode_change` 0.970 during a BDE mode change), component-protection
+  style inputs (0x803058, 0x801CC6 / 0x801CC4 under 0x801CD4 bits 1 / 3 and
+  0x7FEA38), 0x80341E / 0x80341C, 0x7FED90 / 0x7FED8E, 0x801D2C / 0x801D2A,
+  0x803412 / 0x803410 — clamped to [0x802AC0, 0x802ABE], with fixed values on
+  `dwbho1smn_w` bits 0 / 1 (`lamsbg_subst_dwbho` 1.008) and 0x8033FA bit 13
+  (`lamsbg_fixed_b1` / `_b2` 1.000);
+* `%ATM` keys `KFATLAMS` (FR input `lamsbg_w`) with 0x80304A over a λ axis.
+
+So 0x80304A is, with high probability, **`lamsbg_w`, the lambda setpoint, and
+a value below 1.0 enriches**. B8's reading of 0x803046 / 0x803042 as
+*efficiency* setpoints (`start.md` §5.1) is therefore suspect too — the
+12-point x axis 0.65 … 1.20 of the 0x5C76D5 ignition map reads as a λ axis as
+naturally as an efficiency axis. **This reopens the part of §10.2 that says
+"there is no stock enrichment": the mechanism exists; whether any calibrated
+input ever asks for λ < 1 was not traced** (time-boxed; only the six constants
+above are named). The follow-up is to trace the candidate inputs listed above
+to their maps, starting with 0x803058 and 0x801CC6, which look like the
+component-protection (`%LAMBTS`) request. `symbols.csv` carries dated notes on
+`eta_coordinator`, `eta_mean_w` and `eta_mean`, and a `start.md` §5.1 note
+points here.
+
+> **§10.2 — CORRECTION (2026-09-23, G4, §11.8).** Point 1 is incomplete:
+> `gk_rk` also divides by the lambda setpoint 0x80304A. The rest of §10.2
+> (`KFMIXA` / `KFMIXB` neutral, `fgru_trim` a tester channel, the PI
+> controller tracking the request) stands; its conclusion "no full-load or
+> component-protection enrichment on the fuel path" does not, until
+> 0x803046's inputs are traced.
+
+### 11.9 Counts, verification, reproduction
+
+| | before (F4) | after (G4) |
+|---|---|---|
+| rows in `re/calibration_names.csv` (objects with a name) | 359 | **462** |
+| … tagged `static` (the label) | 148 | **242** |
+| … tagged `hypothesis` | 211 | 220 |
+| objects with a unit | 344 | **450** |
+| scaling tagged `static` | 268 | **348** |
+| tables/curves/axes without a sidecar row | 878 of 1,068 | **850 of 1,068** |
+
+(F4 quoted 876 of 1,066; the recount with the current draft gives 878 / 1,068
+before this pass, so the comparison uses that.) **103 new rows**, and 26
+earlier rows corrected in place (the five 0x7FD3E5 rows, `cand_KFMIRLINV`,
+`KFPSSRM` → `KFATMKRH`, `PSREF`, `TMSRMMN`, six `KFPRSOL*`, two `KFZWOP`
+deltas and their counts, `KFZWMNUM` → `cand_KFZWMNKH`, eight gear-keyed
+rows). The generator on a work copy:
+
+```bash
+./.venv/bin/python3 tools/draft_to_xdf.py re/calibration_draft.csv -o work/med9_draft.xdf \
+    --extra-rows patches/ff_fuel/ffcal001_rows.csv --min-confidence hypothesis
+./.venv/bin/python3 tools/draft_to_xdf.py --validate work/med9_draft.xdf
+# re/med9_draft.xdf is not touched on this branch
+```
+
+Reproduction (read-only Ghidra copy, as §10.7):
+
+```bash
+mkdir -p /tmp/ghidra_G4
+cp -R /Users/carlo/ecu_azx/ghidra_projects/med9.gpr /Users/carlo/ecu_azx/ghidra_projects/med9.rep /tmp/ghidra_G4/
+export GHIDRA_INSTALL_DIR=/usr/local/Cellar/ghidra/12.1.3/libexec
+./.venv/bin/python -m pyghidra.ghidra_launch --install-dir "$GHIDRA_INSTALL_DIR" \
+    ghidra.app.util.headless.AnalyzeHeadless /tmp/ghidra_G4 med9 \
+    -process passat_azx_ori.bin -noanalysis -scriptPath ghidra_scripts -postScript import_symbols.py "$PWD"
+./.venv/bin/python ghidra_scripts/decompile.py --project-dir /tmp/ghidra_G4 --project-name med9 \
+    0x0F8FD4 0x11A990 0x0F9F24 0x11ADD0 0x0BDD08 0x4116A4 \
+    0x0E0D5C 0x104224 0x0E069C 0x0E06F8 0x0E0900 0x436B38 0x4362C8 0x436890 \
+    0x44C9FC 0x11965C 0x4582C4 0x103430 0x455C60 0x1043C8 0x45C064 \
+    0x41AA48 0x41AF60 0x442C18 0x454698
+./.venv/bin/python ghidra_scripts/decompile.py --project-dir /tmp/ghidra_G4 --project-name med9 \
+    --asm 0x39BA4 --count 9 --asm 0x39C20 --count 9 --asm 0x0F8FA4 --count 20
+./.venv/bin/python3 tools/sda_xref.py data/passat_azx_ori.bin --var 0x7FD3E5
+./.venv/bin/python3 tools/store_xref.py data/passat_azx_ori.bin --window 0x7FD3E0 0x7FD3F8
+./.venv/bin/python3 tools/measuring_vars.py data/passat_azx_ori.bin --groups | grep -w 85
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin 0x5D728F --scale 0.75 --offset -48
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin 0x5D1CBA --scale 3/128 --offset -273.15
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin --raw 0x5D1E96 16 u16
+```
+
+FR pages read for this pass (`documents/MED9.1_TFSI_Funktionsrahmen.pdf`,
+`pdftotext -layout`): `%BDEMKO` FB (the mode bit table), `%BDEMUM` ABK/FB,
+`%HDRPSOL` p1722 (diagram, ABK, `CWPRSOLAP`), `%MDZW` p768 APP (`KFDZWOHKS`,
+`KFDZWOHSP`, `KLFAKSP`), `%ZWMIN` ABK p3095, `%TEB` ABK, `%ATM` ABK,
+`%BBGANG` ABK/FB. Every FR label this pass assigns is either `static` (the
+FR's inputs, mode split and count match the code) or `cand_` (one of those is
+missing).
