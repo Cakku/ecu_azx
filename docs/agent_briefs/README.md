@@ -435,6 +435,17 @@ list; do not close any issue — every remaining item keeps a bench half):
 5. Milestone descriptions: add a 2026-09-23 line noting wave F merged and wave G
    planned. Counts unchanged; no issue wrongly open or closed.
 
+**Wave-G integration notes, G2 (2026-09-23).**
+* *procedure.md §1 hook-count drift* (G2 item 3): **already closed**. Fixed
+  2026-09-17 (6113843); G1 confirmed it matches the README's eight-hook table
+  and left a dated note. `docs/07` §3.4's E7 drift note is marked resolved.
+* *For the owner of `patches/ff_fuel` + `eeprom.md` (HYPOTHESIS, needs an
+  emulator run):* `adaptation_restore_all` 0x12E3F8 restores channel *k* from
+  block 8 payload +(k+1), with descriptor bytes 0x0A3AD8/9 = 08 02. So
+  `ff_persist_offset` = 2 appears to be **adaptation channel 1's slot**
+  (0x7FD06B), and E4's "free +2..+13" is wrong (+2..+18 are channel slots).
+  Details: `docs/05` §3.8, note of 2026-09-23.
+
 ## How to launch one
 
 From Claude Code (Agent tool), one agent per brief, each in its own worktree
