@@ -131,6 +131,8 @@ FR_MODULES = {
     "BGTMOT": "BGTMOT - coolant temperature",
     "GGHFM": "GGHFM - hot-film air-mass signal",
     "BBKR": "BBKR - knock-control operating conditions",
+    "TEB": "TEB - tank ventilation (canister purge) fuel share",
+    "BBGANG": "BBGANG - gear detection",
     "FFCAL": "FFCAL001 - flex-fuel calibration block",
 }
 UNNAMED_CATEGORY = "Unnamed candidates"

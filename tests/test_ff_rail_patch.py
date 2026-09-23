@@ -119,14 +119,17 @@ RESULT_B = 0x7FD070
 RESULT_A = 0x7FD071
 
 #: The six mode-bit paths of rail.md section 3.2, as (0x7FB69A, 0x80156F).
+#: Labels follow G4's re-assignment (2026-09-23, calibration_names.md section
+#: 11.4, rail.md section 13): 0x7FB69A is bdemod_w, bit coding HOM 0, HMM 1,
+#: HOS 2, SCH 3, SKH 4, HSP 6, HKS 7. The map addresses per path are unchanged.
 MODE_PATHS = (
-    (0x0000, 0x00),      # KFPRSOLHOM, the normal running map (+ KFPRSOLOFF)
-    (0x0080, 0x00),      # KFPRSOLKH
-    (0x0010, 0x00),      # KFPRSOLHMM
-    (0x0004, 0x00),      # KFPRSOLHMM, the second way in
-    (0x0000, 0x01),      # KFPRSOLHMM, the third way in
-    (0x0008, 0x00),      # KFPRSOLHKS (+ KFPRSOLOFF)
-    (0x0002, 0x00),      # KFPRSOLSCH
+    (0x0000, 0x00),      # KFPRSOLHOM 0x5D5324, the normal running map (+ KFPRSOLOFF)
+    (0x0080, 0x00),      # bit 7 HKS -> KFPRSOLHKS 0x5D5224 (was labelled KFPRSOLKH)
+    (0x0010, 0x00),      # bit 4 SKH -> KFPRSOLKH 0x5D53A4 (was labelled KFPRSOLHMM)
+    (0x0004, 0x00),      # bit 2 HOS -> KFPRSOLKH 0x5D53A4, the second way in
+    (0x0000, 0x01),      # 0x80156F bit 0 -> KFPRSOLKH 0x5D53A4, the third way in
+    (0x0008, 0x00),      # bit 3 SCH -> KFPRSOLSCH 0x5D54A4 (+ KFPRSOLOFF; was labelled KFPRSOLHKS)
+    (0x0002, 0x00),      # bit 1 HMM -> KFPRSOLHMM 0x5D52A4 (was labelled KFPRSOLSCH)
 )
 
 #: nmot_w (0.25 rpm), 0x803508 (16-bit full scale) and 0x7FD3F7 (u8 temperature)
