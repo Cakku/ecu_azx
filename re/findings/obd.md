@@ -389,7 +389,7 @@ header**:
 | 0x5C2020-0x5C207F, 0x5C20C0-0x5C217F, 0x5C2188-0x5C21BF | 96, 192, 56 | inside the calibration segment header 0x5C2000-0x5C223F (its own Bosch block, desc 0x1C3310): `5A5A5A5A CCCCCCCC` then a pointer table at 0x5C2008-0x5C2014 whose words 0x1C2040 / 0x1C20C0 / 0x1C2100 point **into** the first two runs, and the word at 0x5C2184 (0x1C2240) sits in front of the third | header, never a patch target |
 | 0x5C421A-0x5C4231 | 24 | three 8-byte tables: `addi r30,r2,-0x5dd6` at 0xFE4BC (= 0x5C421A), and r2-relative `addi` to 0x5C4222 (0xFE22C) and 0x5C422A (0xFE26C) | live |
 | 0x5C61B8-0x5C61E9 | 50 | the **value body of a 5 x 5 u16 map** whose header is at 0x5C61A0 (`00 05 00 05`, x axis 2400..24000, y axis 0..0x6400, then 25 x 0xFFFF = exactly these 50 bytes); `addi r3,r2,-0x3e50` at on-chip 0x42C248 passes 0x5C61A0 to the interpolator | live |
-| **0x5C6AF6**-0x5C6B25 | 48 | `addi r3,r2,-0x34fa` at on-chip 0x42C498 (= 0x5C6AF6) loads it as a map argument; the next cell 0x5C6B26 is referenced by 0x430500 | live |
+| **0x5C6AF6**-0x5C6B25 | 48 | `addi r3,r2,-0x34fa` at on-chip 0x430498 (= 0x5C6AF6) loads it as a map argument; the next cell 0x5C6B26 is referenced by 0x430500 | live |
 | **0x5C8262**-0x5C82A1 | 64 | **two** 16-entry u16 tables: `addi r3,r2,-0x1d8e` at 0xF5BB8 (= 0x5C8262) and `addi r3,r2,-0x1d6e` at 0xF5BCC (= 0x5C8282), each indexed by `(word >> 16) * 2` and `lhzx` | live |
 
 So §8 item 3 is **excluded, not confirmed**: the three runs F6 listed (its

@@ -116,7 +116,9 @@ def cal_from_block(blk: bytes) -> ff.Cal:
                   prail_enable=blk[0x122], prail_rsv=blk[0x123],
                   prail_max=struct.unpack_from(">H", blk, 0x124)[0],
                   diag_window_ms=struct.unpack_from(">H", blk, 0x126)[0],
-                  prail_curve=list(struct.unpack_from(">17H", blk, 0x128)))
+                  prail_curve=list(struct.unpack_from(">17H", blk, 0x128)),
+                  # --- G1 (#39) ---------------------------------------------
+                  pid52_enable=blk[0x14A], obd_rsv=blk[0x14B])
 
 
 @requires_dump
