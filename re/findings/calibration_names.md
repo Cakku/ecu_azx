@@ -982,7 +982,11 @@ as temperatures:
 | 0x5D178C / 0x5D17A0 | unnamed | the block's code word (3) and the unused substitute of 0x8015D8 |
 
 Three exact round numbers (225.15 K, 1000.0 °C, 1100.0 K) under one unit are
-the confirmation. **This is the exhaust-gas temperature model that F4's §10.2
+the confirmation, and the map itself is the fourth: under 3/128 K − 273.15 most
+of its 64 cells land within ±0.01 °C of a **whole degree Celsius** (315.01,
+575.01, 623.01, 656.01, 601.00, 683.01, 722.01, 802.00, 839.01, 886.00 …) —
+the calibrator typed integer °C, which no other reading of the counts
+reproduces. **This is the exhaust-gas temperature model that F4's §10.2
 time-boxed as lead (b)** — not `FUN_00108950`, which is a different soak
 model — and its output turns back into a charge 0x8015CC and a torque
 0x8015C6 through `cand_KFMIOP`, which is the shape of a *component-protection
