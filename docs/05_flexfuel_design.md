@@ -298,6 +298,61 @@ unchanged: one word at 0x42247C, `rk = min((rk * F_q10) >> 10, 0xFFFF)` on RAM
 0x803038, and at F = 1024 the stub takes an early return and **does not write
 `rk` at all** — 20 instructions per injection segment.
 
+#### Hazard, added 2026-09-23 (brief G2, doc debt of #38/#41) — three tester adaptation channels trim the fuel under the flex factor, and a workshop reset moves them
+
+VERIFIED-STATIC by F4. The evidence is in `re/findings/calibration_names.md`
+§10.1 (the channel table, the service, the restore) and the `re/symbols.csv`
+rows `kwp_adaptation_service` 0x038708, `adaptation_restore_all` 0x12E3F8 and
+`adap_ch10_fgru` 0x7FD066. G2 moves the design consequence here; nothing is
+newly derived.
+
+The KWP "Anpassung" service `kwp_adaptation_service` (0x038708) exposes
+**twelve tester-writable channels**. Each is clamped between two calibration
+bytes, committed to **EEP_CONF block 8** (sub-function 0x83) and restored
+from it at every power-up by `adaptation_restore_all` (0x12E3F8). Three of
+them multiply the fuel **upstream of the `rk` hook**, so the flex factor
+`F(E)` multiplies whatever they hold:
+
+| channel | RAM | multiplies | limits → factor | default |
+|---|---|---|---|---|
+| **4** | 0x7FD065 | the running mixture, in `mixture_running_build` 0x419DA4 | 64…141 → **0.50 … 1.10** | 128 = 1.0 |
+| **8** | 0x7FD067 | `ksta`, the start quantity (0x41A5EC, 0x41A780) | 64…141 → **0.50 … 1.10** | 128 = 1.0 |
+| **10** | 0x7FD066 | `fgru_trim`, a factor on `rk` in `gk_rk` | 26…179 → **0.797 … 1.094** | 128 = 1.0 |
+
+(Channel 5, 0x7FD069, 64…141, also feeds the 0x7FD264 mixture factor per the
+same table. F4 did not count it as a fuel trim, and neither does this note.)
+
+**The hazard.** Sub-function 0x82 with channel 0 **restores every channel to
+its default**. A workshop "basic setting" or adaptation reset therefore puts
+all three back to 128 without any warning to the driver. If a flex-fuel
+calibration was trimmed on the wideband with any of them away from 128, the
+reset moves the mixture out from under `F(E)` by up to the table's range
+(−50 % … +10 % on the running mixture). The E85 fuel curve then carries an
+error nobody put into FFCAL001. The reverse also happens: a workshop that
+*sets* a channel (to fix a lean code on petrol, say) changes an E85 tune it
+knows nothing about. For the flex strategy this means:
+
+* **Calibrate with all three at 128**, and read them (sub-function 0x81)
+  before trimming `ff_F_curve` on the wideband. Record the values with the
+  calibration.
+* **After any workshop visit, read them again** before blaming the sensor or
+  the curve for a mixture shift. A shift that is the same at every blend
+  points here, not at `F(E)`.
+* They are *not* a flex-fuel lever. The ±10 % upward range is far short of
+  E85's +54 %, and `F(E)` stays the only fuel correction that follows the blend.
+
+> **Caveat (2026-09-23, G2) — HYPOTHESIS, from G4.** F4's §10.2 concluded that
+> there is no stock enrichment on the fuel path and that these channels are
+> "the only stock lever". G4 (`calibration_names.md` §11.8) found that
+> `gk_rk` also divides `rk` by 0x80304A, very probably the lambda setpoint
+> `lamsbg_w` built by `eta_coordinator` 0x442C18, whenever 0x7FEA33 is set.
+> So a stock λ < 1 enrichment path may exist. Whether any calibrated input
+> ever asks for it is **not traced**. Until it is, do not read "no stock
+> enrichment to lean out" as settled in this document.
+
+The persistence side of the same block (the ethanol store shares EEP_CONF
+block 8 with these channels) is in §3.8, note of 2026-09-23.
+
 ### 3.4 Ignition
 Blend factor `f_zw(E)` from a 1D curve (0 at E0, 1 at about E40-50 where
 MBT is usually reached, per prj) applied as
