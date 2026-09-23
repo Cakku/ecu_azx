@@ -28,6 +28,7 @@ export GHIDRA_INSTALL_DIR=/usr/local/Cellar/ghidra/12.1.3/libexec
 | **`KFZWOP`** torque-model optimum | **0x5CA3F1** | 16 nmot x 11 rl, s8; axes 0x5CA3D6 / 0x5CA3E6 (§9). Never shift it |
 | `zwgru` base-angle sum | `FUN_0041d38c` 0x41D38C | **insertion point: the word at 0x41D40C** (§11) — **TAKEN by `patches/ff_fuel` 2026-09-17, §11.4** |
 | per-bank angle + knock retard | `FUN_0041d10c` 0x41D10C | writes 0x7FD30B / 0x7FD30C (§4, §7) |
+| **`zwdelta_load`** load/temperature term | 0x7FD338, by `FUN_00459334` | s8, 0.75 °/LSB, added in 0x41D10C after `zwgru`; **shares the advance budget with the ethanol offset** (§14, added 2026-09-23 G2) |
 | ZWMIN / ZWSEL / ZWOUT | 0x41D440 / 0x41D464 | clamp -54 ° .. +58.5 ° (§8) |
 | output driver | `FUN_0041cd9c` 0x41CD9C | `zw * 15/2` → 0.1 ° for the TPU stage |
 | **`dwkrz`** per-cylinder knock retard | **0x7FCE57 … 0x7FCE5C** | 6 bytes, firing order 1-5-3-6-2-4, VCDS groups 020-024 (§5) |
