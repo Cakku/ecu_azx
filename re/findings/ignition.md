@@ -740,3 +740,61 @@ model, not through a dedicated knock-enrichment map.
 `0x7FCE74` (mean of the six per-cylinder calibration offsets 0x5C83F8) and
 `0x7FCE77` (mean of the controller's internal retards) are local to `%KRREG`
 plus one measuring handler each (0x03B658, 0x40A3B0).
+
+## 14. Added 2026-09-23 (brief G2, doc debt of #34) — `zwdelta_load` 0x7FD338, a load/temperature ignition term on top of `zwgru`
+
+**Nothing in this section is newly derived.** Brief F4 found the term while
+naming calibration objects and filed it in `re/findings/calibration_names.md`
+§10.5 (read that section and the `re/calibration_names.csv` rows for the
+evidence). This file had not mentioned it, although §4's decompilation always
+showed the add (`DAT_007fd338` in the `acc = …` line). G2 moves it here so the
+ignition chain is complete in one place. The names follow G4's pass 4
+(`calibration_names.md` §11.1): 0x7FD3E5 is `tans`, the intake-air
+temperature, and 0x7FD3F7 is `tmot_filt`. F4's "battery voltage" reading of
+0x7FD3E5 is withdrawn.
+
+| What | Address | Status, evidence |
+|---|---|---|
+| producer `zwdelta_7FD338_build` | `FUN_00459334` 0x459334 | VERIFIED-STATIC (F4): `stb` to 0x7FD338 at **0x459428**, its only writer (`tools/sda_xref.py --var 0x7FD338`) |
+| **`zwdelta_load`** | RAM **0x7FD338**, s8, **0.75 °CA/LSB** | VERIFIED-STATIC (F4): read at **0x41D120** inside `zwbas_per_bank` 0x41D10C (§4), and at 0x1182C8 |
+| `zwdelta_7FD338_weight_map` | 0x5D5F81 (struct 0x5D5F6B) | VERIFIED-STATIC (F4): `lookup_2d_u8`, y = nmot 720…6520 rpm, x = rl 15.6…146.1 %, 128 = 1.0. **0 below 46.9 % charge**, 1.0 above 62.5 % |
+| `zwdelta_7FD338_map` | 0x5D5FFB | VERIFIED-STATIC (F4, x unit G4): s8, **−6.0 … +2.25 °CA** over (y = nmot 720…6000 rpm, x = 0x7FD339). 0x7FD339 = `tans` 0x7FD3E5 because code word `CW_7FD339_SRC` 0x5D5F6A = 0 |
+| `zwdelta_7FD338_add_map` | 0x5D6075 | VERIFIED-STATIC (F4, y unit G4): s8, **−3.75 … +7.5 °CA** over (y = `tmot_filt` 38.25…121.5 °C, x = rl 15.6…96.9 %). **Largest cold and at load**, zero or negative hot |
+
+Per F4 (`re/symbols.csv` row 0x459334):
+
+```
+zwdelta_load = clamp_s8( (weight_map(nmot, rl) * zwdelta_map(nmot, tans)) >> 7
+                         + add_map(tmot_filt, rl) )
+```
+
+**Where it sits in the chain.** `zwgru` (§3, which now includes E1's
+`dzw_e` at 0x41D40C, §11.4) → `zwbas_per_bank` (§4) adds the bank offset,
+then `acc = zwb + zwdelta_load + 0x7FD31A + 0x80208E` (the last is the
+low-octane `KFDZK` delta of §13.2), clamps to s8, then adds the knock retard
+and 0x5C753A → ZWMIN / ZWOUT clamp −54 … +58.5 ° (§8). So `zwdelta_load` is
+**after** the ethanol offset and **before** knock control and every output
+limit. This is VERIFIED-STATIC from §4's decompilation.
+
+**Why it matters for the ethanol blend: both terms spend the same advance
+budget.** E1's `dzw_e` and `zwdelta_load` both add advance on top of `KFZW`.
+The budget §12 and `procedure_e1.md` §B4 read against `ff_dzw_map` is
+`KFZWOP − KFZW`, and that difference **does not include** `zwdelta_load`. At
+load (≥ 47 % charge, where the weight map opens) and with a cold engine, the
+stock term can already add up to +7.5 °CA (`add_map`), plus up to +2.25 °CA
+from the `tans` map. In that region the stock software may already have spent
+part or all of the budget before any ethanol advance is added. Hot, the add
+map is zero or negative and gives the budget back. So:
+
+* read the `KFZWOP − KFZW` headroom **minus the live `zwdelta_load`** at the
+  cell being calibrated, not the bare table. `zwdelta_load` is not in any
+  measuring block. It is logged over DDLI in
+  `logging/sessions/tuning_checklist.json` (`zwdelta_load`, 0x7FD338, signed);
+* calibrate `ff_dzw_map` warm, and treat a cold, high-load cell as having
+  less room than the table says;
+* the acceptance signals do not change (`dwkrz` at zero, 0x7FD31B & 3 at 0;
+  §13.2, measuring block 108). This term is one more reason to watch them
+  across the whole warm-up, not only hot.
+
+The same caveat is cross-referenced from `docs/05_flexfuel_design.md` §3.4,
+where a calibrator reading the E1 design will meet it.
