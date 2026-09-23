@@ -1009,3 +1009,81 @@ Commands:
 ./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin 0x5D1CBA --scale 3/128 --offset -273.15 --x-scale 100/2048
 ./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin --raw 0x5D179A 6 u16
 ```
+
+### 11.3 The intake-air-temperature process (11 objects, VERIFIED-STATIC)
+
+With 0x7FD3E5 settled, `tans_process` 0x0F8A44 and `tans_init` 0x11A898
+(§11.1) read as a textbook sensor chain, and every constant in them has a unit
+from the variable it is compared with:
+
+| object | value | what it does |
+|---|---|---|
+| `tans_ntc_curve` 0x5D728F | ADC 8 … 230 → 140.25 … −48 °C | the NTC linearisation (20 points) |
+| `tans_subst` 0x5D7276 | 91 = 20.25 °C | substitute on a sensor fault |
+| `tans_plaus_min` / `_max` 0x5D7277 / 0x5D7278 | −45.0 / 138.75 °C | range check, fault words 0x8201 / 0x8101 through `FUN_004067FC(0xDA)` |
+| `tans_debounce` 0x5D72A9 | 5 activations | reload of all five debounce counters |
+| `tans_filter_k` 0x5D72B8 | 2621/65536 = 0.040 | low-pass weight in `lowpass_u8q8` 0x4116A4 |
+| `tans_warm_tmot` 0x5D72AC / `tans_warm_count` 0x5D72B6 | 75 °C / 1200 activations | delay before the "sensor stuck" check arms |
+| `tans_min_spread` 0x5D7271 | 0 K | the "stuck" threshold — 0, so the check can never fail |
+| `CW_tans` 0x5D7270, `tans_thr_7FD3D1_b1` 0x5D7279 | 4, 143.25 °C | code word (bit 1, the stuck report, is clear) and a status threshold |
+
+`FUN_004116A4` is now `lowpass_u8q8`: `y += (x·256 − y)·k >> 16`, at least one
+LSB per call. For flex fuel the only row that matters is the NTC curve: the
+ethanol sensor's fuel temperature is *not* this input, and nothing here needs
+to change.
+
+### 11.4 The BDE mode word decides the `KFPRSOL*` labels — four of six were wrong
+
+`rail.md` §13 listed "which FR name belongs to which `KFPRSOL*` variant" as
+open, the addresses and the selection VERIFIED-STATIC and the names guessed.
+The selection tests the **u16** 0x7FB69A (`lhz −0x4956(r13)` at 0x4582A4).
+Its writers `FUN_00119640` (0x11965C) and `FUN_0044C970` (0x44C9FC, 0x44CBD0)
+copy it from 0x802AB2 and maintain three more bits exactly as the FR's
+`%BDEMUM` describes `bdemod_w` (bit 9 `B_berhom`, bit 10 → 12
+`B_easch` → `B_bersch`, bit 14 `B_bdemz` while target ≠ actual mode). The FR
+(`%BDEMKO` FB, the bit table; COMMUNITY for this software) codes the modes as
+
+| bit | 0 | 1 | 2 | 3 | 4 | 6 | 7 |
+|---|---|---|---|---|---|---|---|
+| mode | HOM | HMM | HOS | SCH | SKH | HSP | HKS |
+
+and `%HDRPSOL` p1722 draws the selection with **exactly six booleans** —
+`B_hmm`, `B_skh`, `B_hos`, `B_kh`, `B_sch`, `B_hks` — and says the offset
+(`CWPRSOLAP` bit 5) goes "auf `KFPRSOLHOM` und `KFPRSOLSCH`". The code tests
+bits 7, 4, 2 (+ 0x80156F bit 0), 3, 1 and adds the offset on exactly the bit-3
+and default branches. That fixes all six:
+
+| map | tested | B9's label | **now** |
+|---|---|---|---|
+| 0x5D5224 | bit 7 | `KFPRSOLKH` | **`KFPRSOLHKS`** (homogeneous knock protection) |
+| 0x5D53A4 | bit 4, bit 2, 0x80156F.0 | `KFPRSOLHMM` | **`KFPRSOLKH`** (catalyst heating: SKH, HOS or homogeneous) |
+| 0x5D54A4 | bit 3, + offset | `KFPRSOLHKS` | **`KFPRSOLSCH`** (stratified) |
+| 0x5D52A4 | bit 1 | `KFPRSOLSCH` | **`KFPRSOLHMM`** (homogeneous lean) |
+| 0x5D5324 | default, + offset | `KFPRSOLHOM` | `KFPRSOLHOM` (unchanged, now `static`) |
+| 0x5D5424 | — | `KFPRSOLOFF` | `KFPRSOLOFF` (unchanged, now `static`) |
+
+0x80156F bit 0 is written by `FUN_001032FC` (0x103430) as `bdemod_w` bit 0
+(HOM) AND 0x801571 bit 3, which needs the exhaust-temperature block of §11.2
+running inside a `tmst` / `tnst_w` after-start window: **homogeneous catalyst
+heating**, the FR's `B_kh` (HYPOTHESIS for the meaning). The same bit selects
+the ZWMIN map D3 called `cand_KFZWMNUM` 0x5D5C8B, whose −15 °CA plateau is a
+cat-heating angle; it is now **`cand_KFZWMNKH`** ("Min-Zündwinkel
+Katheizen", FR p3095), still a candidate.
+
+The same bit table names the two `KFZWOP` deltas of `ignition.md` §9:
+`zwopt_delta_maps` reads 0x5C9E25 on bit 7 and 0x5C9EF2 on bit 6, and FR
+`%MDZW` p768 defines the HKS and HSP optimum angles as deltas **`KFDZWOHKS` /
+`KFDZWOHSP`** on the 16 × 11 `KFZWOP` grid with default 0 — both are all zero
+here. The 1-D curve in the same function is **`KLFAKSP`**: `0x802620 =
+(0x10000 − KLFAKSP(nmot)·0x801D8A) >> 1` is FR's "efficiency depending on the
+split", and its axis 0x5C9FA3 is the FR default 520/1000/1520/2000/2520 rpm to
+the rpm.
+
+**For this engine**: the 3.2 FSI runs `bdemod` = HOM in normal driving
+(`fr_index.md` §0), so the live rail setpoint is **`KFPRSOLHOM` (+ `KFPRSOLOFF`)
+and `KFPRSOLKH` during catalyst heating after a cold start**. E5's hook and
+`docs/05` §3.5 name `KFPRSOLHOM`, which is unchanged; nothing that was built
+depends on the four corrected labels. Two things outside this brief's files
+still carry the old labels and are listed for their owners: the draft's
+`name_or_blank` column (the sidecar wins, so the XDF is right) and the
+comments of `tests/test_ff_rail_patch.py` lines 124-129.
