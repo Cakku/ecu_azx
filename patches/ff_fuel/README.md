@@ -171,7 +171,7 @@ Plus **twenty-one** data edits:
 | Address | Old | New | What |
 |---|---|---|---|
 | **0x02BD8C** | `00 00 07 FF` | `00 00 00 EC` | the id word of `tbl_can_rx` slot 15 |
-| **0x5E2510** | 332 B of 0xFF | FFCAL001 v4 | the new calibration block |
+| **0x5E2510** | 334 B of 0xFF | FFCAL001 v5 | the new calibration block |
 | **0x0A78A8** | `00 03 8E C4` ×4 | the four handler addresses | `tbl_measuring_vars` ids 2196-2199 (D2) |
 | **0x5C55F6** | `00 00` | `08 94` | `tbl_measuring_groups` group 111 field 1 (D2) |
 | **0x5C57F4** | `00 00` | `08 95` | field 2 |
@@ -464,8 +464,8 @@ Three things about this layout:
 * **The header is mandatory, not decoration.** Brief C2 proved the cold start
   does not fill 0x7FF770-0x7FFFEB, so the contents are undefined at power-on.
   `ff_state_init()` runs whenever magic, length or checksum do not describe our
-  block, zeroes all 76 bytes and re-seeds them. It clears the block a **word**
-  at a time, which is why `FF_LENGTH` has to stay a multiple of four — 0x4C is,
+  block, zeroes all 80 bytes and re-seeds them. It clears the block a **word**
+  at a time, which is why `FF_LENGTH` has to stay a multiple of four — 0x50 is,
   and a `_Static_assert` in `src/ff_fuel.c` says so.
 * **The checksum covers the core (+08..+2B) only.** It is recomputed at the end
   of every periodic activation, so it may only cover fields that activation
