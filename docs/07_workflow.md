@@ -660,6 +660,10 @@ Then the three checks E6's `flash_programming.md` §7.2 adds, in order:
 > 0x42247C and 0x432940. Since E1/E2/E5 the patch has **eight hooks, seven of
 > them on-chip**; the current list is in `patches/ff_fuel/README.md`. Read the
 > README's hook table, not procedure.md §1, when doing the read-back.
+>
+> **RESOLVED (2026-09-23, G2, checked against G1):** procedure.md §1 was fixed
+> on 2026-09-17 (6113843). It now lists all seven on-chip words and matches the
+> README's eight-hook table, so either one can be used for the read-back.
 
 ---
 
