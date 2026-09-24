@@ -55,7 +55,7 @@ them has an override.
 |---|---|---|---|
 | S1 | `checksum.py verify -q data/passat_azx_ori.bin` is not `ALL OK (65 blocks)`, or its SHA-256 is not `b15590d3f1874ace3125c5d047c09a686db9b8bb498187663539ebab205609b3` | nothing downstream means anything | `docs/07` §0.3, §6.1 |
 | S2 | the unit's stock flash CRC is not 0x5562139F | that unit cannot supply evidence for steps 3-4, or be the flash-rehearsal spare | `flash_crc.json` item 5 |
-| S3 | **`"ram_status"` is still `"static"`** in the patch you are about to write | **do not flash at all.** Finish step 4 first. This playbook applies it to Flash 0 too, which is stricter than `docs/07` §6.4's row (patches only) | `docs/07` §2.3, §6.4; `patch_apply.py`'s warning; the G6 brief |
+| S3 | **`"ram_status"` is still `"static"`** in the patch you are about to write | **do not flash at all.** Finish step 4 first. This playbook applies it to Flash 0 too — **confirmed as the strict rule by ruling (Carlo, 2026-09-24)**; `docs/07` §6.4 carries the matching dated note | `docs/07` §2.3, §6.4; `patch_apply.py`'s warning; the G6 brief |
 | S4 | **the target ECU has no verified BDM backup** (external flash, on-chip flash including 0x400000-0x403FFF, EEPROM) with SHA-256s in `data/backup_bdm/MANIFEST` | **do not flash that ECU.** For the car this is absolute (#28 depends on #2) | `docs/07` §3.1 row 4, §6.2; `docs/01` M1 |
 | S5 | the file does not verify, has any `unexpected` byte in `bindiff -p`, was not built from this ECU's own read, or has a changed ident block 0x1CEE20 | do not flash it | `docs/07` §6.4 rows 1-4 |
 | S6 | a tool offers to address 0x000000-0x01FFFF, 0x080000-0x09FFFF or 0x400000-0x403FFF | refuse. A BDM tool does not refuse by itself | `docs/07` §3.3, last paragraph |
@@ -64,7 +64,7 @@ them has an override.
 | S9 | Flash 1 lands on row **B** or **E** of `patches/ff_counter/test/procedure.md` §4 | no further flash until it is explained | same, §4 |
 | S10 | an image has not run on the software-matching bench spare | it does not go to the car | `docs/01` §3 principle 2; `docs/07` §6.4 row 6 |
 | S11 | more than one `ff_*_enable` would change in one flash | one feature at a time | `docs/01` §3 principle 5; `docs/07` §3.4 item 3 |
-| S12 | **`ff_persist_enable` = 1 in a bench `ff_fuel` image before brief G7 is merged.** It **ships as 1** (`patches/ff_fuel/README.md` FFCAL001 table, +1B). Today the E% store shares block 8 payload +2 with adaptation channel 1 | build the bench image with `ff_persist_enable=0` (`procedure_d2.md` §B4). Read block 8 before any flash (step 3f) | `docs/05` §3.8, notes of 2026-09-23 and the integrator note of 2026-09-24 ("until G7 is merged, `ff_persist_enable` stays 0 on any bench image"; on `integration/wave-G` since e8970e6); brief `docs/agent_briefs/G7_persist_offset_off_channels.md` |
+| S12 | **block 8 payload +19..+28 has not been read on this ECU** (step 3f) before the first `ff_fuel` flash. `ff_persist_enable` **ships as 1 by ruling** (Carlo, 2026-09-24; `patches/ff_fuel/README.md` FFCAL001 row +1B) and the E% store sits at **+19** since brief G7 (merged 2026-09-24) | read block 8 first and record +19..+28; `eeprom.md` §5 predicts 0x00 there. If the bytes are anything else, do **not** flash `ff_fuel` with the store enabled — build with `ff_persist_enable=0` (`procedure_d2.md` §B4) and report | `docs/05` §3.8 (notes of 2026-09-23/24 and the ruling of 2026-09-24); `eeprom.md` §5 (G7's exclusion set) |
 | S13 | anything is unexplained after a write | roll back with `data/passat_azx_ori.bin`. Never "fix forward" on the car | `docs/07` §6.1; `docs/04` §6 item 8 |
 | S14 | a fix seems to need the ROM check, immobiliser pairing or component protection turned off | find the actual cause instead | `docs/04` §6, closing line |
 
@@ -315,7 +315,7 @@ session ff_fuel: 95 variables, 37 chunks on 0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 
 The full EEPROM image also belongs in the BDM backup before the first write
 (`docs/07` §6.2, S4). This non-destructive read shows what a used car's block 8
 holds. Per `docs/05` §3.8 (note of 2026-09-23), **+2 … +18 are the 17
-adaptation-channel slots**. Record them, and +19 as well: G7 moves the store to that byte (its brief, default 2 → 19).
+adaptation-channel slots**. Record them, and **+19..+28** as well: brief G7 (merged 2026-09-24) moved the store to +19 and `eeprom.md` §5 predicts 0x00 at +19..+28 — this read is what stop line S12 asks for.
 
 **Why step 3 comes before any flash:** every row above is a read of the
 **stock** image. After a flash it would no longer be a stock read. Flash 1's
@@ -602,9 +602,10 @@ explanations instead of one (procedure §0).
 
 Each item is its own procedure. Only the order and the gates are given here.
 
-1. **`ff_fuel`, its first flash and E0 equivalence (#32).** Build it with
-   **`ff_persist_enable=0`** until G7 is merged (S12; `procedure_d2.md` §B4 has
-   the command). Before that, settle `procedure.md` §0's last HYPOTHESIS with
+1. **`ff_fuel`, its first flash and E0 equivalence (#32).** Flash the shipped
+   image — `ff_persist_enable` = 1 by ruling (Carlo, 2026-09-24), the E% store at
+   block 8 +19 since G7 — **after** step 3f has recorded +19..+28 (S12). Before
+   that, settle `procedure.md` §0's last HYPOTHESIS with
    `logging/sessions/can_bc_check.json`: TouCAN C must share the wire with B, or
    the Pico is on the wrong pair. Then `patches/ff_fuel/test/procedure.md` §1
    (read back **all seven** on-chip words; the list is in §1 and the
@@ -614,7 +615,8 @@ Each item is its own procedure. Only the order and the gates are given here.
 2. **The fault matrix (#37):** `procedure.md` §5. Settle before you trip
    (`docs/07` §5.6).
 3. **Measuring block 111 (#39):** `procedure_d2.md` Part A. **Part B, the E%
-   store (#38), waits for G7** (S12).
+   store (#38):** G7 is merged and the store is at +19; run it once step 3f's
+   block 8 read is on record (S12).
 4. **OBD PID 0x52 (#39, optional half; brief G1, merged).** The seven
    stock-instruction edits are in every `ff_fuel` image and are run-time gated:
    with `ff_pid52_enable` = 0 mode 01 is observably stock
@@ -666,7 +668,7 @@ the day.
 | 6 (row A) | **#32** on-chip half | KESS writes 0x404000-0x47FFFF | Flash 1 row A; row D sends it to §7.3's ladder |
 | 7.1 | **#32** acceptance | E0 equivalence of `ff_fuel` | `procedure.md` §4 |
 | 7.2 | #37 | fault matrix | `procedure.md` §5 |
-| 7.3-7.4 | #39 (#38 after G7) | block 111 / PID 0x52 / E% across power loss | `procedure_d2.md`; README "What a tester sees" |
+| 7.3-7.4 | #39, #38 | block 111 / PID 0x52 / E% across power loss (store at +19) | `procedure_d2.md`; README "What a tester sees" |
 | 7.5 | #34 / #35 / #36 | per feature | `procedure_e1/e2/e5.md` |
 | 7.6 | **#28** | car runs normally; no DTCs; adaptation unchanged; counter visible via OBD | Flash 0 + Flash 1 on the car, BDM backup in hand |
 
@@ -690,7 +692,7 @@ from the log.
 5  Flash 0 -> read back -> bindiff 0 ranges, 5A5A, block 10, CRC 0x5562139F   => #26
 6  Flash 1 -> read back 0x432940 -> 3a/3b/3c -> row A..I -> CRC 0x06C08AD4    => #27 (+#44, #32 on row A)
   |
-7  ff_fuel (persist off until G7) -> E0 (#32) -> faults (#37) -> 111/0x52 (#39) -> E1, E2, E5 -> #28 on the car
+7  ff_fuel (store at +19, persist on) -> E0 (#32) -> faults (#37) -> 111/0x52 (#39) -> E1, E2, E5 -> #28 on the car
 ```
 
 ## Open questions this ordering could not settle

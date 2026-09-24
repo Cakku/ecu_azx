@@ -4,7 +4,7 @@ Self-contained task briefs for autonomous (Opus-class) sub-agents. Each brief
 maps to one or more GitHub issues, states prerequisites, deliverables and
 acceptance criteria, and assumes the rules in `00_common_rules.md`.
 
-## Status (2026-09-16, updated 2026-09-17; wave G done 2026-09-24 — see its section)
+## Status (2026-09-16, updated 2026-09-17; wave G merged 2026-09-24, wave H planned — see their sections)
 
 Waves A and B are merged into `main` (647efe6). Phase 1 (static RE) is
 closed: 13/13 issues. Phase 0 is blocked on hardware (#1-#4); Phase 2 has
@@ -495,6 +495,73 @@ tables / 274 constants / 0 problems. Carlo: review and merge `integration/wave-G
 into `main`, push; then the stale `agent/*`, `integration/wave-B..G` branches, the
 `/private/tmp/integ_wave*` and `.claude/worktrees/agent-*` worktrees can go.**
 
+## Wave H — launched 2026-09-24: the bench-adjacent leftovers of wave G (small, and then the bench)
+
+Wave G merged into `main` (c25bc35, 2026-09-24; 820 tests). It was meant to be the
+last desk wave, and for the original plan it was — but its own reports opened four
+questions that change what the bench day records or what the fuel design assumes,
+and left a dozen small inconsistencies. Wave H is deliberately **small and
+bench-adjacent**: (a) the two static questions that decide what to *read* on the
+bench (H2: does a reflash reset the adaptation channels; H3: does a generic scan
+tool's 0x7DF request reach the OBD handler at all), (b) the one design question the
+fuel path still has (H1: does the stock ECU ever request λ < 1, and how does `F(E)`
+compose with it), (c) a housekeeping pass so docs and tools agree (H4), (d) the
+continuing naming work under its new issue (H5), and (e) one command that builds the
+bench-day images with a pinned manifest (H6). Nothing in it needs the ECU; nothing is
+flashed. Still two agents at a time; integration branch `integration/wave-H`.
+
+**Baseline (`main` c25bc35):** 820 tests OK, `checksum.py verify` → `ALL OK (65
+blocks)`, `bench_rehearsal.py --fresh-eeprom` 79/79, dump SHA-256 unchanged.
+
+| Pair | Brief | Issues | Needs | Owns (nobody else edits these while it runs) |
+|---|---|---|---|---|
+| 1 | [H3 The generic OBD route](H3_isotp_obd_route.md) | #48 (#39 prerequisite) | — | `re/findings/obd.md`, `can.md` note, `logging/ecu_sim.py`, `logging/bench_rehearsal.py`, `med9log.py` `obd` subcommand or new `logging/obd_client.py`, `logging/med9kwp/` (additive), `logging/README.md`, `logging/samples/` (new), `emu/` (additive), `tests/test_ecu_sim_*`, `re/symbols.csv` rows |
+| 1 | [H1 The stock lambda-setpoint path](H1_lambda_setpoint_path.md) | #46 (#32/#33 desk half) | — | `re/findings/calibration_names.md` + `re/calibration_names.csv`, `injection.md`, `start.md`, docs/05 §3.3, `tuning_checklist_draft.md`, `logging/sessions/tuning_checklist.json`, `re/symbols.csv` rows |
+| 2 | [H2 The adaptation-reset flag](H2_adaptation_reset_flag.md) | #47 (#26/#28/#38 desk half) | — | `re/findings/eeprom.md`, `flash_programming.md` §7.2 note, `kwp.md` §12.7 note, docs/08 steps 5-6 (one line each), new `logging/sessions/adaptation_channels.json`, new `tests/test_adaptation_reset_path.py`, `re/symbols.csv` rows |
+| 2 | [H5 Calibration naming pass 5](H5_calibration_naming_pass5.md) | #49, #43 | **H1 merged** (same files) | `re/calibration_names.csv`, `calibration_names.md`, `tuning_checklist_draft.md`, dated notes in `injection.md`/`start.md`/`measuring_vars.md`, `tests/test_cal_show.py`, `tests/test_draft_to_xdf.py`, `draft_to_xdf.py` `FR_MODULES` (additive) |
+| 3 | [H4 Housekeeping after wave G](H4_housekeeping_after_wave_g.md) | #42 desk half, #23 static half | **H3 and H2 merged** (`obd.md`/`kwp.md` lines, `med9log.py`) | `tools/ram_survey.py`, `re/ram_map.csv`, `ram.md`, docs/07, docs/08 stop row, `med9log.py` (except H3's subcommand), `flash_crc.json` note, `boot.md` §6.4, `scheduler.md` §13, name notes in `obd.md`/`kwp.md`, prose notes in the two `test/procedure.md`, `re/symbols.csv` |
+| 3 (filler) | [H6 `make bench-kit`](H6_bench_kit.md) | #26/#27 desk half | — | new `tools/bench_kit.py`, new `tests/test_bench_kit.py`, the Makefile target, `tools/README.md` row, one line in docs/08 step 5 |
+
+Why this order and split. **H3 and H1 first** because both are pure static RE on
+disjoint files and both feed the bench day: H3 decides whether the PID 0x52 bench
+check is even possible with a scan tool, H1 decides what the E85 blend has to
+watch. **H2 waits** so that H3's simulator changes are in before H2 writes its own
+(separate) emulator test, and **H5 waits for H1** because both edit
+`calibration_names.md`. **H4 runs last** because it touches lines H3 and H2 own,
+and **H6** is independent tooling that fills pair 3. The one policy question H4
+raises (Flash 0 and the `ram_status` gate, item 7a) is written as a dated line the
+human can veto; the two procedure notes (item 7b, engine-off bench baselines) are
+facts about a bench mule, not decisions.
+
+**Deferred on purpose (unchanged from wave G).** The RAM bootstrap loader's SCI1
+protocol and SecurityAccess key (F5 — bench capture and the human's decision); the
+torque/charge limiter (#36 step 3 — needs an engine margin table); every
+calibration *value* for #34-#36 and the eight `bdemod_w` combinations' meaning
+(a car and a wideband).
+
+**Human side (the order of `docs/01` §4 Phase 0 and `docs/08`), and three rulings:**
+1. K-Suite **Service Mode** check for `0261S02226` (`hardware_prep.md` §2.3) → then
+   the BDM/bench read route (§2.7 shop, §2.4 clone frame, §2.2 K-TAG), a VR6
+   `03H906032` mule, the gs_usb adapter; the software-matching spare only when a
+   flash is imminent. Then `docs/08` from step 1.
+2. **Rulings taken 2026-09-24 (Carlo):** (1) `ff_persist_enable` **stays 1** (D2
+   design; the store is at +19; docs/08 S12 is now "read block 8 +19..+28 first");
+   (2) the `ram_status: static` stop is the **strict rule** — no write of any kind,
+   Flash 0 included, before the #23 snapshots (docs/07 §6.4 dated note; H4 item 7a
+   aligns any "patches only" wording); (3) bench baselines are **engine-off**, the
+   running comparison is the car (#28; H4 item 7b). None of the three blocked pair
+   1 or 2; they shape pair 3.
+3. **Still yours:** the TunerPro open test of `re/med9_draft.xdf` on Windows
+   (`re/README.md`), listed on #49.
+
+**Issue bookkeeping for wave H** (post when the wave starts; do not close any
+issue — closing policy as in wave G: only when the exit checklist is fully ticked):
+1. On #20 #22 #23 #26 #27 #34 #37 #38 #39 #43 #44: wave G is merged into `main`
+   (c25bc35, 2026-09-24); wave H planned (this section).
+2. On #46 #47 #48 #49: "brief H1/H2/H3/H5 exists; launched <date>".
+3. Milestone descriptions: one 2026-09-24 line — wave G merged, wave H planned,
+   #46-#49 added (counts: Phase 3 +1, Phase 4 +1, Phase 5 +1, Phase 6 +1).
+
 ## How to launch one
 
 From Claude Code (Agent tool), one agent per brief, each in its own worktree
@@ -504,15 +571,15 @@ so parallel agents do not collide on `re/symbols.csv` and the docs:
 subagent_type: general-purpose
 model: opus
 isolation: worktree
-name: G1
+name: H3
 prompt: |
   You are working in a git worktree of /Users/carlo/ecu_azx. First run
-  `git branch -m agent/G1`, `git reset --hard integration/wave-G` (the wave's
+  `git branch -m agent/H3`, `git reset --hard integration/wave-H` (the wave's
   integration branch, so later pairs build on the merged earlier ones) and
   `ln -s /Users/carlo/ecu_azx/.venv .venv`, and
   use ./.venv/bin/python3 for every Python command (bare python3 is the
   wrong interpreter). Read docs/agent_briefs/00_common_rules.md, then
-  docs/agent_briefs/G1_obd_pid52_implement.md, and execute that brief completely.
+  docs/agent_briefs/H3_isotp_obd_route.md, and execute that brief completely.
   Commit on your branch after every finding; do not push; do not modify
   data/passat_azx_ori.bin. Run `./.venv/bin/python3 -m unittest discover -s
   tests` before you finish. End with the report format from the rules file.

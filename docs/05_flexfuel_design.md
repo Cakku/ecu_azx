@@ -1091,6 +1091,14 @@ G7's move to **+19** neither path touches the E% byte — proven in
 `tests/test_ff_diag_patch.py` (`TestPersistOffsetOffTheChannels`,
 `TestPersistenceThroughTheDeviceAt19`); exclusion set in `eeprom.md` §5.
 
+**Ruling 2026-09-24 (Carlo, at wave-H planning).** `ff_persist_enable` **stays 1**
+in the shipped image: persistence is part of the D2 fuel-path design, and the
+ships-disabled rule of 2026-09-17 applies to the features added after it. The
+hazard that made G6 propose a stop is fixed by the move to +19, so the bench
+step is a *read* — block 8 payload +19..+28 on the real ECU before the first
+`ff_fuel` flash (`docs/08` step 3f / stop line S12) — not a rebuild with the
+store off.
+
 ## 4. New calibration data
 
 All new parameters live in one block inside 0x5E2510-0x5EFFFF (all 0xFF

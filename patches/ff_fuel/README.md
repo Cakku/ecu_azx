@@ -551,7 +551,7 @@ v4 block flashed under a v5 blob reads as corrupt, which means mode 0 —
 | +18 | u8 | `ff_mode` | **1** | 0 off / 1 normal / 2 bench override |
 | +19 | u8 | `ff_e_override` | 0 | % |
 | +1A | u8 | `ff_stall_max` | 3 | frames |
-| +1B | u8 | `ff_persist_enable` | **1** | **D2**, 0 makes the patch behave exactly like D1's. *It predates the 2026-09-17 ships-disabled rule and still ships as 1 (G7 did not change it, on the integrator's ruling); `docs/08_bench_playbook.md` S12 builds the bench image with 0 until the human rules on it* |
+| +1B | u8 | `ff_persist_enable` | **1** | **D2**, 0 makes the patch behave exactly like D1's. *It predates the 2026-09-17 ships-disabled rule and still ships as 1 (G7 did not change it; **Carlo's ruling of 2026-09-24 keeps it at 1** — the store is at +19 and the bench reads block 8 first); `docs/08_bench_playbook.md` S12 builds the bench image with 0 until the human rules on it* |
 | +1C | u8 | `ff_persist_hyst_pct` | 5 | **D2**, % |
 | +1D | u8 | `ff_persist_block` | 8 | **D2**, EEP_CONF block |
 | +1E | u8 | `ff_persist_offset` | **19** | **D2**, payload offset — 0 until the E4 correction, 2 until the **G7** correction below (+2..+18 are the adaptation channels) |

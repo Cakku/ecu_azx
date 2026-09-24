@@ -1233,6 +1233,11 @@ yet seen on hardware):
 | Any image, to the **car**, that has not run on the bench spare | docs/01 §3 principle 2 |
 | Anything that disables the ROM check, immobiliser pairing or component protection | docs/04 §6, closing line. Find the actual cause instead |
 
+> **Ruling 2026-09-24 (Carlo, at wave-H planning).** The `ram_status` row is the
+> **strict rule**: no write of any kind — **Flash 0 included** — before issue #23's
+> runtime RAM snapshots are in (`docs/08` step 4 comes before step 5). Flash 0
+> carries no patch RAM, but the rule is "snapshots first", not "patches only".
+
 ---
 
 ## 7. The order of the whole thing
