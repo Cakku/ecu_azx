@@ -74,3 +74,137 @@ project over them:
 * an ECU that reboots into the loader and stays there: the calibration marker
   `5A 5A` at file 0x1E2500 is wrong (`docs/07` §3.3 check 2, §6.3);
 * frozen set-B raster counters: set A is the live set (step 3c).
+
+---
+
+## Step 1 — Bench bring-up (#3)
+
+**Drives:** `re/findings/hardware_prep.md` §3.9 items 1-5 (the order), §3.2
+(the T94 pinout, COMMUNITY: ring it out before power), §3.3 (caveats), §3.6
+(current-limited supply), and `logging/README.md` §7 "On the bench" (CAN pair
+on T94 67/68, adapter termination **off**, KL15 present).
+
+**Unit:** the mule is enough (§0.1).
+
+**Run [bench-only]:** photograph and label the unit (item 1). Ohm out the pins
+with no power (item 2). Power up in stages, ground, then KL30 at 1 A, then KL15,
+noting the current each time (items 3-4). Sniff at 500 kbit/s (item 5; SavvyCAN,
+or `python3 -m can.viewer -i gs_usb -c 0 -b 500000` from `logging/README.md` §8
+step 1).
+
+**Pass:** pins 1, 2, 4 and 61 read about 0 Ω to the case. 3, 5, 6, 87 and 92 are
+not shorted to ground. **CAN-H 68 to CAN-L 67 reads about 66 Ω**, which confirms
+both the pin numbering and the central termination (§3.4). With KL15 on, the ECU
+sends cyclic frames every 10-25 ms (`re/findings/can.md` §4).
+
+**Fail means:**
+
+| Symptom | Meaning |
+|---|---|
+| no ≈66 Ω between 67 and 68 | wrong pins, or a unit that is not the central terminator. Re-ring before any power (§3.9 item 2) |
+| a supply pin shorted to ground, or current far above the §3.6 expectation | stop. Power off and find it before going on |
+| no CAN traffic with KL15 on | wiring, bitrate or KL15 (`logging/README.md` §8 step 1) |
+
+**Record:** the results go into `re/findings/bench.md`, the file §3.9's heading
+names. It does not exist yet. The measured current replaces the §3.6 HYPOTHESIS
+paragraph.
+
+**Why first:** nothing that follows is interpretable on a harness that has not
+been rung out. `docs/01` §4 Phase 0 has the harness before any flash work.
+
+## Step 2 — First contact over the logger (#3 exit, #20)
+
+**Drives:** `logging/README.md` §8 steps 0-2, and its table "Things that will
+go wrong, and what they mean", which is the troubleshooting reference for
+steps 2-6. `logging/README.md` §6 covers the adapter. `hardware_prep.md` §3.9
+item 6 is the same test.
+
+### 2a. On the Mac, with nothing connected [Mac]
+
+```bash
+./.venv/bin/python3 logging/ecu_sim.py --self-test
+./.venv/bin/python3 logging/med9log.py probe --sim
+```
+
+```
+RESULT: PASS
+channel setup      0.19 ms   we transmit on 0x740, module on 0x300
+```
+
+If either fails, the software is broken, not the bench. Fix it before
+connecting anything.
+
+### 2b. The real answer [bench-only]
+
+```bash
+python3 logging/med9log.py probe --bus gs_usb:0
+```
+
+**Pass:** `we transmit on 0x740, module on 0x300`, with round trips of a few
+milliseconds. **This is the exit criterion of issue #3** (TesterPresent over
+TP2.0). **Fail:** use the §8 table. No answer on 0x201 means wiring, KL15,
+bitrate or swapped H/L. `0xD6`-`0xD8` means another tester holds the channel.
+`7F 3E 12` means the tool sent `3E 01`, and this ECU wants a bare `3E`.
+
+### 2c. The Pico node on the same wire (#3, second half) [bench-only]
+
+`#3`'s exit criterion also asks for Pico frames visible in SavvyCAN.
+`hardware_prep.md` §3.9 item 7 puts this after TesterPresent. Rehearse it
+first [Mac], then swap the bus (`docs/07` §4.6):
+
+```bash
+./.venv/bin/python3 logging/ethanol_frame_send.py --bus virtual:doc --e-pct 85 --seconds 1 -v
+```
+
+```
+  E 85%  T  25 C  f 134 Hz  cnt   0  v1  OK
+```
+
+On the bench the same command runs with `--bus gs_usb:0` (`logging/README.md`
+§9). **Pass:** id 0x0EC at 10 Hz in SavvyCAN. With 2b, that **closes #3**.
+
+### 2d. Which software is this unit, and what is T_bg — the flash-CRC read (#20)
+
+**Drives:** `logging/sessions/flash_crc.json` (its comment, items 1-5), and
+`re/findings/boot.md` §6.8(c) and (e).
+
+Rehearse [Mac]. `--sim-flash-crc` runs the firmware's own CRC task. In 45 s
+the cursor walks 0x21004 → 0x9B69C, and the publish is still minutes away:
+
+```bash
+./.venv/bin/python3 logging/med9log.py log --sim --sim-flash-crc --time-scale 8 --seconds 45 --session logging/sessions/flash_crc.json -o work/sim_flash_crc.csv
+```
+
+```
+session flash_crc: 13 variables, 6 chunks on 0xf0, 32 bytes per sample
+```
+
+On the unit [bench-only], **power-cycle first**, because the task runs once per
+power cycle (item 1). Then, KL15 on and the engine off:
+
+```bash
+python3 logging/med9log.py log --session logging/sessions/flash_crc.json \
+    --bus gs_usb:0 --seconds 300 -o logs/2026-xx-xx_flash_crc.csv
+```
+
+This read answers two questions:
+
+1. **The software identity.** `flash_crc_pub_hi`/`_lo` must become
+   `0x5562`/`0x139F` (item 5). If they do not, gate **S2** applies. The unit is
+   a mule, and steps 3-6 need another one. Publish can take up to 24.7 min after
+   `os_init` (boot.md §6.8(c), table), so a 300 s log that has not published
+   yet is not a failure. Extend it.
+2. **T_bg**, the background-loop period that G3 bounded to **0.51-300.75 ms**
+   (boot.md §6.8(c)). T_bg = 500 bytes ÷ the slope of `flash_crc_cursor`
+   (0x7FB700) in bytes/s (§6.8(e) item 1). The #20 integration note of
+   2026-09-24 asks for the number twice, **at key-on engine off** (here) and
+   **at idle** ([car-only], step 3). The result goes into `flash_crc.json` and
+   #20.
+
+For the idle read: the cursor only moves until the publish, and on a warm
+ECU nothing moves (item 1). §6.8(e) item 2's loop counter **0x7FD70C** keeps
+counting after that, but no session file on this head logs it (open question 2).
+
+**Why here:** S2 has to be known before any step-3 read can count as evidence
+about SW `1037382557`. The same 0x5562139F is then the expected result of the
+Flash 0 read-back in step 5, so this read is also its "before".
