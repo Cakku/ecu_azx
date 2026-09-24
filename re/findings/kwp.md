@@ -759,8 +759,9 @@ entry `dfp_entry_read` 0x43DB20 and answers
   SAE J2012-encoded codes per fault path (path 1 = 0x0601 = P0601, path 11 =
   0x1427/0x1428/0x1429/0x1429), `k` the lowest set bit of entry +0x0A (bits
   0-3 → k = 0-3, bits 4-6 → k = 0-2, none → 3).
-* **status** = `1 << k` (bits 0-3) | **0x20** always (0x40 instead when entry
-  +0x0B bit 0) | **0x10** when bit 5 of byte 0x7F9C46 + 2·path is clear |
+* **status** = one of 0x01/0x02/0x04/0x08 (the type bit that chose `k`) |
+  **0x20** always, plus **0x40** when entry +0x0B bit 0 (`ori r8,r8,0x60`) |
+  **0x10** when bit 5 of byte 0x7F9C46 + 2·path is clear |
   **0x80** when entry +0x09 bit 4. Meaning of the bits: HYPOTHESIS, not chased.
 * An entry is listed only if entry +0x1C has bit **0x0800** (`dfp_entry_read`
   copies it to record +5 bit 5, tested at 0x350F0).
