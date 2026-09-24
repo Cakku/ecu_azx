@@ -921,7 +921,7 @@ addr,kind,x_axis_addr,y_axis_addr,x_n,y_n,elem_size,signed,consumer_func,name_or
 0x5C6F0E,scalar,,,1,,1,0,FUN_0010cbcc@0x10CBCC,,static,enumerate_maps.py; direct load; 1 call site(s): 0x10CBDC,,,,1
 0x5C6F10,scalar,,,1,,1,0,FUN_00443090@0x443090,,static,enumerate_maps.py; direct load; 1 call site(s): 0x443184,,,,1
 0x5C6F11,scalar,,,1,,1,0,FUN_00443090@0x443090,,static,enumerate_maps.py; direct load; 1 call site(s): 0x443180,,,,1
-0x5C6F36,map_2d_shared,0x5C6F1E,0x5C6F12,12,12,2,0,FUN_00443090@0x443090,cand_KFETAKS,hypothesis,"B8 issue #16, re/findings/start.md S5.1; 12 tmst x 12 u16 (4096 = 1.0) cold-start efficiency derate feeding the torque coordinator; 0x44319C",u16,u8,,1
+0x5C6F36,map_2d_shared,0x5C6F1E,0x5C6F12,12,12,2,0,FUN_00443090@0x443090,KFLANS,hypothesis,"B8 issue #16, re/findings/start.md S5.1; 12 tmst x 12 u16 (4096 = 1.0) cold-start efficiency derate feeding the torque coordinator; 0x44319C | RENAMED 2026-09-24 (integration after H1, #46): was cand_KFETAKS; the sidecar row and calibration_names.md S12 carry the evidence",u16,u8,,1
 0x5C7056,scalar,,,1,,2,0,FUN_00443090@0x443090,,static,enumerate_maps.py; direct load; 1 call site(s): 0x4431CC,,,,1
 0x5C7058,scalar,,,1,,1,0,FUN_0041af7c@0x41AF7C,,static,enumerate_maps.py; direct load; 1 call site(s): 0x41B174,,,,1
 0x5C7059,scalar,,,1,,1,0,FUN_0041af7c@0x41AF7C FUN_004546b4@0x4546B4,,static,enumerate_maps.py; direct load; 3 call site(s): 0x41B0E8 0x41B348 0x4547B0,,,,3
@@ -1011,7 +1011,7 @@ addr,kind,x_axis_addr,y_axis_addr,x_n,y_n,elem_size,signed,consumer_func,name_or
 0x5C76BE,scalar,,,1,,1,0,FUN_004310c8@0x4310C8,,static,enumerate_maps.py; direct load; 1 call site(s): 0x4310D8,,,,1
 0x5C76BF,scalar,,,1,,1,0,FUN_004310c8@0x4310C8,,static,enumerate_maps.py; direct load; 1 call site(s): 0x431110,,,,1
 0x5C76C0,scalar,,,1,,1,0,FUN_004310c8@0x4310C8,,static,enumerate_maps.py; direct load; 1 call site(s): 0x43110C,,,,1
-0x5C76D5,map_2d_shared,0x5C76C9,0x5C76C1,12,8,1,1,FUN_004310c8@0x4310C8,cand_KFZWETA,hypothesis,"B8 issue #16, re/findings/start.md S5.1; 8 nmot x 12 efficiency s8 ignition correction, x axis 83..154 = eta 0.65..1.20 (0x7FD271 = 0x803042>>5); result 0x7FD313 is added by zwgru_build; 0x4310E8",u8,u8,,1
+0x5C76D5,map_2d_shared,0x5C76C9,0x5C76C1,12,8,1,1,FUN_004310c8@0x4310C8,dzw_lambas_map,hypothesis,"B8 issue #16, re/findings/start.md S5.1; 8 nmot x 12 efficiency s8 ignition correction, x axis 83..154 = eta 0.65..1.20 (0x7FD271 = 0x803042>>5); result 0x7FD313 is added by zwgru_build; 0x4310E8 | RENAMED 2026-09-24 (integration after H1, #46): was cand_KFZWETA; the sidecar row and calibration_names.md S12 carry the evidence",u8,u8,,1
 0x5C7738,axis,0x5C7738,,16,,2,0,FUN_0041d334@0x41D334,SNM16ZUUW,static,"enumerate_maps.py; axis_search_u16_hint; 1 call site(s): 0x41D34C; struct 0x5C7736; B7 #15: KFZW nmot axis, 16 u16 at 0.25 rpm/LSB = 520..6520 rpm; struct 0x5C7736",u16,,0x5C7736,1
 0x5C7758,scalar,,,1,,2,0,FUN_0041d280@0x41D280 FUN_0041d334@0x41D334,,static,enumerate_maps.py; direct load; 2 call site(s): 0x41D2CC 0x41D36C,,,,2
 0x5C775A,axis,0x5C775A,,12,,2,0,FUN_0041d334@0x41D334,SRL12ZUUW,static,"enumerate_maps.py; axis_search_u16_hint; 1 call site(s): 0x41D360; struct 0x5C7758; B7 #15: KFZW rl axis, 12 u16 at 100%/4096 per LSB = 10.2..103.9 %; struct 0x5C7758",u16,,0x5C7758,1
