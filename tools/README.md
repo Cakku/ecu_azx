@@ -31,6 +31,7 @@ document and `med9lib.py` together.
 | `ercosek_tasks.py` | Brief C4 (#44). Decodes the whole ERCOSEK activation chain: the 37 task descriptors behind the ActivateTask thunk table (0x0B091C), both cyclic time tables (0x478EE4 / 0x478F80) and both raster divider chains (0x40BEF0 / 0x40C064), and prints every raster period in Time Base ticks and milliseconds. `--tasks`, `--timetable`, `--dividers`, `--periods`, `--json`. `re/findings/scheduler.md` section 11. |
 | `ram_snapshot_diff.py` | Compares the RAM snapshots taken over KWP RequestUpload and classifies every byte `changed` / `constant` / `blank`. The dynamic half of issue #23; ranges in `logging/sessions/ram_snapshot.json`, format in the module docstring, `--self-test` runs it on synthetic snapshots. |
 | `flash_segments.py` | Brief E6. Dumps the firmware's flash-programming tables: the three-entry flash device table (0x082980), the erase geometry and the UC3F block map (0x0825E4 / 0x082684), the programming-mode KWP dispatch table (0x088174) with the download/erase whitelist, and the 0x480000 mode-4 EEPROM window; `--all`, `--json`. `re/findings/flash_programming.md`. |
+| `bench_kit.py` | Brief H6 (#26/#27, 2026-09-24). `make bench-kit` from the repo root: builds the four bench-day images into `work/bench_kit/` (`00_stock_resaved.bin` via `checksum.py fix`, `10_ff_counter_both.bin` / `11_ff_counter_external.bin` via `make -C patches/ff_counter HOOKS=both|external apply`, `20_ff_fuel_shipped.bin` via `make -C patches/ff_fuel apply`), runs `checksum.py verify`, `bindiff.py -p` and `logging/ecu_sim.py --print-flash-crc` on each, and writes `MANIFEST.json` (size, SHA-256, patch id/variant/blob, FFCAL001 version, changed ranges, expected flash CRC, docs/08 step and S-rows) plus a kit `README.md`. Refuses a non-canonical dump, `data/`, and in-repo paths outside `work/`; exit 1 on any unexpected verify/bindiff result. `--out DIR`. |
 
 Quick checks:
 
@@ -136,6 +137,7 @@ constant):
 
 | File | What it covers |
 |---|---|
+| `test_bench_kit.py` | `tools/bench_kit.py`: builds the kit into a temp dir; the stock re-save equals the dump, the image hashes match the patch READMEs and the flash CRCs match docs/08 (both parsed from the documents), `data/` and the patch descriptors are unchanged, the guard rails refuse; the build half skips without `LLVM_DIR` |
 | `test_bindiff.py` | builds a patched copy in a temp directory and checks that only the edits and their descriptors moved |
 | `test_cal_show.py` | `tools/cal_show.py`'s parsers, that `--guess` rejects as well as accepts, and that the bytes it reads match `med9lib` |
 | `test_draft_to_xdf.py` | the XDF skeleton, the file-offset mapping, the `val[iy*nx+ix]` layout, and `re/calibration_names.csv` against the draft |
