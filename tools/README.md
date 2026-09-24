@@ -148,6 +148,7 @@ constant):
 | `test_injection_model.py`, `test_start_model.py`, `test_window_model.py`, `test_zw_model.py` | the bit-exact models of the injection, start, injection-window and base-ignition paths |
 | `test_logcmp.py` | the synthetic logs in `logging/samples/`, including the alignment on the raster counter, the `--uncovered` modes and `derive` |
 | `test_med9kwp.py` | the TP2.0 + KWP2000 stack against `logging/ecu_sim.py` (49 tests, no hardware) |
+| `test_med9log_sim.py` | `logging/med9log.py`'s `--sim-t-bg-ms` / `--sim-seed-dtc` pass-throughs, the `--sim-flash-crc` help text and `dump`'s per-range block count (brief H4) |
 | `test_patch_framework.py` | `patches/common/` + `patch_gen` + `patch_apply` + the `ff_counter` hook under the emulator; the build layer skips itself with a clear message when `LLVM_DIR` is not installed |
 | `test_qspi_eeprom.py` | the QSMCM QSPI queue and the M95160 device model |
 | `test_ram_survey.py` | `tools/ram_survey.py` and `emu/ext_sram_probe.py` |

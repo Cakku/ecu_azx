@@ -27,6 +27,8 @@ definition in `docs/01` §4 Phase 3, `docs/07` §3.4 item 2 and issue #26.
 first `patches/ff_fuel` write: the intro of `docs/07` §3, and item 6 of
 `logging/sessions/flash_crc.json`'s comment. Read those as "ff_fuel's first
 flash".
+*Both corrected in place, dated, 2026-09-24 (H4); `docs/06` §6's read-back
+checklist carried the same old naming and has the same note.*
 
 ## 0. Which ECU, and the stop list
 
@@ -292,6 +294,10 @@ will be flashed:
 
 The scenario has an idle and a load step. On a bench spare that cannot run an
 engine, see open question 4 before you rely on these baselines.
+*2026-09-24, by ruling (dated note H4): on the bench spare both baselines are
+taken **engine-off** — KL15 on, no crank, the same duration; the raster
+counters still run. The idle-plus-load-step comparison is #28 on the car
+(open question 4, settled).*
 
 ### 3e. EEPROM block 10, before (#26)
 
@@ -641,6 +647,14 @@ Each item is its own procedure. Only the order and the gates are given here.
    is needed because the support bitmap is rebuilt once per new diagnostic
    connection (`obd.md` §10.3, G3). The 0x7DF/0x7E8 transport itself has never
    been exercised, so it is a bench item (README, same section).
+   *2026-09-24 (H3 result, recorded by H4): send to the **functional** id 0x7DF;
+   a **physical 0x7E0** request is received and never answered on this ECU (its
+   connection gate is `li r3,0` at 0x2C29C) — `re/findings/obd.md` §11.*
+   *2026-09-24 (H3, `obd.md` §11.3/§11.6): silence is the normal "no" (`01 52`
+   with the switch off draws no frame). After enabling `ff_pid52_enable`, wait
+   **more than 5 s** without a request — the OBD connection times out 5.00 s
+   after the last answer and the next request opens a new one, which rebuilds
+   the support bitmap — before reading `01 40`.*
 5. **One feature at a time (S11):** the ignition blend `procedure_e1.md`
    (#34), then start enrichment `procedure_e2.md` (#35), then the rail adder
    `procedure_e5.md` (#36). Each one is an `ff_*_enable` byte flipped in
@@ -729,7 +743,14 @@ from the log.
    §2 check 4 says the counter runs with KL15 only) with the engine-running
    comparison deferred to #28. Decide before the baselines of step 3d are
    recorded.
+   *Settled 2026-09-24 by ruling (Carlo): the bench baselines are engine-off
+   (KL15, no crank; the raster counters still run) and the running comparison
+   is #28 on the car — dated notes in `ff_counter/test/procedure.md` §3-§5 and
+   `ff_fuel/test/procedure.md` §4 (H4).*
 5. `logging/README.md` §8 says a snapshot is 1,032 TransferData blocks, and
    `ram.md` §9 says 1,031. The tool prints `5 ranges, 63932 bytes, 1032
    TransferData blocks`, because each of the five ranges rounds up. It does not
    matter for the procedure.
+   *Settled 2026-09-24 (H4): both were wrong — per-range rounding gives
+   1,034; the tool printed ceil(total / 62) = 1,032 and now prints 1,034
+   (`ram.md` §9).*
