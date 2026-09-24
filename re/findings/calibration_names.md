@@ -1171,6 +1171,13 @@ the exhaust as the ignition efficiency falls, so an E85 calibration that runs
 itself, and one that is knock-limited later raises it. Whether anything
 enriches on the modelled temperature is the open question of §11.8.
 
+> **§11.6 HYPOTHESIS (pre-catalyst vs Grenzkat) — SETTLED (2026-09-24, H5, §13.4).** The
+> section with `EAVKH` / `MATMAVK` / `TAVVKEMN` is the pre-catalyst: its monolith output
+> `tkivkm_w` 0x8017DE is compared with `TKIVKBTS` and its outlet feeds the pipe whose
+> temperature `tanvk_w` is compared with `TANVKBTS` in `lambts_temp_cond` 0x0E1054. The
+> parallel section's outputs 0x8017D6 / 0x801780 (and bank 2) are only ever stored, never
+> read — the write-only Grenzkat. The eight `cand_` labels are promoted.
+
 ### 11.7 0x80223B is the gear, not an operating mode (`%BBGANG`)
 
 §10.6 settled 0x80223B as "the operating-mode index, 0..7". Its one writer
@@ -1450,6 +1457,10 @@ below 1.000 on this dataset under exactly these conditions (fuel increase =
 | 8 | **any** of the above is bounded by the LAMKO rich limit `lamko_hom_min` 0x5C54E0 | clamp | **0.700** | **+42.9 %** | VERIFIED-STATIC |
 | 9 | `bdemod_w` bit 0 clear while fuelling (if it ever happens) | `lamds_w` 0x80340C held 0, clamped | 0.700 | +42.9 % | dataflow VERIFIED-STATIC; **whether it happens is open** (§11.4, bench ids 503 / 43) |
 
+> **Row 3 — CORRECTED (2026-09-24, H5, §13.3).** The predicted protection is unreachable on
+> this dataset: 0x7FE9F8 needs `max(tavvk_w) > TAVVKBTSP` 0x5C693C, and `TAVVKBTSP` = 65535.
+> The 0.730 floor of `lambts_pred_map` never applies; rows 2, 4, 8 are unchanged.
+
 **The exclusion set** (inputs that cannot move `lamsbg_w` on this dataset,
 each because its selector or value has no store other than a constant one):
 catalyst heating `lamkh_w` (selector 0x7FEC3B never written — the lean
@@ -1479,6 +1490,10 @@ FR candidate is `KFDZWKG` (nmot_w, lambas_w), a label B7 already gave to
 0x5C753E, so the choice is left to naming pass 5. `start.md` §5.1 is
 corrected accordingly.
 
+> **KFDZWKG — SETTLED (2026-09-24, H5, §13.4).** The FR label goes to 0x5C76D5 (keyed by
+> `nmot` and `lambas_w`, as FR %ZWGRU p3090 draws it); B7's 0x5C753E / 0x5C753D become the
+> descriptive `dzw_kg_weighted_map` / `dzw_kg_weighted_max`.
+
 ### 12.4 Items settled or changed by this pass
 
 | item | status |
@@ -1501,6 +1516,9 @@ corrected accordingly.
 * 0x7FEC3B is never *stored*; that it reads 0 rests on RAM being cleared at
   reset, which this pass did not re-derive. The bench check is id 410 bit 2
   (`B_kh`) set on a cold start while id 43 stays 1.000.
+
+> **The 0x7FE9F8 part — SETTLED (2026-09-24, H5, §13.3):** it is `B_tatmbtsp`, gated by
+> `TAVVKBTSP` = 65535, so never set.
 
 ### 12.6 Reproducing
 
@@ -1536,3 +1554,286 @@ r13 displacement, any `rA`); it found nothing beyond `tools/sda_xref.py`. FR
 pages read: `%LAMSOLL` p1535-1536, `%LAMKO` p2582-2587, `%LAMKOD` p2588,
 `%LAMBTS` p2572-2581 (parameter list), `%BGFAWU` p324 ABK, `%LANSWL` p1606 ABK,
 `%LRSKA` p2644 ABK, `%LAKH` p2591 ABK, `%BGBVG` ABK.
+
+## 13. Pass 5 (brief H5, 2026-09-24, issues #49 and #43)
+
+Brief `docs/agent_briefs/H5_calibration_naming_pass5.md` (the brief says "§12";
+H1 took §12, so this pass is §13). Dump unchanged (`tools/checksum.py verify -q`
+→ `ALL OK (65 blocks)` before and after). Decompilation from a read-only copy
+`/tmp/ghidra_H5` (recipe of `injection.md` §0, symbols imported); FR text from
+`pdftotext -layout documents/MED9.1_TFSI_Funktionsrahmen.pdf`. Every row carries
+its own evidence in `re/calibration_names.csv`; this section is the argument.
+
+**The labelling rule this pass leans on.** Where a block of FW / KL of one FR
+module sits contiguously in the calibration, its order is the FR ABK's
+alphabetical order, element size by element size (G4 used it for `KTMOTW …
+TOEXTVKG`; here it holds for `CWATM … SOPOV`, `KATMCPAV … KATMCPVY`,
+`FATMAHK … FATMAVY`, `FATMVHK … FATMVVY`, `DFRLBTSN … ZLBTS`,
+`MLOBKLHV … MLUBKLNV`, `VBKLHO … VBKLNU`, `KFDTMBH1 … KFDTMTU`, `FTEVFXHM …
+FVRMDYN`). The order is **never** the evidence alone: a label is `static` only
+where the role read out of the code is the one the FR text gives that label and
+the slot agrees; where only one of the two holds, the row is `cand_` or
+descriptive.
+
+### 13.0 Counts
+
+| | before (H1, integration/wave-H) | after (H5) |
+|---|---|---|
+| rows in `re/calibration_names.csv` (named objects) | 501 | **645** |
+| … label tagged `static` | 272 | **425** |
+| … label tagged `hypothesis` | 229 | 220 |
+| … names still `cand_` | 179 | 170 |
+| objects with a unit | 489 | **633** |
+| scaling tagged `static` | 386 | **507** |
+| tables / curves / axes without a sidecar row | 838 of 1,068 | **802 of 1,068** |
+
+**144 new rows** (37 %ATM / %ATMHEX, 31 %LAMBTS, 76 %GGTFM) and **30 rows
+renamed** (§13.9), plus dated notes on 16 more (the twelve `NVQUOT*` windows,
+`tol_w802260_curve`, `lambts_pred_map`, `cand_LAMFA`, `cand_LAMKAMLW`). Most new
+rows are scalars; the table count moves by 36.
+
+### 13.1 %ATM completed: the pipe-segment chain (VERIFIED-STATIC)
+
+`atm_exhaust_temp_model` 0x1043C8 computes every pipe segment the same way, once
+per bank (bank 1 first, keyed by `lamsbg_w` and `rkg` 0x803034; bank 2 by
+`lamsbg2_w` and 0x803032):
+
+```
+dT      = (T_gas_in >> 1) - (T_wall >> 1)
+T_out   = 2 * ((T_gas_in >> 1) - dT * FATMA*(mass flow) >> 16)             ; gas-to-wall loss
+k_amb   = (KTMOTW - 0x801A6E) * FTMOTK* >> 4  +  FATMV*[split 0x7FD890 of vfzg_w]
+T_wall += [dT * FATMA * f(mass flow) - k_amb * (T_wall - T_ambient 0x80222C)] / KATMCP*   ; FUN_0040C2EC, FUN_0040CD3C
+first call: T_wall = (T_start * FATMTW* + T_ambient * (256 - FATMTW*)) >> 8                 ; FUN_000AC2C4
+```
+
+Which output feeds which input fixes the order of the segments, and that order
+is the FR's (`%ATM` APP, blocks ATMTANAV … ATMTANTHK):
+
+| segment | FR block | gas out (bank 1 / 2) | wall | FATMA* (mass flow) | FATMV* (no draft row) | KATMCP* (raw) | FATMTW* | FTMOTK* |
+|---|---|---|---|---|---|---|---|---|
+| exhaust valve lag | ATMTANAV | 0x801772 / 0x801770 | — | — | — | `KATMCPAV` 0x5D1BEA = 540 | — | — |
+| manifold | ATMTAIKR | **`taikr_w` 0x801766 / 0x801750** | 0x801802 | `FATMAKR` 0x5D1AB0 (0.045 … 0.016) | `FATMVKR` 0x5D1B96 | `KATMCPKR` 0x5D1BEE = 1485 | `FATMTWKR` 0.957 | `FTMOTKKR` 1 |
+| front pipe | ATMTANKR | **`tavro_w` 0x8017A2 / 0x80179C** | 0x801812 | `FATMARO` 0x5D1B16 (all 0) | `FATMVRO` 0x5D1BC0 | `KATMCPRO` 630 | `FATMTWVK` 0.957 | `FTMOTKVK` 1 |
+| pipe before the pre-cat | ATMTAVVK | **`tavvk_w` 0x8017B6 / 0x8017A8** | 0x801816 | `FATMAVK` 0x5D1B38 (all 0) | `FATMVVK` 0x5D1BCE | `KATMCPVK` 6300 | `FATMTWVK` | `FTMOTKVK` |
+| pre-catalyst, 2 monoliths | ATMVK | **`tkivkm_w` 0x8017DE / 0x8017D8**, out 0x8017CA | — | (G4: `EAVK*`, `EBVK*`, `MATMA/BVK`) | | | | |
+| pipe after the pre-cat | ATMTANTVK | **`tanvk_w` 0x801786 / 0x80177C** | 0x80180A | `FATMANVK` 0x5D1AF4 (all 0) | `FATMVNVK` 0x5D1BB2 (all 0) | `KATMCPNVK` 4950 | `FATMTWNVK` 0.738 | `FTMOTKHK` 4 |
+| pipe before the Y | ATMTANVK | 0x8017BE / 0x8017B8 | 0x80181A | `FATMAVY` 0x5D1B5A (all 0) | `FATMVVY` 0x5D1BDC | `KATMCPVY` 2250 | `FATMTWHK` 0.738 | `FTMOTKHK` |
+| pipe before the main cat | ATMTAVHK | **`tavhk_w` 0x80179A / 0x801790** | 0x80180E | `FATMAHK` 0x5D1A8E (0.32 … 0.10) | `FATMVHK` 0x5D1B88 | `KATMCPHK` 6750 | `FATMTWHK` | `FTMOTKHK` |
+| main catalyst | ATMTKHK | **`tkihkm_w` 0x8017D2 / 0x8017CC**, out 0x8017C4 | — | (G4: `FATMEHK`, `MATMA/BHK`) | | | | |
+| pipe after the main cat | ATMTANTHK | `tanhk_w` 0x801778 / 0x801776 | 0x801806 | `FATMANHK` 0x5D1AD2 (0.13 … 0) | `FATMVNHK` 0x5D1BA4 | `KATMCPNHK` 1350 | `FATMTWNHK` 0.738 | `FTMOTKHK` |
+
+* **Units.** The wall-loss curves are Q16 (`>> 16` at every use) — `static`;
+  the FATMTW* factors are /256 (`FUN_000AC2C4`) — `static`; the heat capacities
+  and FTMOTK* have no derived scale (the FR defaults 80 … 1400 J/K do not map
+  onto 540 … 6750 by one factor) and stay raw. The temperatures are G4's u16 at
+  3/128 K, and every threshold of §13.3 lands on a whole °C under it.
+* **The FATMV* tables** are seven u16 tables of seven points each at
+  0x5D1B88 … 0x5D1BDC, read by index with the split 0x7FD890 of `SVF07TMUW`
+  (§13.5). The detector did not record them, so they have no draft row and
+  cannot enter the sidecar; the labels above follow from the segment each is
+  used in and agree with the FR order `FATMVHK < FATMVKR < FATMVNHK < FATMVNVK
+  < FATMVRO < FATMVVK < FATMVVY`. Raw values: HK 1382 … 8064, KR 138 … 806,
+  NHK 17 … 294, NVK all 0, RO 29 … 1319, VK all 0, VY 1168 … 4929. Listed for a
+  detector pass (`enumerate_maps.py` misses index-read tables).
+* **Four segments are applied dead** (`FATMARO`, `FATMAVK`, `FATMANVK`,
+  `FATMAVY` all zero): the gas passes through them unchanged, which is what the
+  FR APP says to do with a pipe of about zero length. So on this car the
+  temperature before the pre-catalyst equals the manifold temperature, and the
+  one after it equals the monolith outlet.
+* **`CWATM` 0x5D18D8 = 112** (bits 4, 5, 6): the model states start from the
+  stored after-run temperatures (0x7F9234 / 0x7F9232 / 0x7F9230 / 0x7F922E),
+  not from constants. `SOPOF` 0x5D18E1 = 1 and `SOPOH` 0x5D18E2 = 4 select the
+  probe positions behind the pre-catalyst and behind the main catalyst the same
+  way G4's `SOPOV` selector does; the u8 order promotes `cand_SOPOV` too.
+
+### 13.2 %ATMHEX: the lambda-probe hexagon (9 objects)
+
+`FUN_00108204` is FR `%ATMHEX` (p2287-2291), one more segment on the manifold
+temperature with its own wall: `FATMAHX` / `FATMAHX2` (Q15 at the use: 0.41,
+0.30, then 0), `FATMVHX` / `FATMVHX2` (a **curve over `vfzg_w`** 0x802260,
+50 … 220 km/h, unlike the %ATM tables), `KATMCPHX` / `KATMCPHX2` = 945,
+`FATMTWHX` = 255/256, `FTMOTKHX` / `FTMOTKHX2` = 3. All `static` labels (role
+and slot agree). FR_MODULES gains `ATMHEX`.
+
+### 13.3 %LAMBTS by exhaust location — the thresholds H1 left descriptive (VERIFIED-STATIC)
+
+With the locations of §13.1, `lambts_temp_cond` 0x0E1054 reads exactly as FR
+`%LAMBTS` FB 1.1: three locations **before** the pre-catalyst share one
+debounce, four **from** it on share another, and the hard threshold on the
+pre-catalyst inlet bypasses both:
+
+| location (max of both banks) | threshold | value | group, delay |
+|---|---|---|---|
+| manifold `taikr_w` | **`TAIKRBTS`** 0x5D18AE | **875.0 °C** | upstream, `TVLBTSVVK` 0x5D18D7 = 5.0 s |
+| front pipe `tavro_w` | **`TAVROBTS`** 0x5D18B8 | **875.0 °C** | upstream |
+| before the pre-cat `tavvk_w` | **`TAVVKBTS`** 0x5D18BA | **875.0 °C** | upstream |
+| after the pre-cat `tanvk_w` | **`TANVKBTS`** 0x5D18B2 | **1050.0 °C** | downstream, `TVLBTS` 0x5D18D6 = 0 s |
+| before the main cat `tavhk_w` | **`TAVHKBTS`** 0x5D18B4 | **900.0 °C** | downstream |
+| pre-cat monolith `tkivkm_w` | **`TKIVKBTS`** 0x5D18CC | **1050.0 °C** | downstream |
+| main-cat monolith `tkihkm_w` | **`TKIHKBTS`** 0x5D18C8 | **1050.0 °C** | downstream |
+| `tavvk_w`, soft | **`TAVVKBTSW`** 0x5D18BE | 875.0 °C | the upstream delay drops to 0 |
+| `tavvk_w`, hard | **`TAVVKBTSH`** 0x5D18BC (was `lambts_temp_full`) | **905.0 °C** | weight 1.0 at once |
+| `tavvk_w`, predicted protection | **`TAVVKBTSP`** 0x5C693C | 65535 = off | — |
+
+with the hysteresis **`DTBTS`** 0x5C693A = 60.0 K, the weight PT1 `cand_ZLBTS`
+0x5D18D4 (0.05 per 100 ms) and the code word **`CWLAMBTS`** 0x5C6938 = 259.
+The overrun cut-off block of the same function (disassembly 0x0E14F0-0x0E1664;
+the decompiler drops it) adds the five `…SAO` limits (all 65535 = never
+limiting), two 50 K margins and **`VFZGSA`** 0x5D18D2 = 150 km/h; the
+charge-limit integrator at the rich limit adds **`DFRLBTSN`** −0.030 /s,
+**`DFRLBTSP`** +0.005 /s and **`FRLBTSMN`** 0.850. The gear branch (0x5D1882 /
+0x5D1898) gets its two delays (120 s, 10 s) and its PT1 as descriptive rows —
+it is not in the FR. `lambts_build` adds `SNM16GK2UB` / `SRL12GK2UB`, the
+detazwbs axis 0x5C6942 (0 … 0.40) and two filter curves.
+
+**Consequence for H1's §12.3.** Row 3 (the 0.730 of the predicted protection) is
+unreachable, because `TAVVKBTSP` = 65535 means `B_tatmbtsp` 0x7FE9F8 is never
+set (§12.3 is marked in place). Rows 2 and 4 are unchanged; the 875 °C that
+arms them is the **manifold / pre-catalyst inlet** temperature, the 1050 °C the
+catalyst ones. These are the limits #43 needs (checklist draft 5).
+
+### 13.4 Items decided (the H1 hand-over and G4's hypotheses)
+
+* **Grenzkat (G4 §11.6) — SETTLED.** The consumer decides: the section G4 took
+  for the pre-catalyst writes `tkivkm_w`, compared with `TKIVKBTS`, and feeds the
+  pipe whose outlet is compared with `TANVKBTS`. The parallel section's outputs
+  0x8017D6 / 0x8017D4 and 0x801780 / 0x80177E have **only stores** in the image
+  (`tools/sda_xref.py --var`: 0x10554C, 0x106B30, 0x119804, 0x1199B8 and
+  0x10559C, 0x106B80, 0x119810, 0x1199C0; no `lis` pair in
+  `tools/find_abs_refs.py --range`, no pointer in `tools/find_branch_refs.py`): a
+  write-only reference model, the FR's "wird nur für %DKATTH benötigt". `EAVKG`,
+  `EAVKGH`, `EBVKG`, `EBVKGH`, `MATMAVKG`, `MATMBVKG`, `TAVVKGEMN`, `TOEXTVKG`
+  lose the `cand_`; `MATMAHK` / `MATMBHK` follow from the FW block order.
+* **`KFLBTS` 0x5C6636, `KFLBTS2` 0x5C66F6, `KFFDLBTS` 0x5C6576 — SETTLED.** All
+  three are 16 × 12 on `SNM16GK2UB` × `SRL12GK2UB` (0x5C6953 / 0x5C6964, now
+  named), the FR's axes for exactly these labels; the second map is used for
+  bank 2 unconditionally, so it is the bank twin, not `KFLBTSLBKO`.
+* **`KFDZWKG` — DECIDED for 0x5C76D5.** FR %ZWGRU p3090 draws `dzwkg =
+  KFDZWKG(nmot_w, lambas_w)`; 0x5C76D5 is keyed by nmot and the mean lambda
+  setpoint (H1) and is 0 at λ = 1. B7's 0x5C753E has no lambda input (the KFZW
+  grid and a Q15 weight of 0x800EC0 − 0x800020), so it loses the label and
+  becomes the descriptive `dzw_kg_weighted_map` (its clamp 0x5C753D
+  `dzw_kg_weighted_max`); its shape resembles FR `KFDZWKGAGR`, which is not
+  claimed. The integrator carries all three into the draft (§13.9).
+* **`cand_LAMFA` 0x5D34D8 — stays a candidate.** Its second key is the charge
+  request `rlsol_req`, the FR's is the torque request `mrfa_w`; role, output and
+  every companion label match, the axis quantity does not.
+* **`cand_LAMKAMLW` 0x5D3430 — stays a candidate.** The FR declares one
+  clear-out lambda, a curve over `ml_w`; this is a 5 × 5 map over 0x80189E
+  (which §13.1 identifies as the exhaust mass flow before the main catalyst) and
+  0x801CC2.
+
+### 13.5 The vehicle-speed unit behind `nvquot_w` (G4 §11.7) — SETTLED
+
+0x802260 is **`vfzg_w` at 1/128 km/h**: its only store (0x45C940) copies
+0x80225E (0 while 0x7F9E2F bit 0 is set), whose only store (0x45C924) is a
+low-pass of the speed, and 0x80225E is VCDS id 86, whose handler 0x039C44 emits
+`min(v >> 7, 255)` with formula 0x07, A = 100 (the handler VERIFIED-STATIC, the
+formula meaning COMMUNITY). Under it the axis 0x5D7A68 reads 50, 80, 120, 150,
+180, 200, 220 km/h — it is **`SVF07TMUW`** (renamed from
+`axis_ram802260_5D7A68`) — and `nvquot_w` is 1/128 rpm per km/h, so the six
+gear windows read 200/76, 109/51, 65/40, 47/32, 36/27, 29/15 rpm per km/h, which
+a six-speed box fits. The twelve `NVQUOT*` rows' scale is now `static`;
+`tol_w802260_curve`'s axis is 5.5 / 6.0 / 7.5 km/h. One VCDS log of id 86
+against the speedometer confirms it on the car.
+
+### 13.6 The tmot model `FUN_000F90C8` is FR %GGTFM (76 objects)
+
+The ~50 thresholds of the brief are the tmot signal diagnosis and its two models
+(FR `%GGTFM` ABK p3665), read in the tmot unit 0.75 °C/LSB − 48:
+
+| part | objects (values) |
+|---|---|
+| range check | **`TMDMN`** −45.0 °C, **`TMDMX`** 138.75 °C, debounce `cand_TDTM` 5 |
+| step ("Delta zu groß") | **`DTMDZG`** 15.0 K, **`DTMRESDZG`** 5.25 K, **`TMDZGMN`** −44.25 °C, **`TWRDZGMX`** 50 |
+| stuck signal | **`TMSSSCO`** / **`TMSSSCU`** 140.25 / −44.25 °C, **`TWSSCTM`** 30, **`ZKTMLINSS`** 11/65536, **`KLDTMFXTM`** (0 / 2.25 K), **`TMESSCMN`** 48.0 °C, **`AFZBKLH`** 1 / **`AFZBKLN`** 6 cycles |
+| cooling-power conditions | **`VBKLHO`/`VBKLHU`** 160 / 60 km/h, **`VBKLNO`/`VBKLNU`** 6.25 / 0 km/h (0x802257 at 1.25 km/h, id 25), **`MLOBKLHV`, `MLOBKLNV`, `MLUBKLHV`, `MLUBKLNV`** over speed, **`TWBKLHON`/`OF`** 1600 / 400, **`TWBKLNON`/`OF`** 50 / 150, `cand_TDBKLOFF` 80 |
+| thermostat monitor | **`KLITHMS`** (integrated-air threshold over tmst), **`KLTHMDTMS`** (69.75 … 5.25 K over tmst) |
+| NTC pull-up | **`TMPUPOFF`** 43.5 °C / **`TMPUPON`** 50.25 °C, `cand_UBMNPUP` 66 raw |
+| hot start | **`TANH1`** 35.25 °C, **`TANDT1`** (30 … 0 K over tans at stop) |
+| substitute model `tmot_subst_model` 0x8021EB (FR tmew) | **`TMDMMAU`** −30 °C, **`TUMDETM`** 9.75 °C, **`TMDMMEE`** 95.25 °C, **`KFDTMTE`**, **`FABSTT`** (0 … 1 over the off time), **`TMDMMAT`** (90 / 39 / 15 °C), `cand_CW_TABST` |
+| reference model `tmot_ref_model` 0x8021F4 (tmrw) | **`TMDMMER`** 54.75 °C, **`KFDTMTR`**, **`KFDTMTU`**, **`KFDTMRS`**, `tans_subst_ref_model` −30 °C, `tmot_model_start_delay` 300 |
+| block heater `dtmbh` 0x8021D8 | **`KFDTMBH1` … `KFDTMBH4`** (1 + 2 or 3 + 4 summed), `cand_DTMSRT` 2.25 K, `cand_TMMXRT` 60 °C |
+| plus | 16 count bytes, `tmot_sensor_config`, `CW_tmot_ggtfm`, `cand_FRWKSCH`, `cand_TMDMXKST`, `tmst_min_plaus_curve`, `tmot_model_gain_curve` |
+
+The eight s8 gradient maps are `static` labels because each one's second input is
+the FR's (`tmotlin` / `tansstbh` / `tmrw` / `tmew` / `tum`) *and* the eight sit
+in FR order; their values stay raw (Q10 of 0.75 K per call). For flex fuel
+nothing here needs to change: the model is about coolant, and its only
+fuel-dependent input is `mll1_tmot` 0x8021E8 = f(`lamsbg_w`), which an E85
+lambda request leaves at 1.0. FR_MODULES gains `GGTFM`.
+
+### 13.7 %TEB: G4's four candidates settled
+
+`NVERZMN` 0x5D4982, `DSTEMIN` 0x5D4828, `FVERMN` 0x5D4705 and `SQM05TEUB`
+0x5C732B (was `axis_qmsdyn_5C732B`): each role is the FR's single label for it
+and each sits at its alphabetical slot among the neighbours G4 already made
+`static` (`FTEVFXHM < FTEVFXS < FVERMN < FVRMDYN`; `DSTEMIN < FRKTEMN < FRKTEMX
+< NVERZMN`). `FVRMDYN` (0x5D470B) and `FVERZDYN` (0x5D4890) are read by index
+and have no draft row.
+
+### 13.8 Open after this pass (time-boxed, not settled)
+
+* **`%GK` running-mixture maps (F4 §10.3).** Not reached; the 13 `mix_*` rows
+  keep their descriptive names. The one that matters for E85 is still
+  `mix_801CF5_map` 0x5D3580 (the warm-up enrichment).
+* **`%RKTI` / `%ZGST`.** `rk2ti`, `fkkvs_func`, `gk_rk`, the `gk_seg_*`
+  functions and the purge block have three unnamed scalars left (0x5C6F08,
+  0x5D46E6, 0x5D46E7); `%ZGST` has no identified function in `re/symbols.csv`.
+  Not reached.
+* **The %TEB adaptation `FUN_000ECE7C`**: 57 unnamed objects (0x5D46C4 …
+  0x5D499A) — the natural block for pass 6; the FR ABK p1949-1950 is the reading
+  list.
+* Heat capacities, FTMOTK* and the FATMV* values have no derived unit.
+* The FATMV* tables and `DLBTS` 0x5C6876 are index-read tables with no draft
+  row (§13.1, §13.3).
+
+### 13.9 RENAMED labels (for the integrator; each row's evidence says "RENAMED from …")
+
+The draft's `name_or_blank` is non-empty for three, which the integrator carries
+into `re/calibration_draft.csv`: **0x5C753D `cand_DZWKG_MAX` →
+`dzw_kg_weighted_max`**, **0x5C753E `cand_KFDZWKG` → `dzw_kg_weighted_map`**,
+**0x5C76D5 `dzw_lambas_map` → `KFDZWKG`**. The other 27 have an empty draft
+label: `cand_KFFDLBTS` → `KFFDLBTS`, `cand_KFLBTS` → `KFLBTS`, `cand_KFLBTS2`
+→ `KFLBTS2`, `axis_qmsdyn_5C732B` → `SQM05TEUB`, `lambts_temp_thr_18AE` →
+`TAIKRBTS`, `_18B2` → `TANVKBTS`, `_18B4` → `TAVHKBTS`, `_18B8` → `TAVROBTS`,
+`_18BA` → `TAVVKBTS`, `lambts_temp_full` → `TAVVKBTSH`, `_18C8` → `TKIHKBTS`,
+`_18CC` → `TKIVKBTS`, `cand_SOPOV` → `SOPOV`, `cand_EAVKG` → `EAVKG`,
+`cand_EAVKGH` → `EAVKGH`, `cand_EBVKG` → `EBVKG`, `cand_EBVKGH` → `EBVKGH`,
+`cand_MATMAHK` → `MATMAHK`, `cand_MATMAVKG` → `MATMAVKG`, `cand_MATMBHK` →
+`MATMBHK`, `cand_MATMBVKG` → `MATMBVKG`, `cand_TAVVKGEMN` → `TAVVKGEMN`,
+`cand_TOEXTVKG` → `TOEXTVKG`, `cand_FVERMN` → `FVERMN`, `cand_DSTEMIN` →
+`DSTEMIN`, `cand_NVERZMN` → `NVERZMN`, `axis_ram802260_5D7A68` → `SVF07TMUW`.
+`re/symbols.csv` renames `cand_DZWKG_MAX`, `cand_KFDZWKG` and `cand_KFZWETA`
+the same way (dated note at the end of each notes field).
+
+### 13.10 Reproducing
+
+```bash
+mkdir -p /tmp/ghidra_H5 && cp -R ghidra_projects/med9.gpr ghidra_projects/med9.rep /tmp/ghidra_H5/
+export GHIDRA_INSTALL_DIR=/usr/local/Cellar/ghidra/12.1.3/libexec
+./.venv/bin/python -m pyghidra.ghidra_launch --install-dir "$GHIDRA_INSTALL_DIR" \
+    ghidra.app.util.headless.AnalyzeHeadless /tmp/ghidra_H5 med9 \
+    -process passat_azx_ori.bin -noanalysis -scriptPath ghidra_scripts -postScript import_symbols.py "$PWD"
+./.venv/bin/python ghidra_scripts/decompile.py --project-dir /tmp/ghidra_H5 --project-name med9 \
+    0x1043C8 0x108204 0x0E1058 0x42EF10 0x0C58B0 0x0F90C8 0x11AA28 0x0AC2C4 0x41D2D8 0x455C60 \
+    0x410EF0 0x410598 0x41061C 0x4105E4 0x410AF0 0x4107E8 0x4108BC
+./.venv/bin/python ghidra_scripts/decompile.py --project-dir /tmp/ghidra_H5 --project-name med9 \
+    --asm 0x0E14AC --count 150 --asm 0x45C8E0 --count 32 --asm 0x39C44 --count 12 \
+    --asm 0x39494 --count 10 --asm 0x115BC4 --count 12
+./.venv/bin/python3 tools/sda_xref.py data/passat_azx_ori.bin --var 0x80177E 0x801781   # stores only
+./.venv/bin/python3 tools/sda_xref.py data/passat_azx_ori.bin --var 0x8017D4 0x8017D7   # stores only
+./.venv/bin/python3 tools/find_abs_refs.py data/passat_azx_ori.bin --range 0x80177E 0x801781
+./.venv/bin/python3 tools/find_branch_refs.py data/passat_azx_ori.bin 0x80177E 0x801780 0x8017D4 0x8017D6
+./.venv/bin/python3 tools/sda_xref.py data/passat_azx_ori.bin --var 0x80225E 0x802261   # 0x45C924, 0x45C940
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin --raw 0x5D18A0 27 u16   # the %LAMBTS thresholds
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin --raw 0x5D1B88 49 u16   # FATMV* x 7
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin --raw 0x5D1BEA 8 u16    # KATMCP*
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin --raw 0x5D734A 34 u8    # %GGTFM FW block
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin 0x5D1AB0 --scale 1/65536   # FATMAKR
+```
+
+FR pages read: `%ATM` ABK p2272-2276 and APP (typical values), `%ATMHEX` ABK
+p2289 / APP p2290, `%LAMBTS` ABK p2577 and FB 1.1-1.2, `%ZWGRU` p3073 / p3090
+(`KFDZWKG`, `DZW_KGAGR`), `%BGFAWU` p325, `%LRSKA` ABK p2655, `%GGTFM` ABK
+p3665-3667, `%TEB` ABK p1949-1950.
