@@ -815,6 +815,20 @@ config pointer 0x803DDC is set, and runs `kwp_service_h2_walk` 0x13ECB0 once
 per new TP2.0 channel (obd.md §10.1): that walk also resets the session to 0
 and `14`'s state byte.
 
+> **2026-09-24 (H2, #47) — 0x7FEB59 is a different byte from 0x7FEB65, and it
+> is now settled.** G5 left 0x7FEB65 as the `14`/`10 85` "engine running /
+> programming-mode active" gate (HYPOTHESIS, unchanged). **0x7FEB59** is the
+> **abnormal / just-programmed boot latch**: sole writer 0x134030 inside
+> `boot_mode_classifier` 0x133F40, set to 1 when this boot follows a
+> programming request (magic 0x7F8020 = 0xAABFFB11) or the flashed HW/SW
+> identity mismatches (VERIFIED-STATIC, `re/findings/eeprom.md` §11.3). It is
+> gate 1 of `fault_clear_then_adaptation_reset` 0x0D1068, which runs *this*
+> §12.7 fault-clear machine 0x035300 (committing block 24) and then, unlike a
+> plain `14 FF 00`, resets all 17 adaptation channels through 0x038D64. So the
+> fault-clear machine documented here has a **second, tester-free caller** that
+> chains an adaptation reset after it; a workshop DTC clear does not
+> (0x038D64's only caller is 0x0D10D0). See `re/findings/eeprom.md` §11.
+
 Reproduce:
 
 ```bash
