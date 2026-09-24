@@ -390,7 +390,8 @@ rates fall proportionally. The CSV is long-form (section 1), so a slow variable
 simply has fewer rows.
 
 **A RAM snapshot takes about a minute** (63,932 bytes, 1,032 TransferData
-blocks). Do the six of `re/findings/ram.md` section 9 in one sitting, one
+blocks; *corrected 2026-09-24 (H4): 1,034, one short last block per range,
+`re/findings/ram.md` §9*). Do the six of `re/findings/ram.md` section 9 in one sitting, one
 command each, `--session-name` naming which of the six it is:
 
 ```bash

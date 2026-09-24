@@ -501,6 +501,14 @@ PATCH_RAM_SIZE = 0x100          /* 256 bytes */
 `kwp_upload_range_check` (0x0A3160) rejects with NRC 0x31 — 63,932 bytes,
 1,031 TransferData blocks of 62 bytes.
 
+> **Corrected 2026-09-24 (H4):** 1,031 was 63,932 / 62 rounded down. Every
+> range is its own RequestUpload with a short last block, so the snapshot is
+> **1,034 TransferData blocks** (125 + 312 + 67 + 265 + 265 for the five
+> ranges of `ram_snapshot.json`). The 1,032 that `med9log dump` printed (and
+> G6 measured with `--sim`) was ceil(63,932 / 62); the tool now counts per
+> range and prints 1,034. Derivation:
+> `sum(ceil(b/62) for b in (7740, 19328, 4096, 16384, 16384))`. VERIFIED-STATIC.
+
 **Protocol** (C3's logger, one JSON file per session in
 `logging/sessions/`):
 

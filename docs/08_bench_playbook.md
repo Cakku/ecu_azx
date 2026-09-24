@@ -733,3 +733,6 @@ from the log.
    `ram.md` §9 says 1,031. The tool prints `5 ranges, 63932 bytes, 1032
    TransferData blocks`, because each of the five ranges rounds up. It does not
    matter for the procedure.
+   *Settled 2026-09-24 (H4): both were wrong — per-range rounding gives
+   1,034; the tool printed ceil(total / 62) = 1,032 and now prints 1,034
+   (`ram.md` §9).*
