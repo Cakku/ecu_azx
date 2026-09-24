@@ -384,6 +384,7 @@ blocks)`, dump SHA-256 unchanged.
 | 2 | [G2 Documentation consistency](G2_docs_consistency.md) | doc debt of #34/#38/#41 | — | `re/findings/ignition.md`, `docs/05` §3.4/§3.7, `docs/06`, non-flashing `docs/07`. **Does not touch `calibration_names.*`, `rail.md`, `patches/ff_fuel/**`, `boot.md`, `logging/`** |
 | 3 | [G5 Simulator fidelity round 3](G5_simulator_fidelity_pass3.md) | #20, #22 prep, #37 rehearsal | **G3 merged** (for the CRC period) | `logging/ecu_sim.py`, `logging/bench_rehearsal.py`, `emu/` (additive), `logging/sessions/flash_crc.json`, `tests/test_ecu_sim_*` |
 | 3 (filler) | [G6 Bench-day playbook](G6_bench_day_playbook.md) | #20 #23 #26 #27 #44 desk half | — | new `docs/08_bench_playbook.md`, `docs/README.md` row, one dated note in `docs/07` §3 |
+| follow-up (found during the wave) | [G7 Move the E% store off the adaptation-channel bytes](G7_persist_offset_off_channels.md) | #38 | **G2 and G5 merged** | `patches/ff_fuel/**`, `emu/models/flexfuel.py`, `tests/test_ff_*`, `logging/sessions/ff_fuel.json`, `re/findings/eeprom.md` §4/§5/§9/§10.5, docs/05 §3.8 SETTLED mark. **The only brief after G1 in `patches/ff_fuel`** |
 
 Why this order and split. **G1 first in pair 1** because it is the only feature
 work and it owns `patches/ff_fuel` alone (the "one patch grows" rule); it takes
@@ -434,6 +435,12 @@ list; do not close any issue — every remaining item keeps a bench half):
 4. **#41 / #43**: G4 is naming pass 4 and tuning-checklist draft 3.
 5. Milestone descriptions: add a 2026-09-23 line noting wave F merged and wave G
    planned. Counts unchanged; no issue wrongly open or closed.
+
+**Wave-G integration note, integrator (2026-09-24).** G2's block-8 finding was
+confirmed from the dump and graded (docs/05 §3.8, note of 2026-09-24: channel 1
+is clamped to 0/0, so the collision is benign for the engine; the exposure is a
+workshop channel-0 reset zeroing the stored E %). Brief **G7** (row above) moves
+the store to +19 after G5 makes the rehearsal read the offset from FFCAL001.
 
 **Wave-G integration notes, G2 (2026-09-23).**
 * *procedure.md §1 hook-count drift* (G2 item 3): **already closed**. Fixed

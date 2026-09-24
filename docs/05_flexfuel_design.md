@@ -1033,6 +1033,21 @@ before the manager's +29), or channel-free space in block 24 (Fallback A).
 Filed for the integrator in `docs/agent_briefs/README.md` wave-G notes. The
 integrator decides where `ff_persist_offset` moves, in a follow-up brief.
 
+**Integrator note, 2026-09-24 (after G2, G3 merged) — grading and ruling.**
+Consequence (a) is settled **VERIFIED-STATIC, benign on this dataset**: the
+only reader of 0x7FD06B is 0x46B0BC in the function at 0x46B09C, which passes
+the s8 as the *value* of `clamp(value, lo, hi)` at 0x410ACC (`cmpw r4,r5 / ble;
+cmpw r4,r3 / bge`) with `lo` = s8 0x5C608F = 0 and `hi` = s8 0x5C608E = 0
+(`tools/blobdis.py` over 0x46B040-0x46B1F0 and 0x410ACC; file 0x1C608E holds
+`00 00`), so the result is 0 whatever the restored byte is. Consequence (b)
+stands: a channel-0 reset + commit (sub-function 0x83 commits block 8, F4
+§10.1) zeroes the store, and a tester reading channel 1 sees the E %. **Ruling:**
+the store moves to a payload byte outside +2 … +18 — brief
+`docs/agent_briefs/G7_persist_offset_off_channels.md` (FFCAL001 default
+2 → 19, no layout change; emulator proofs for the restore loop and the
+channel-0 reset; `eeprom.md` §4/§5/§9/§10.5 corrected in place). Until G7 is
+merged, `ff_persist_enable` stays 0 on any bench image.
+
 ## 4. New calibration data
 
 All new parameters live in one block inside 0x5E2510-0x5EFFFF (all 0xFF
