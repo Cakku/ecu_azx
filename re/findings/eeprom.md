@@ -597,6 +597,18 @@ found. This is a **correction to the reading implied in
 4. The exact identity of blocks 4, 9, 13-23, 25-31 — plausibly the fault-path
    (`DFPMEEP`) and IUMPR blocks the FR lists, reached only through the
    run-time-indexed call sites.
+   *2026-09-24 (G5, #22 prep): **still open — named, not reversed.** The
+   simulator's DTC read-back does not need them: `18`/`17`/`14` read the RAM
+   fault memory at 0x7F8890 (20 × 0x5C, `kwp.md` §12.7), which the
+   rehearsal seeds as a labelled model. One adjacent fact, VERIFIED-STATIC:
+   `kwp_sid_14_h1` (clearDiagnosticInformation) commits **block 24** —
+   `nvm_block_request(0x18, …)` at 0x3536C/0x353B0, the handle record reads
+   block 0x18 done in the emulator — so block 24 belongs to the same
+   fault-memory family although it is not in this list. It is the largest
+   block — length 0xFF, EEPROM 0x620-0x71F (eight pages), mirror 0x7FA2A0,
+   inside the upload-protected window (`tools/eeprom_map.py`) — and the
+   handler zeroes a 251-byte stack buffer before its first call
+   (0x35338-0x35350). What the payload holds is not established.*
 5. Whether the external SRAM is 32 KB or 64 KB on our hardware (RAM 0x7F8012
    at run time answers it). *2026-09-16 (C2, #23): the probe is now emulated
    under both models — `python3 -m emu.ext_sram_probe` gives 0x44 with plain
