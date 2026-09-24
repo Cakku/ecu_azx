@@ -185,7 +185,7 @@ logging/
 ## 4. Rehearse everything against the simulator first
 
 ```bash
-python3 logging/ecu_sim.py --self-test          # 18 services, RESULT: PASS
+python3 logging/ecu_sim.py --self-test          # 23 steps (18 before G5), RESULT: PASS
 python3 logging/med9log.py probe  --sim
 python3 logging/med9log.py groups --sim 1 3 106 231
 python3 logging/med9log.py log    --sim --seconds 2 \
@@ -208,6 +208,14 @@ second terminal on `virtual:` will not work (put it on a real adapter if you
 want that). Nothing it produces is a recording of an ECU, and both the CSV and
 the snapshot manifest say so in a `# simulated:` / `"simulated"` line —
 **never put a simulated snapshot into the #23 comparison set.**
+
+> **2026-09-24 (G5, #22 prep).** The simulator also answers the fault services
+> with the firmware's own handlers — `18 00 FF 00` (read DTCs), `17 hi lo`
+> (status of one) and `14 FF 00` (clear; needs `--eeprom`, it commits EEP_CONF
+> block 24 and answers `7F 14 78` then `54 FF 00`) — and `--seed-dtc P0601`
+> puts a fault into the firmware's RAM fault memory (a labelled model of the
+> fault-path manager); `bench_rehearsal.py --only dtc` rehearses the bench
+> day's "clear DTCs, then read them back".
 
 ### Session files
 
@@ -457,7 +465,7 @@ session file and the tolerances, not the ECU.
 ./.venv/bin/python3 logging/med9log.py groups --sim \
     --sim-patch patches/ff_fuel --eeprom work/eeprom.bin 111 108
 
-# 3. all eleven procedure steps, graded
+# 3. all thirteen procedure steps, graded (eleven before G5 added dtc and pid52)
 ./.venv/bin/python3 logging/bench_rehearsal.py --fresh-eeprom
 ```
 
@@ -543,7 +551,8 @@ tolerances themselves; `bench_rehearsal.py` calls the tool's `align_on` and
 | **not** any other OS task | the stock baseline runs only what the hook sites replace (`--sim-stock-tasks`) |
 | the firmware's own one-shot init entries at power-on | `ecu_sim.INIT_ENTRIES` (F3; `boot.md` section 6.5) |
 | a running PowerPC time base for `read_time_base` | `emu/time_base.py` (F3) — without it the real `27 01` never returns |
-| the firmware's flash CRC-32 task, one activation per simulated 10 ms raster | `ecu_sim.FlashCrcTask`, `--flash-crc` / `med9log --sim-flash-crc` (F3) |
+| the firmware's flash CRC-32 task, five activations per background loop T_bg (G5; was one per 10 ms, F3) | `ecu_sim.FlashCrcTask`, `--flash-crc [T_BG_MS]` / `med9log --sim-flash-crc` |
+| the fault services 18 / 17 / 14 over the firmware's RAM fault memory; the seeding and the post-clear erase are labelled models | `ecu_sim.DtcStore`, `--seed-dtc` (G5) |
 | **not** every other init-table entry | 1,028 of them, most touching peripherals the emulator does not model; the residue is a table in `ecu_sim.py`'s docstring |
 
 > **2026-09-22 (F3, #20/#38).** `power_on` no longer hand-seeds the KWP
@@ -553,3 +562,13 @@ tolerances themselves; `bench_rehearsal.py` calls the tool's `align_on` and
 > publishes **0x5562139F** to 0x7F9178/0x7F917A after 24,627 activations
 > (246 simulated seconds), and `logging/sessions/flash_crc.json` logs the
 > cursor and the running register, which move every activation.
+
+> **2026-09-24 (G5, #20).** The CRC period is G3's, not a raster: `--flash-crc
+> [T_BG_MS]` runs five activations (500 bytes) and one tick of the loop counter
+> 0x7FD70C per background loop T_bg, and the value appears in loop 4,926 =
+> 4,926 × T_bg (default 50 ms = 246 s, a HYPOTHESIS inside the VERIFIED-STATIC
+> bound 0.51-300.75 ms, i.e. 2.5 s-24.7 min on a car); `--flash-crc-warm`
+> models the warm ECU (state 7, nothing moves), `--print-flash-crc --sim-patch
+> DIR` recomputes a patched image's value. `bench_rehearsal.py` now has
+> thirteen steps: `dtc` (read, clear, read back, reconnect) after the FAULT
+> rows and `pid52` (enable, reconnect, `01 40` advertises 0x52).

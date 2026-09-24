@@ -1,0 +1,30 @@
+# session: dtc (a scripted KWP conversation, logging/bench_rehearsal.py)
+# transport: KWP2000 over TP2.0 (in-process virtual bus)
+# simulated: true
+# simulated_by: logging/ecu_sim.py -- NOT a recording of an ECU
+# sim_patch: /Users/carlo/ecu_azx/.claude/worktrees/agent-a3ebbf8865bd4969b/patches/ff_fuel
+# modelled: the stored faults P0601, P1429 (DtcStore.seed) and the erase after a positive 14 (DtcStore.after_clear); the 18/17/14 answers are the firmware's
+# kwp: t=0.000 -> 10 89  <- 50 89
+# kwp: t=0.017 -> 18 00 ff 00  <- 58 02 06 01 31 14 29 34
+# kwp: t=0.037 -> 17 06 01  <- 57 01 06 01 31
+# kwp: t=0.052 -> 14 ff 00  <- 54 ff 00
+# kwp: t=0.209 -> 18 00 ff 00  <- 58 00
+# kwp: t=0.236 -> 10 89  <- 50 89
+# kwp: t=0.254 -> 18 00 ff 00  <- 58 00
+# block_24_writes: EEPROM device writes 255
+time_s,var,value,unit
+0.0375,dtc_before_well_formed,1,-
+0.0375,dtc_before_count,2,-
+0.0375,dtc_before_0_code,1537,-
+0.0375,dtc_before_0_status,49,-
+0.0375,dtc_before_1_code,5161,-
+0.0375,dtc_before_1_status,52,-
+0.0375,dtc_seeded,2,-
+0.0518,dtc_status_query_ok,1,-
+0.2093,clear_positive,1,-
+0.2093,clear_seconds,0.1574,s
+0.2209,dtc_after_well_formed,1,-
+0.2209,dtc_after_count,0,-
+0.2651,dtc_reconnect_well_formed,1,-
+0.2651,dtc_reconnect_count,0,-
+0.2651,connections,2,-

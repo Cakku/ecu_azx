@@ -734,3 +734,97 @@ loop:  21 F0   -> 61 F0 <bytes>        ; sample
 > wrap. A tester that asks for `27 01` immediately after power-up can see the
 > request take that long. HYPOTHESIS for the behaviour on the car (it follows
 > from the loop, but the time base's start value at reset is not established).
+
+### 12.7 The fault services 0x18 / 0x17 / 0x14 and the RAM fault memory (G5, 2026-09-24, #22 prep)
+
+Brief G5 put the read-DTC surface into `logging/ecu_sim.py`. The three
+services were already in the dispatch table (mask **0x38**, sessions 3/4/5,
+§2.1) and already reached the real handlers; what was missing was the state
+they read. Everything below is **VERIFIED-STATIC** (disassembly) unless
+tagged; the emulated answers are **VERIFIED-DYNAMIC (emulated)** —
+`tests/test_ecu_sim_dtc.py` — and say nothing about a car.
+
+**`kwp_sid_18_h1` 0x35064 (readDiagnosticTroubleCodesByStatus).** Request
+length must be 3 (0x35084) and the first byte **0** (0x35090; a VCDS-style
+`18 02 FF 00` is NRC 0x12). Group `FF 00` or `00 00` reads everything; a
+group 0x0001-0x3999 goes to 0xA2274 (not followed); above that NRC 0x10. It
+calls `dfp_list_active` 0x43E080 (on-chip) for the active entries, then per
+entry `dfp_entry_read` 0x43DB20 and answers
+
+```
+58 <n> { <DTC hi> <DTC lo> <status> } x n
+```
+
+* **DTC** = u16 at **0x5D9F06 + (path × 4 + k) × 2** (0x3519C-0x351B8): four
+  SAE J2012-encoded codes per fault path (path 1 = 0x0601 = P0601, path 11 =
+  0x1427/0x1428/0x1429/0x1429), `k` the lowest set bit of entry +0x0A (bits
+  0-3 → k = 0-3, bits 4-6 → k = 0-2, none → 3).
+* **status** = one of 0x01/0x02/0x04/0x08 (the type bit that chose `k`) |
+  **0x20** always, plus **0x40** when entry +0x0B bit 0 (`ori r8,r8,0x60`) |
+  **0x10** when bit 5 of byte 0x7F9C46 + 2·path is clear |
+  **0x80** when entry +0x09 bit 4. Meaning of the bits: HYPOTHESIS, not chased.
+* An entry is listed only if entry +0x1C has bit **0x0800** (`dfp_entry_read`
+  copies it to record +5 bit 5, tested at 0x350F0).
+
+**The RAM fault memory** (from 0x43E080 / 0x43DB20): **20 entries × 0x5C
+bytes at 0x7F8890**; 0x7F91CA = entries in use (0x43DB20 bounds its index with
+it), 0x7F91CB = length of the **1-based order list at 0x7F91AA**; an entry is
+active when +0 bit 0x2000 is clear and its fault-path id +2 is non-zero. It
+lies inside the block `app_init` clears (0x7F8490-0x7FA62F, `boot.md`
+§6.7(c)), so on the car it is refilled after power-on from the fault-path
+EEPROM blocks (`eeprom.md` §7 item 4) — not reversed here.
+*Side note:* init entry 38 (`kwp_tp_buf_init`, `boot.md` §6.4) installs
+0x7F8892, 0x7F8893, 0x7F889A, 0x7F88AC — entry 0's +2, +3, +0x0A and +0x1C —
+so its name is doubtful (HYPOTHESIS that it is a fault-memory pointer init;
+`boot.md` is not this brief's to edit).
+
+**`kwp_sid_14_h1` 0x35410 (clearDiagnosticInformation).** NRC **0x22** if
+byte 0x7FEB65 is set (0x35420; plausibly "engine running" — HYPOTHESIS).
+Length must be 2; group = sub << 8 | byte 2. Group `FF 00`/`00 00` runs the
+state machine 0x35300 on 0x7FB718:
+
+1. state 0: take the fault-memory **lock** through 0x43D7AC — it succeeds only
+   if {0x7FBA5C, 0x7FBA60} = {0, 0xFFFFFFFF} and writes {0xFA, ~0xFA}; that
+   free state is left by **init entry 39** (0x12EC00, `dfp_init`, stores at
+   0x12F074/0x12F078). Then `nvm_block_request(0x18, …)` = **EEP_CONF block
+   24**, answer `7F 14 78` (status 8), time-stamp at 0x7FB71C.
+2. state 1: commit block 24 (`nvm_block_request(0x18, 0, 0, 0, 0, &0x7FB720)`)
+   and keep answering 0x78 until the handle reports done (0x7FB728 = 2).
+3. state 2: wait until **0x2AD4E9** time-base ticks (≈ 0.8 s) have passed
+   since step 1, then answer **`54 FF 00`**.
+
+A single group 0x0001-0x3999 is matched against the four codes of every
+active entry through the table pointer **0x7FBA58**, which **init entry 34**
+(0x12F10C) sets to 0x5D9F06 if cal byte 0x5CF642 == 1, else **0x5DA6DE**
+(0x5CF642 = 2 in this dump, so `14` and `18` read different tables);
+a match calls 0x43D948 for that path, no match still answers positively.
+The erase of the RAM entries is **not** in the handler: it only takes the lock.
+DFPM processes behind the lock value (0xFB/0xFC/0xFD, e.g. 0x0D4D74, and
+0x125C18 in the task-8 list at 0x0B26B0) do it later; not reversed.
+
+**`kwp_sid_17_h1` 0x36024.** Dynamically: `17 06 01` → `57 01 06 01 31` (the
+status of P0601), `17 FF 00` → NRC 0x12. Not disassembled.
+
+What `logging/ecu_sim.py` adds around these, each labelled a MODEL in its
+docstring: `DtcStore.seed` (writes an entry in the layout above), a
+re-dispatch loop for status-8 answers that pumps the NVM queue between calls,
+and `DtcStore.after_clear` (empties the store and frees the lock after a
+positive `14`). It also runs init entries 34 and 39 at power-on, calls
+`kwp_service_config_set` 0x13E974 (obd.md's `kwp_register_table`) so the
+config pointer 0x803DDC is set, and runs `kwp_service_h2_walk` 0x13ECB0 once
+per new TP2.0 channel (obd.md §10.1): that walk also resets the session to 0
+and `14`'s state byte.
+
+Reproduce:
+
+```bash
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x35064 --addr 0x35064 --len 0x290
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x352F4 --addr 0x352F4 --len 0x430
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x23A080 --addr 0x43E080 --len 0x78
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x239B20 --addr 0x43DB20 --len 0x74
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x2397AC --addr 0x43D7AC --len 0x60
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x12F040 --addr 0x12F040 --len 0xF8
+./.venv/bin/python3 tools/sda_xref.py data/passat_azx_ori.bin --var 0x7FBA58 0x7FBA64
+./.venv/bin/python3 -m unittest tests.test_ecu_sim_dtc -v
+./.venv/bin/python3 logging/bench_rehearsal.py --only dtc
+```
