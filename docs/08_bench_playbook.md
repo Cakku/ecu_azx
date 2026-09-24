@@ -468,3 +468,129 @@ and read-back files in #26 (its deliverable).
 no-op checksum correction and the read-back without any of our code in the
 ECU (`docs/07` §3.4 item 2). A failure here is a tool or harness problem, and
 nothing else. `ff_counter` procedure §0 also lists Flash 0 as a prerequisite.
+
+---
+
+## Step 6 — Flash 1: the both-sets counter (#27)
+
+**Drives:** `patches/ff_counter/test/procedure.md`: §0 (prerequisites), §1-§2
+(what is in the ECU, the DDLI), §3a-§3c (the three measurements, in that
+order), §4 (the decision table, rows A-I), §4.5 (`HOOKS=external`), §5
+(regression), §6-§7 (if wrong, roll back). Also `docs/07` §3.4 item 3 and its
+note of 2026-09-22, and `logging/sessions/flash1_counter.json`. **Unit:** the
+software-matching spare that ran Flash 0. **Gates:** S3 (step 4 passed and
+`ram_status` is `verified`), S4, S5.
+
+### 6a. Build and rehearse [Mac]
+
+```bash
+./.venv/bin/python3 tools/patch_apply.py data/passat_azx_ori.bin patches/ff_counter -o work/ff_counter.bin
+./.venv/bin/python3 tools/bindiff.py data/passat_azx_ori.bin work/ff_counter.bin -p patches/ff_counter/patch.json
+```
+
+```
+sha256: 3cd20443c068ed009b7d48b32210790eb320cb159489fc36cc1ef1ea67696498
+11 changed range(s): 5 patch (229 B), 6 descriptor (16 B), 0 unexpected (0 B)
+```
+
+Today `patch_apply.py` also prints the `ram_status` do-not-flash warning
+(`docs/07` §3.4 note). After step 4 it must not. The on-chip warning for
+0x432940 stays, by design.
+
+Rehearse rows A and B of the decision table in the simulator:
+
+```bash
+./.venv/bin/python3 logging/med9log.py log --sim --sim-patch patches/ff_counter --session logging/sessions/flash1_counter.json --patch patches/ff_counter/patch.json --seconds 3 -o work/sim_flash1.csv
+./.venv/bin/python3 logging/med9log.py log --sim --sim-patch patches/ff_counter --sim-task-set B --session logging/sessions/flash1_counter.json --patch patches/ff_counter/patch.json --seconds 3 -o work/sim_flash1_setB.csv
+```
+
+```
+session flash1_counter: 17 variables, 11 chunks on 0xf0, 44 bytes per sample
+```
+
+In the first run `ff_alive` = 64513, `ff_src_seen` = 1 and `ff_ticks` tracks
+`raster_setA_10ms_count` (row A's pattern). In the second, `ff_src_seen` = 2
+and set B counts (row B's pattern). On the stock image without `--sim-patch`,
+the block stays at 0, which is row D's pattern.
+
+**The expected flash CRC of this image**, per `flash_crc.json` item 6
+("recompute the expected value from the patched image the same way"):
+
+```bash
+./.venv/bin/python3 logging/med9log.py log --sim --sim-dump work/ff_counter.bin --sim-flash-crc --time-scale 8 --seconds 330 --session logging/sessions/flash_crc.json -o work/sim_flash_crc_ff_counter.csv
+```
+
+It publishes `flash_crc_pub_hi` = 1728, `_lo` = 35540, i.e. **0x06C08AD4**
+(state 7, about 200 s of wall time on the M2). A zlib CRC-32 over the same
+three ranges of `work/ff_counter.bin` gives the same value. **This holds for the
+image with the SHA-256 above only.** Recompute it if the image changes.
+
+### 6b. Write, read back, then the three measurements [bench-only]
+
+Write it like Flash 0 (5b, `docs/07` §3.2). Read back, then
+`bindiff work/readback.bin` against `work/ff_counter.bin -p
+patches/ff_counter/patch.json` (procedure §1). Then `blobdis` both words out of
+the **read-back** (`docs/07` §3.4 note, consequence 1):
+
+```bash
+./.venv/bin/python3 tools/blobdis.py work/readback.bin --file-off 0x22E940 --addr 0x432940 --len 4
+./.venv/bin/python3 tools/blobdis.py work/readback.bin --file-off 0x12067C --addr 0x12067C --len 4
+```
+
+[Mac] on the built image, which is what the read-back must show:
+
+```
+00432940  4B D1 D6 C1  bl       0x150000
+```
+
+The stock word there is `4B C8 B0 A5  bl 0xbd9e4`. **That is the on-chip input
+of the decision table** (procedure §3b, "written" or "stock"; see 5b item 2 for
+why Flash 0 could not supply it).
+
+Then, in procedure §3's order:
+
+* **3a**, the five stock raster counters. You already have them from step 3c
+  on the stock image. Read them again on the flashed ECU.
+* **3b**, the on-chip read-back above.
+* **3c**, the counter log [bench-only]:
+
+  ```bash
+  python3 logging/med9log.py log --session logging/sessions/flash1_counter.json \
+      --patch patches/ff_counter/patch.json --bus gs_usb:0 --seconds 70 \
+      -o logs/2026-xx-xx_flash1.csv
+  ```
+
+  Fit the slope over ≥ 60 s; the tolerance is ±2 % (procedure §4, "Method").
+* **The flash CRC**, after a power-cycle (step 2d's command). It must publish
+  **0x06C08AD4**, not 0x5562139F (`flash_crc.json` item 6).
+
+### 6c. Which row proves what (procedure §4, quoted in outline)
+
+| Row | Inputs | What it proves | Where it goes |
+|---|---|---|---|
+| **A** | set A moving, on-chip **written**, 100 ±2 /s, `ff_src_seen` = 1 | **The expected outcome.** `scheduler.md` §11.8 goes from VERIFIED-STATIC to **VERIFIED-DYNAMIC**; the 10 ms raster is confirmed end to end; the live-set row of #44 is ticked; KESSv2 **does** write the on-chip array over OBD, which **settles the on-chip half of #32** for `ff_fuel` as well | dated note in `scheduler.md`; #44, #32, #27 |
+| **B** | set B moving, 100 /s, `ff_src_seen` = 2 | §11.8 is **wrong**. E1/E2/E5 assume set A | **S9: stop.** Reopen #34 and #44 with the log |
+| **C** | 200 ±4 /s, `ff_src_seen` = 3 | both sets run; every "once per 10 ms" claim needs a re-check | reopen #44 |
+| **D** | set A moving, on-chip **stock**, slope 0, `ff_alive` never set | **KESS skipped the on-chip array.** No counter patch can run, and neither can six of `ff_fuel`'s eight hooks (`flash_programming.md` §7.3). A tool-capability result, not a patch bug | §7.3's ladder (BDM/K-TAG, or a tool that drives the firmware's own route). **Do not** rebuild and **do not** move the hook. `make HOOKS=external` helps **only** if set B is live (row B) *and* the array cannot be written (§4.5). In row D set A is live, so it is useless |
+| **E** | on-chip **written**, slope 0 | read-back and execution disagree | **S8/S9: stop.** Re-read the whole image and disassemble both sites out of the read-back |
+| **F** | set A moving, written, 100 /s, `ff_src_seen` = 2 | contradictory; suspect the logger first | re-read after a power cycle |
+| **G** | neither set moving | the logger reads the wrong place, or the application is not running | check `5A5A` (`docs/07` §3.3 check 2) |
+| **H** | 10 ±0.2 /s | C4's tick chain is wrong | reopen #44 |
+| **I** | any other slope | not a fixed-period raster | record the pattern (`scheduler.md` §11.3) |
+
+The full wording, including what to write where, is procedure §4. This table
+is only its index.
+
+### 6d. Regression, then the #27 exit
+
+Procedure §5: `logcmp.py` of the Flash-1 log against the step-3d baseline, with
+`--align-on raster_setA_10ms_count:100` (or the set-B counter, if 3a said set B)
+and `--uncovered report`. Exit 0 plus row A is the **#27 exit criterion**: the
+counter increments at the task rate, and the log comparison shows no other
+change. If anything is off, roll back (procedure §7). Row D's roll-back needs
+no on-chip write (§7, note).
+
+**Why here:** Flash 1 is the first code of ours in the ECU. It needs S3
+(`ram_status` from step 4), Flash 0's proof of the route (step 5), and step
+3c's stock counters. Without the counters, a frozen `ff_ticks` has two
+explanations instead of one (procedure §0).
