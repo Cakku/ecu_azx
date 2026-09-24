@@ -183,7 +183,7 @@ section 1 — **prediction, not a recording**, for the 10 ms raster settled by C
 (`re/findings/scheduler.md` §11) with **task set A** live (§11.8):
 
 ```csv
-# session: bench, Flash 1 (ff_counter), engine idling
+# session: bench, Flash 1 (ff_counter), engine off (KL15, no crank; ruling 2026-09-24)
 # ecu: 03H906032 / 1037382557
 # dump_sha256: <sha256 of the flashed image, from work/ff_counter.sha256>
 # transport: KWP2000 0x2C/0x21 over TP2.0

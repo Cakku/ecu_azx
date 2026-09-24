@@ -647,6 +647,14 @@ sections 3 and 4. Marked SETTLED in `boot.md` §5.
 
 ## 7. Consequences for `patches/ff_fuel` (#32) and for Flash 0 (#26)
 
+> **2026-09-24 (integration after G6/H4) — two corrections to §7.1-§7.2 below.**
+> (1) The **Flash 0 read-back cannot tell "written" from "skipped"**: the file
+> written in Flash 0 *is* the stock image, so 0x404000-0x47FFFF reads back
+> identical either way. The tool-capability answer comes from **Flash 1's**
+> read-back of the set-A hook word 0x432940 (`patches/ff_counter/test/procedure.md`
+> §3b, `docs/08` step 6). (2) Since E5/G1 the patch has **eight** hook words,
+> **seven** on-chip (`patches/ff_fuel/README.md` hook table), not seven/six.
+
 ### 7.1 The on-chip hook words are reachable over OBD
 
 `patches/ff_fuel` currently has seven hook words, six of them in

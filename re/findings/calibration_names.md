@@ -147,7 +147,7 @@ Maps that gained both axes from this (all s8 at 0.75 degCA/LSB unless noted):
 | `cand_KFDZWGRU` 0x5C7A58 | `FUN_00431228` 0x431250 → 0x7FD337 | additive delta weighted by a Q16 factor, all zero |
 | `cand_KFETAZWOP` 0x5CA092 (u16) | `FUN_00436498` 0x4364DC → 0x800020 | the reference the `KFDZWKG` weighting is measured against |
 
-and `cand_KFDZWKG` (0x5C753E) gained `SNM16ZUUW` × `SRL12ZUUW`, because the
+and `cand_KFDZWKG` (0x5C753E; now `dzw_kg_weighted_map` — H5 moved the FR label `KFDZWKG` to 0x5C76D5, §13) gained `SNM16ZUUW` × `SRL12ZUUW`, because the
 keys it is handed (0x7FD5EC / 0x7FD5F0) are written only by
 `zwgru_kfzw_lookup` 0x41D334 — i.e. it rides on `KFZW`'s own axes.
 
@@ -167,7 +167,7 @@ that key and the shared `rl` key 0x7FD84C:
 | Address | Branch | Values | Name given |
 |---|---|---|---|
 | 0x5D5BCB | the default | +21 … −15 degCA | `cand_KFZWMN` |
-| 0x5D5C8B | `0x80156F` bit 0 and `0x5C7972` bit 0 set | −15 … +19.5 degCA | `cand_KFZWMNUM` |
+| 0x5D5C8B | `0x80156F` bit 0 and `0x5C7972` bit 0 set | −15 … +19.5 degCA | `cand_KFZWMNUM` (now `cand_KFZWMNKH`, G4 §11.4) |
 | 0x5D5D4B | `0x5C7972` bit 3 set; the other branch takes `zwstt` (0x802096) instead | −24 … +4.5 degCA | `cand_KFZWMNST` |
 | 0x5D5E0B | read unconditionally, selected by `0x7FD321` bit 0 | −15 … +27 degCA | `cand_KFZWMS` |
 | 0x5C7973 | `0x7FD306` / `0x802AB2` bit 6 — the same bit that selects 0x7FD32C in `zwmin_select` | all −24.75 degCA | `cand_KFZWMNLB` |
@@ -1102,7 +1102,7 @@ and default branches. That fixes all six:
 (HOM) AND 0x801571 bit 3, which needs the exhaust-temperature block of §11.2
 running inside a `tmst` / `tnst_w` after-start window: **homogeneous catalyst
 heating**, the FR's `B_kh` (HYPOTHESIS for the meaning). The same bit selects
-the ZWMIN map D3 called `cand_KFZWMNUM` 0x5D5C8B, whose −15 °CA plateau is a
+the ZWMIN map D3 called `cand_KFZWMNUM` (now `cand_KFZWMNKH`, G4 §11.4) 0x5D5C8B, whose −15 °CA plateau is a
 cat-heating angle; it is now **`cand_KFZWMNKH`** ("Min-Zündwinkel
 Katheizen", FR p3095), still a candidate.
 

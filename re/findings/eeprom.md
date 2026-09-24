@@ -878,7 +878,7 @@ caller**: they appear only as two entries of the function-pointer table at
 nothing that references that table either. The existence of the mode is
 VERIFIED-STATIC; its trigger stays **HYPOTHESIS**.
 
-**4. `engine_not_running` (0x7FEAD0) leads somewhere else.**
+**4. `engine_not_running` (0x7FEAD0; `B_not_running` in `re/symbols.csv`, name note 2026-09-24) leads somewhere else.**
 Twelve sites read or write it (`tools/sda_xref.py --var 0x7FEAD0 0x7FEAD0`).
 The two nearest are the functions on either side of ff_fuel's set-A hook:
 0x0BD9E8 and 0x0BDA64 both gate on `0x7FEAD0 != 0`, take a one-shot latch at
@@ -1000,7 +1000,7 @@ not `eeprom_read_bytes` itself (three arguments, returns a count).
 
 ### 10.4 Two sub-states no start-up code seeds
 
-`nvm_dev_block_read` (0x05FCC8) and `nvm_dev_block_write` (0x060524) dispatch
+`nvm_dev_block_read` (0x05FCC8) and `nvm_dev_block_write` (0x060524) — `nvm_device_read_sm` / `nvm_device_write_sm` in `re/symbols.csv` (name note 2026-09-24) — dispatch
 on **0x7FADAC** and **0x7FADAD**; the entry states are 0x40 and 0x50. Each
 routine resets its own byte to that value only **after** it finishes a block
 (`li r9,0x40; stb r9,0(r25)` at 0x060510, `li r9,0x50` at 0x0609D4). On a
@@ -1064,7 +1064,7 @@ The same correction applies to blocks 1, 3, 7, 11 and 12 in that table.
 ### 10.6 The full #38 path, emulated end to end
 
 With `ff_persist_offset = 2`, a factory-shaped device image and the 10 ms
-hook plus the real pump wrapper `nvm_pump_wrapper` (0x061944) called once per
+hook plus the real pump wrapper `nvm_pump_wrapper` (0x061944; `nvm_pump_from_background` in `re/symbols.csv`, name note 2026-09-24) called once per
 simulated activation:
 
 | Step | Result |

@@ -66,7 +66,7 @@ cell                                 reason
                                      two trampolines (`eeprom.md` 7 Q1)
 0x803DDC = 0x2BA50 (G5)              the KWP config-struct pointer the h2
                                      walk reads.  Written by the real
-                                     `kwp_register_table` 0x13E974, whose
+                                     `kwp_register_table` 0x13E974 (`kwp_service_config_set` in re/symbols.csv), whose
                                      only caller is inside init entry 281
                                      (the whole diagnostic-stack start-up,
                                      not run); power_on calls just 0x13E974
@@ -206,7 +206,7 @@ INIT_ENTRIES = (
                                              #   (G5: they point INTO fault-
                                              #   memory entry 0 at 0x7F8890,
                                              #   +2/+3/+0xA/+0x1C, so the name
-                                             #   is doubtful; kwp.md 12.7)
+                                             #   was doubtful; settled by H4 2026-09-24 as dfp_nvm_field_map_init)
     (39, 0x12EC00, "dfp_init"),              # G5: the fault-memory manager's
                                              #   start-up; among others the
                                              #   lock pair 0x7FBA5C = 0 /

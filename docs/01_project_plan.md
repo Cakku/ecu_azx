@@ -82,7 +82,7 @@ fuel change) is the owner's responsibility and is not covered here.
 > **What still blocks the first flash is now only hardware.** The RAM block
 > 0x7FFB00 is VERIFIED-STATIC, not dynamic — the RequestUpload snapshots of
 > #23 need an ECU — and whether **KESSv2** drives the on-chip route is a
-> property of the tool that only the Flash 0 read-back can answer (seven of
+> property of the tool that only the Flash 0 read-back can answer (*2026-09-24: not Flash 0 — its file is the stock image, so the read-back is identical either way; Flash 1's read-back of 0x432940 answers it, `docs/08` step 6*) (seven of
 > the eight hook words are on-chip now, not two of three). There is still no
 > spare ECU (#2), no BDM backup (#4: `data/backup_bdm/MANIFEST` does not
 > exist) and no bench (#22). Phase 5's *code* is written; Phase 5's
