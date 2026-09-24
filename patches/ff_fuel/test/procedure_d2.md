@@ -166,6 +166,12 @@ and read the five `eep_blk8_*` variables.
 > "nothing known". The failure was silent. **`ff_persist_offset` is now 2**,
 > the first free payload byte, and §5's "free payload offsets +0..+13" for
 > block 8 must be read as **+2..+13**.
+>
+> **Corrected again 2026-09-24 (G7, #38): +2..+18 are the 17 tester
+> adaptation channels** (channel *k* at +(k+1), `re/findings/eeprom.md` §5,
+> note of 2026-09-24), so +2 was channel 1 and a channel-0 reset + commit
+> zeroed the store. **`ff_persist_offset` is now 19**; the free bytes of
+> block 8 are **+19..+28**, and the bullets below follow.
 
 * `eep_blk8_mirror_b0` and the byte after it — **expect the stamp**, i.e.
   `08 01`. If the block has never been written, `nvm_read_all_blocks` will
@@ -174,11 +180,16 @@ and read the five `eep_blk8_*` variables.
   EEPROM before believing either prediction**: the default-table reading is
   static plus emulated (E4), and the only thing that settles what a *used*
   car's block 8 actually holds is the non-destructive read above.
-* `eep_blk8_mirror_b2` — where the patch now stores. On a virgin block it is
-  whatever the default record's third byte is (`00` by the table above), and
-  after the first commit it is `ff_diag_e_pct`. Anything else before flashing
-  means a stock function we have not found uses payload +2: stop, and move the
-  patch with `--set ff_persist_offset=3` (one calibration byte, no rebuild).
+* ~~`eep_blk8_mirror_b2` — where the patch now stores.~~ *(G7, 2026-09-24:
+  +2 is adaptation channel 1; the patch no longer writes it and it must stay
+  at its default `00` through everything below.)*
+* `eep_blk8_mirror_b19` — where the patch stores since G7. On a virgin block
+  it is the default record's byte +19 (`00`: the record is
+  `08 01 00 80 80 80 80 00 00 80 00 80 80 FF` and then zeros), and after the
+  first commit it is `ff_diag_e_pct`. Anything else before flashing means a
+  stock function we have not found uses payload +19: stop, and move the patch
+  with `--set ff_persist_offset=20` (any of +20..+28; one calibration byte, no
+  rebuild).
 * `eep_blk8_mirror_b14` — whatever it is, note it. It is the one byte stock
   code writes (cpu 0x134380) and it must be unchanged by everything below.
 * `eep_blk8_mirror_b29` — the manager's own **ReplV** byte. **Never write
@@ -281,10 +292,15 @@ asserts that the mirror is byte-identical after 400 activations. The measuring
 block keeps working; only fields 4's `persist_state` stays 0 for ever.
 
 The same lever moves the store somewhere safer without a rebuild:
-`--set ff_persist_offset=3` (or any of **+2..+13**, +15..+28 — **not** +0 or
-+1, which are the block-id/version stamp) and
-`--set ff_persist_block=24` with `--set ff_persist_offset=3` for the 255-byte
-single-copy block (eeprom.md §5), at the cost of an eight-page write.
+`--set ff_persist_offset=20` (or any of ~~**+2..+13**, +15..+28~~ **+19..+28**
+— **not** +0 or +1, which are the block-id/version stamp, and **not** +2..+18,
+which are the 17 tester adaptation channels (G7, 2026-09-24)).
+~~`--set ff_persist_block=24` with `--set ff_persist_offset=3` for the 255-byte
+single-copy block (eeprom.md §5), at the cost of an eight-page write.~~
+*G7, 2026-09-24: block 24 is excluded — the fault-clear service commits it
+after zeroing it (G5, `eeprom.md` §7 item 4, note of 2026-09-24), so a DTC
+clear would wipe the store. There is no second EEPROM fallback; the one left
+is the external SRAM plus a key-off mirror of `eeprom.md` §5.*
 
 ## B5. Endurance, stated so it is not forgotten
 

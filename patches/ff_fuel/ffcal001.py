@@ -118,7 +118,7 @@ SCALARS = (
     (0x1B, "ff_persist_enable", "B", "-", "D2 (#33): 1 = store E% in EEPROM block 8"),
     (0x1C, "ff_persist_hyst_pct", "B", "%", "D2: minimum E% change before a commit"),
     (0x1D, "ff_persist_block", "B", "-", "D2: EEP_CONF block number (eeprom.md section 5)"),
-    (0x1E, "ff_persist_offset", "B", "-", "D2: payload offset inside that block"),
+    (0x1E, "ff_persist_offset", "B", "-", "D2: payload offset inside that block; G7: 19, past the adaptation channels +2..+18"),
     (0x1F, "ff_persist_rate_s", "B", "s", "D2: minimum seconds between two commits"),
     (0xE6, "ff_zw_enable", "B", "-", "E1 (#34): 1 = apply the ignition blend;"
                                      " 0 (shipped) makes dzw_e permanently 0"),
