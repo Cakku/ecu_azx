@@ -55,7 +55,7 @@ them has an override.
 |---|---|---|---|
 | S1 | `checksum.py verify -q data/passat_azx_ori.bin` is not `ALL OK (65 blocks)`, or its SHA-256 is not `b15590d3f1874ace3125c5d047c09a686db9b8bb498187663539ebab205609b3` | nothing downstream means anything | `docs/07` §0.3, §6.1 |
 | S2 | the unit's stock flash CRC is not 0x5562139F | that unit cannot supply evidence for steps 3-4, or be the flash-rehearsal spare | `flash_crc.json` item 5 |
-| S3 | **`"ram_status"` is still `"static"`** in the patch you are about to write | **do not flash at all.** Finish step 4 first | `docs/07` §2.3, §6.4; `patch_apply.py`'s warning |
+| S3 | **`"ram_status"` is still `"static"`** in the patch you are about to write | **do not flash at all.** Finish step 4 first. This playbook applies it to Flash 0 too, which is stricter than `docs/07` §6.4's row (patches only) | `docs/07` §2.3, §6.4; `patch_apply.py`'s warning; the G6 brief |
 | S4 | **the target ECU has no verified BDM backup** (external flash, on-chip flash including 0x400000-0x403FFF, EEPROM) with SHA-256s in `data/backup_bdm/MANIFEST` | **do not flash that ECU.** For the car this is absolute (#28 depends on #2) | `docs/07` §3.1 row 4, §6.2; `docs/01` M1 |
 | S5 | the file does not verify, has any `unexpected` byte in `bindiff -p`, was not built from this ECU's own read, or has a changed ident block 0x1CEE20 | do not flash it | `docs/07` §6.4 rows 1-4 |
 | S6 | a tool offers to address 0x000000-0x01FFFF, 0x080000-0x09FFFF or 0x400000-0x403FFF | refuse. A BDM tool does not refuse by itself | `docs/07` §3.3, last paragraph |
@@ -381,7 +381,8 @@ change `"ram_status"` to `"verified"` in `patches/ff_counter/patch.json` and
 files. That is what lifts gate **S3** (`docs/07` §2.3). The #23 exit criterion,
 "unchanged across runtime dumps at idle, driving and key-off/on", is then met.
 
-**Why before Flash 0:** Flash 0 writes no RAM block, so strictly it does not
-need this. But `docs/07` §6.4 forbids every image whose `ram_status` is not
-`verified`. Doing the snapshots first also means the whole day's logging runs
-on a stock ECU. A snapshot of a flashed ECU would contain our own block.
+**Why before Flash 0:** Flash 0 is not a patch and has no `ram_status`, so
+`docs/07` §6.4's row does not literally cover it. This playbook still puts the
+snapshots first, for two reasons. The G6 brief states S3 as "do not flash at
+all". And it keeps every step-3 and step-4 read on a never-written ECU, so a
+Flash 0 that goes wrong cannot cost you the stock reads.
