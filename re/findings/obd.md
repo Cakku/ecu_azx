@@ -368,7 +368,7 @@ plus a RAM record are enough, and both the answer and the support bitmap follow.
 | # | Item | State |
 |---|---|---|
 | 1 | The ISO 15765-2 single-frame parser: which function reads module C MB15 and hands the payload to `kwp_service_dispatch`. Traced as far as the ISR at 0x404000 kind-4 arm (0x4040C4) and the channel table `[0x7FDA7C] + idx*0x14` (0x1443C4). | OPEN |
-| 2 | Where the dispatch-table **h2** field (+0xC, 0x5CBE8 for mode 01) is called from. 0x5CBE8 is referenced only by the table word at 0x2B9BC, and the dispatcher itself (0x13E98C) only ever calls +0x8; the three `blrl`s at 0x13EB74/0x13EB90/0x13EBAC take handlers from the *config struct*, not the entry. So the bitmap builder runs from a second walker not yet found. | OPEN |
+| 2 | Where the dispatch-table **h2** field (+0xC, 0x5CBE8 for mode 01) is called from. 0x5CBE8 is referenced only by the table word at 0x2B9BC, and the dispatcher itself (0x13E98C) only ever calls +0x8; the three `blrl`s at 0x13EB74/0x13EB90/0x13EBAC take handlers from the *config struct*, not the entry. So the bitmap builder runs from a second walker not yet found. | **SETTLED (2026-09-23, G3, §10)**: `kwp_service_h2_walk` **0x13ECB0** calls every non-NULL entry +0xC of the 28-entry table (`blrl` at 0x13ED10). It is called only from `kwp_conn_cyclic` 0x13E650 (0x13E71C, 0x13E840), which runs every **10 ms** from the set-A 10 ms task (0x432BC0 → 0x4328B4 → 0x4328C4), and fires the walk **once per new diagnostic connection** (and on a transport channel re-selection), not on every request. The bitmaps are therefore current as of the connection's first 10 ms tick |
 | 3 | Whether the 0xFF runs at 0x5C2188 / 0x5C6AF6 / 0x5C8262 are genuinely free calibration. | **SETTLED (2026-09-23, G1, §9.1): EXCLUDED** — none is free: 0x5C6AF6 and 0x5C8262/0x5C8282 are live tables with r2-relative readers, 0x5C2188 is in the calibration segment header, and so are the other 0xFF runs of 24 B or more in the window |
 | 4 | Whether internal session 6 is actually reachable on the car: it needs `[0x803D6A] == 4` and `[0x7F804B] == 0x33`, and 0x7F804B has exactly one reader and no statically resolvable writer (it is inside the word written by `stw` at 0x15BB8/0x15C0C and possibly by the `stswi` at 0x1443A0). Session 4 (`10 86`) reaches the OBD services regardless. | OPEN |
 | 5 | Modes 0x02-0x09 handlers (0x37804, 0x37D2C, 0x37E1C, 0x427B50, 0x37EA0, 0x37FE0, 0x381B0) are named only from the dispatch table; none was read. | NOT DONE (out of scope) |
@@ -488,3 +488,103 @@ with all 41 stock records valid and the PID 0x52 record produced by the real
 Cost: `obd_pid_support_build` 1,196 → 1,205 (off) / 1,223 (on) instructions
 with all records valid; `obd_pid_read` for a B2 PID 44 → 51. Nothing here
 settles §8 items 1, 2 or 4; they stay bench items.
+
+---
+
+## 10. Brief G3 (2026-09-23): who calls `obd_pid_support_build` — §8 item 2
+
+VERIFIED-STATIC unless tagged. The second walker is not on the ISO-TP path and
+not a mode-01 pre-pass: it is a **connection-start hook walk** in the
+diagnostic layer, run from the 10 ms task.
+
+### 10.1 `kwp_service_h2_walk` 0x13ECB0 calls every entry's +0xC
+
+The config-struct pointer 0x803DDC (`= 0x2BA50`, stored by `kwp_register_table`
+0x13E974 from 0x13C9FC) has four readers; the one outside the dispatcher is
+
+```
+0013ECC0  bl   0x13CF90 ; bl 0x13CF38(lbz [0x7F804E]) ; bl 0x13EC98
+0013ECD8  r28 = &0x803DDC ; r31 = i = 0 ; r30 = i*0x14
+0013ECF4  r12 = [[0x803DDC]] + r30          ; entry i of the 28-entry table 0x2B820
+0013ED00  lwz  r29,0xC(r12)                 ; h2
+0013ED04  cmpwi r29,0 ; beq skip
+0013ED0C  mtlr r29 ; blrl                   ; h2()
+0013ED14  r30 += 0x14 ; i++ ; while i < [config+0x1C] (= 28)
+```
+
+Nine entries have an h2; this walk calls all nine, in table order:
+
+| entry | SID | h2 | what it is |
+|---|---|---|---|
+| 0x2B870 | 0x14 | 0x0352F4 | |
+| 0x2B898 | 0x3B | 0x0A3320 | |
+| 0x2B8AC | 0x2C | 0x035034 | |
+| 0x2B8FC | 0x10 | **0x0370F8** | picks internal session 5 or **6** from the channel type and tester address 0x33 (§1.2) |
+| 0x2B94C | 0x36 | 0x0A33A4 | |
+| 0x2B9B0 | **0x01** | **0x05CBE8** | `obd_pid_support_build` (§4) |
+| 0x2B9C4 | 0x02 | 0x037670 | |
+| 0x2BA00 | 0x06 | 0x4278AC | |
+| 0x2BA3C | 0x09 | 0x03819C | |
+
+So h2 is the per-service **"a tester has connected" hook**, which is why SID
+0x10's h2 is the one that sets session 6: both belong to the same moment.
+
+### 10.2 When the walk runs
+
+`find_branch_refs 0x13ECB0` gives exactly two `bl`s, both inside
+**`kwp_conn_cyclic` 0x13E650** (0x13E650-0x13E948). It asks the transport for
+the active connection (`bl 0x13CC5C` → r30, 0 = none) and compares it with the
+one it saw last time (0x803D70):
+
+| site | condition | then |
+|---|---|---|
+| 0x13E71C | r30 ≠ 0, `[0x803D70]` = 0, byte 0x7F8064 ≠ 0 (a request-pending flag, name HYPOTHESIS; written at 0x036B74, 0x08E04C, 0x13E838) | `bl 0x13D77C`; **h2 walk**; `[0x803D70] = r30` |
+| 0x13E840 | r30 ≠ 0, `[0x803D70]` ≠ 0, channel-reselect flag 0x803D10 ≠ 0 (written only at 0x13CB84, inside the channel search of 0x13CC5C, which clears it on entry) | `0x7F8064 = 0`; `bl 0x13D77C`; **h2 walk** |
+| 0x13E680 | r30 = 0, `[0x803D70]` ≠ 0 | connection gone: end hooks, `[0x803D70] = 0` |
+
+`kwp_conn_cyclic` itself has three callers:
+
+| caller | in | rate |
+|---|---|---|
+| 0x4328C4 (`bl`) in 0x4328B4 | the set-A 10 ms task 0x4328E4 (id 19), its second-last `bl` at 0x432BC0 | **10 ms**, live (scheduler.md §11.8) |
+| 0x13CA48 (`bl`) in 0x13CA1C | the set-B 10 ms epilogue 0x120570 (`bl` at 0x120580) | 10 ms, set B only |
+| 0x40BEEC (`b`) | the only process of task 20 (list 0x0B1ED4) | event task; nothing in the image loads its handle 0x4787C0 except the uncalled thunk 0x0B09A0 — no static activator |
+
+### 10.3 What that means for `01 00`
+
+* The support bitmaps are rebuilt **once per diagnostic connection**, at the
+  first 10 ms tick of `kwp_conn_cyclic` that sees it (plus on a channel
+  re-selection). They are **not** rebuilt per request and not on a raster.
+  Whether that tick always precedes the dispatch of the connection's first
+  request (the dispatcher 0x13E98C is reached from 0x13D890 / 0x13E260, not
+  traced here) is open; a tester that sends `01 00` as its very first frame
+  could in principle see the previous connection's bitmap.
+* So a scan tool's `01 00` sees the record `valid` bytes **as they were when
+  it connected**. A PID whose `valid` byte goes 0 → 1 during a session (for G1:
+  `ff_obd_pid52_rec.valid` after `ff_cal_ok()` and the enable byte) appears in
+  `01 40` only after the tester disconnects and reconnects; `01 52` itself is
+  answered as soon as `valid` is 1, because `obd_pid_read` (§3) checks the byte
+  on every request. The converse holds too: a PID that becomes invalid stays
+  advertised until the next connection, and its `01 52` then returns nothing.
+  G1's run-time gate is therefore correct but **per connection**, not
+  instantaneous — worth one line in a bench test (connect, enable, reconnect).
+* VERIFIED-DYNAMIC (emulated): with the config pointer 0x803DDC = 0x2BA50,
+  `emu.call(0x13ECB0)` over a bitmap pre-filled with 0xAA returns in 2,123
+  instructions and leaves exactly the bytes a direct `emu.call(0x5CBE8)` leaves
+  (the stock valid flags are 0 on a cold emulator, so both are 12 × 0x00).
+
+### 10.4 Reproduction
+
+```bash
+./.venv/bin/python3 tools/find_abs_refs.py data/passat_azx_ori.bin --range 0x803DDC 0x803DE0
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x13ECB0 --addr 0x13ECB0 --len 0x90
+./.venv/bin/python3 tools/find_branch_refs.py data/passat_azx_ori.bin 0x13ECB0 0x13E650 0x4328B4 0x13CA1C
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x13E650 --addr 0x13E650 --len 0x200
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x22E8B4 --addr 0x4328B4 --len 0x30
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x22EBB0 --addr 0x432BB0 --len 0x2C
+./.venv/bin/python3 -c "import struct;d=open('data/passat_azx_ori.bin','rb').read();[print(hex(0x2B820+20*i),hex(d[0x2B820+20*i]),hex(struct.unpack('>I',d[0x2B82C+20*i:0x2B830+20*i])[0])) for i in range(28) if d[0x2B82C+20*i:0x2B830+20*i]!=bytes(4)]"
+```
+
+The emulated check: `Med9Handlers(animate=False)` from `logging/ecu_sim.py`;
+`emu.call(0x5CBE8, reset=False)`, keep the 12 bytes at 0x801215; fill them with
+0xAA, write 0x0002BA50 to 0x803DDC, `emu.call(0x13ECB0, reset=False)`, compare.

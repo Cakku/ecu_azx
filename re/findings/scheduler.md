@@ -1060,3 +1060,46 @@ MPC561RM's USIU register map lists `0x2F C048 Interrupt Mask2 Register
 relocation those are 0x6FC048 / 0x6FC04C. Section 3.3's names move from
 HYPOTHESIS to **VERIFIED** (manual). The neighbours 0x6FC040 / 0x6FC044 are
 SIPEND2 / SIPEND3 and 0x6FC050 / 0x6FC054 are SISR2 / SISR3.
+
+## 13. Added 2026-09-23 (brief G3, issues #20 / #39) — the background task, the process cursor, and two periodic processes placed
+
+Details and reproduction are in `re/findings/boot.md` §6.8 and
+`re/findings/obd.md` §10; this note records what they add to the task picture
+of §11. VERIFIED-STATIC unless tagged.
+
+* **Task id 0 (set A) and task id 29 (set B) are background tasks, not init
+  tasks.** Priority 0, each activated once by `os_init` (0x11B0F4 for id 0),
+  each ending in `os_set_deadline_timer(1, 1,052,631 ticks = 300.75 ms)` and a
+  self re-activation through 0x477B48 (0x11DB34 / 0x124854). They run their
+  whole process list back to back for as long as nothing of higher priority is
+  ready, so their "period" T_bg is the CPU's idle time: bounded
+  **0.51 ms ≤ T_bg ≤ 300.75 ms** — the ceiling because `os_deadline_supervisor`
+  (every 10 ms) calls the fatal handler with code 0x74 when timer 1 expires.
+  The §11 table's "(event)" for ids 0 and 29 should read "background". C4's
+  `re/symbols.csv` note for 0x11DA64 ("a process of the priority-0 init task")
+  is corrected there. Task 0's list (0x0B2678, 13 processes) carries the five
+  `flash_crc_task` activations, which is what fixes the flash-CRC period
+  (`boot.md` §6.8(c)): **N = T_bg / 5, publish after 4,926 × T_bg**.
+* **The process cursor.** `os_dispatch_loop` 0x475DE0 runs a task's list with
+  **0x7FE59C = next process slot** and **0x7FE5A0 = current process slot**
+  (0x475E3C-0x475E50); the start-up list 0x0B1A68 uses the same cursor from
+  `os_start` (0x477A6C). `re/findings/ram.md`'s label "stack-pointer chain,
+  kernel object ptr" for 0x7FE5A0 (and `tools/ram_survey.py`'s
+  `os_stack_ptr_chain_ext`) is superseded for that word; the OS object pointer
+  is 0x7FE58C (K = 0x478E28).
+* **Runtime measurement is live in the set-A lists** (ids 20, 25, 18, 22, 17, 0;
+  not task 8, not set B).
+  0x0B5878 / 0x0B5978, the "wrappers" §11.8's reachability walk removed, are
+  `rtm_list_enter` / `rtm_list_exit` of a debug-comparator runtime measurement
+  whose control step 0x0B5188 runs in the **100 ms** task 18 (slot 0x0B2310).
+  Enabled by calibration 0x5C8BAA = 1; default target task 0's list
+  (0x7FC9D8 = 0x0B2678). Removing them from a call graph remains right: they
+  do not call processes.
+* **`kwp_conn_cyclic` 0x13E650 runs every 10 ms** in set A (0x4328B4, called at
+  0x432BC0 from task 19) and, in set B, from 0x13CA1C (0x120580). It is what
+  calls the dispatch-table **h2** hooks, once per new diagnostic connection
+  (`obd.md` §10).
+* Task 20 (list 0x0B1ED4 = `{0x0B5878, 0x40BEEC → b 0x13E650, 0x0B5978}`) has
+  **no static activator**: its thunk 0x0B09A0 is uncalled and its handle
+  0x4787C0 is loaded nowhere else. An indirect activation (e.g. from an ISR via
+  a table) is not excluded.
