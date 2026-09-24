@@ -4,7 +4,7 @@
     <flags>0x1</flags>
     <fileversion>1.0</fileversion>
     <deftitle>MED9.1.1 03H906032 draft (machine-generated)</deftitle>
-    <description>Calibration definition for data/passat_azx_ori.bin (03H906032 / 1037382557, SHA-256 b15590d3...09b3), produced by ghidra_scripts/enumerate_maps.py + tools/draft_to_xdf.py on 2026-09-23. Addresses are file offsets. Scaling comes from re/calibration_names.csv and is applied only where it was derived from the firmware; everything else is raw counts (equation X). Names starting with cand_ are placeholders, not Bosch labels, and every description carries the confidence of the name and of the scaling. Run tools/checksum.py fix after saving, and never flash without tools/checksum.py verify.</description>
+    <description>Calibration definition for data/passat_azx_ori.bin (03H906032 / 1037382557, SHA-256 b15590d3...09b3), produced by ghidra_scripts/enumerate_maps.py + tools/draft_to_xdf.py on 2026-09-24. Addresses are file offsets. Scaling comes from re/calibration_names.csv and is applied only where it was derived from the firmware; everything else is raw counts (equation X). Names starting with cand_ are placeholders, not Bosch labels, and every description carries the confidence of the name and of the scaling. Run tools/checksum.py fix after saving, and never flash without tools/checksum.py verify.</description>
     <author>ecu_azx / ghidra_scripts/enumerate_maps.py</author>
     <baseoffset>0</baseoffset>
     <DEFAULTS datasizeinbits="8" sigdigits="2" outputtype="1" signed="0" lsbfirst="0" float="0"/>
@@ -51546,7 +51546,7 @@
   </XDFCONSTANT>
   <XDFCONSTANT uniqueid="0x52F" flags="0x0">
     <title>ff_persist_offset</title>
-    <description>scalar at CPU 0x5E252E (file 0x1E252E), 1x1 u8. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; D2: payload offset inside that block [-] [ffcal001_rows.csv]</description>
+    <description>scalar at CPU 0x5E252E (file 0x1E252E), 1x1 u8. Read by ff_fuel@patches/ff_fuel. D1 issue #32, patches/ff_fuel (FFCAL001 at 0x5E2510, built by patches/ff_fuel/ffcal001.py); layout asserted by tests/test_ff_fuel_patch.py; D2: payload offset inside that block; G7: 19, past the adaptation channels +2..+18 [-] [ffcal001_rows.csv]</description>
     <CATEGORYMEM index="0" category="0x5"/>
     <EMBEDDEDDATA mmedtypeflags="0x00" mmedaddress="0x1E252E" mmedelementsizebits="8" mmedmajorstridebits="0" mmedminorstridebits="0"/>
     <units>-</units>
