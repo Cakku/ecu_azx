@@ -130,6 +130,7 @@ FR_MODULES = {
     "VSTMSV": "VSTMSV - MSV feed-forward, rail model",
     "GGDSKV": "GGDSKV - rail pressure sensor",
     "BGTMOT": "BGTMOT - coolant temperature",
+    "GGTFM": "GGTFM - coolant temperature sensor, model and diagnosis",
     "GGHFM": "GGHFM - hot-film air-mass signal",
     "BBKR": "BBKR - knock-control operating conditions",
     "TEB": "TEB - tank ventilation (canister purge) fuel share",
