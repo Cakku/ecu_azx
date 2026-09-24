@@ -14,6 +14,7 @@ Bosch 0261S02226, software 1037382557).
 | [06_patch_pipeline.md](06_patch_pipeline.md) | How a C patch becomes bytes in flash: build, hook, checksum, verify, flash, roll back. |
 | [07_workflow.md](07_workflow.md) | The end-to-end walkthrough, for someone who built none of it: a calibration-only change, a code change, flashing, logging, log review, roll back. Every command outside the flashing chapter has been run and its output quoted. |
 | [08_bench_playbook.md](08_bench_playbook.md) | The bench day in order, from bring-up to Flash 1 verified: bring-up, first contact, the #44 reads, the RAM snapshots, Flash 0, Flash 1, then pointers onward. Each step names the procedure it drives, what passes, what a failure means, and which issue it closes. Also a stop list. Its own procedures stay where they are. |
+| [09_status_report.md](09_status_report.md) | Where the project stands (dated), whether the flex-fuel feature is ready barring the bench, and every open question with the bench or car work that answers it. Re-issued after each milestone. |
 
 01-06 are reference; **07 is the one you follow**. Read 07 first if you have a
 change to make and 01-06 when it tells you to.
