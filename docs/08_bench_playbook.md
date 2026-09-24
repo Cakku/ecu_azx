@@ -208,3 +208,114 @@ counting after that, but no session file on this head logs it (open question 2).
 **Why here:** S2 has to be known before any step-3 read can count as evidence
 about SW `1037382557`. The same 0x5562139F is then the expected result of the
 Flash 0 read-back in step 5, so this read is also its "before".
+
+---
+
+## Step 3 — The wave-B confirmations, the stock baselines, block 8 (#44)
+
+**Drives:** `logging/README.md` §8 steps 3-4, `logging/sessions/wave_b_confirm.json`
+(its comment has the scenario and the expected raster slopes), and the #44
+checklist. **Unit:** the software-matching spare or the car (S2). Most of #44
+needs a running engine, so most of this step is [car-only] read-only logging.
+
+### 3a. Rehearse [Mac]
+
+```bash
+./.venv/bin/python3 logging/med9log.py groups --sim 1 2 3 20
+./.venv/bin/python3 logging/med9log.py log --sim --seconds 2 --session logging/sessions/wave_b_confirm.json -o work/sim.csv
+```
+
+```
+  field 2: fmt 0x05 A=0x0a B=0x77 -> 19.000 degC [crosschecked]
+session wave_b_confirm: 26 variables, 17 chunks on 0xf0, 56 bytes per sample
+```
+
+### 3b. The two reads
+
+```bash
+python3 logging/med9log.py groups --bus gs_usb:0 1          # then 2, 3, 20-24, 231 (read as 104, kwp.md 12.3)
+python3 logging/med9log.py log --bus gs_usb:0 --seconds 70 \
+        --session logging/sessions/wave_b_confirm.json -o logs/2026-xx-xx_wave_b.csv
+```
+
+Run VCDS on the same groups at the same time; one tester at a time per channel
+(§8 table, `0xD6`-`0xD8`). Scenario: 0-30 s idle, 30-40 s one load step,
+40-70 s idle, engine warm (`wave_b_confirm.json`).
+
+### 3c. Which #44 checkbox each read closes
+
+| #44 row | Read | Where | Pass | Closes |
+|---|---|---|---|---|
+| group 001.2 vs `tmot` 0x8021EF / `tmot_w` 0x802228 | `groups 1` + `tmot`, `tmot_w` in the log | bench (KL15) or car | the same °C as VCDS, within a count (§8 step 3) | already ticked (emulator, `measuring_vars.md` §7.1); a sanity check of the logger |
+| group 002 vs `ti` 0x8030C4, 1 µs/LSB | `groups 2` + `ti_sum` | **car** | agree at 1 µs/LSB (`injection.md` §8) | **ticks the row** |
+| rail, group 231 vs `prist` 0x8031DA / `prsoll` 0x8031F4 | `groups 231` + `prist_w`, `prsoll_w` | **car** | 0.005 bar/LSB | already ticked (emulator, §7.3); sanity check |
+| group 003.4 vs 0x7FEF87, s8 at 0.75 °CA/LSB | `groups 3` + `zwist_display_b1` | **car** | agree at 0.75 °CA/LSB (`ignition.md`) | **ticks the row** |
+| groups 020-024 vs `dwkrz` 0x7FCE57-0x7FCE5C | `groups 20`…`24` + `dwkrz_1`…`_6` | **car** | the cylinder order 1,5,3,6,2,4 (COMMUNITY) holds | **ticks the row** |
+| `dwi` 0x803088 at WOT | `dwi_inj_angle` in a WOT pull (not the 70 s scenario) | **car, road** | a number for the +73 % window margin (`rail.md` §7) | **ticks the row** |
+| period of 0x45CAC4 | — | — | — | already ticked (C4); nothing to read |
+| **which task set is live** | the five raster counters in the log | bench (KL15) first, then **car** at idle | set A 0x7FD754 +100/s, 0x7FD75C +1000/s; the three set-B cells frozen; all ~0.25 % low (`wave_b_confirm.json`) | the row says "with the engine running", so the bench read is only the first look. The **car** read ticks it, and so does Flash 1 row A (step 6), whichever comes first |
+| `nmot_w` 0x7FEE74 / `rl` 0x7FED38 scaling | `groups 1` + `nmot_w`, `rl_for_fuel` | **car** | 0.25 rpm/LSB, 100 %/4096 | **ticks the row** |
+
+Frozen set-B counters are the prediction (`scheduler.md` §11.8), not a fault.
+Set-B counters moving is procedure.md §4 row B's finding, made early. Write it
+into #44 and #34 loudly, and read §11.8 again before any flash (S9 applies in
+spirit).
+
+**Also read in the same session (brief G4, #41 integration note of
+2026-09-23, `re/findings/calibration_names.md` §11). These are not #44 rows.**
+Record the results as dated notes in `calibration_names.md` §11:
+
+| Id | Cell | How | Expect | Source |
+|---|---|---|---|---|
+| 43 | 0x80304A `lamsbg_w` | in **no** stock group (`re/findings/measuring_groups.txt`) and in no session file, so it needs a DDLI entry that does not exist yet (open question 3) | 1.000 at steady part load | §11.8; `re/symbols.csv` row 0x80304A |
+| 85 | 0x8021CC, intake air `tans` | `groups 4` (field 4), against VCDS 004.4 | same °C | §11.1 |
+| 130 | 0x80223B `gangi` | `groups 51` (field 3), or `gangi` in `logging/sessions/tuning_checklist.json`, **while shifting** | 0 … 6, 7 = reverse | §11.7 |
+| 171 | 0x80315C `rkte_w` | `groups 73` (field 4) **during canister purge** | non-zero while purging | §11.5 |
+
+(`./.venv/bin/python3 logging/med9log.py groups --sim 4 51 73` [Mac] prints
+all three groups. Their simulated values mean nothing.)
+
+**T_bg at idle** (step 2d, second half) belongs in this car session.
+
+### 3d. Two stock baselines, before any flash
+
+`docs/07` §3.2 and §7: *there is no second chance to record a baseline on a
+flashed ECU.* Record the scenario **twice** on the stock image of the unit that
+will be flashed:
+
+* `logging/sessions/flash1_counter.json`, for Flash 1
+  (`patches/ff_counter/test/procedure.md` §3 and §5; the two runs feed
+  `logcmp.py derive`, `docs/07` §5.5);
+* `patches/ff_fuel/test/procedure.md` §4's scenario, for `ff_fuel`'s E0
+  equivalence later (#32).
+
+The scenario has an idle and a load step. On a bench spare that cannot run an
+engine, see open question 4 before you rely on these baselines.
+
+### 3e. EEPROM block 10, before (#26)
+
+`docs/07` §3.3 check 3: read EEP_CONF block 10 before any write and again
+after. A changed block 10 is independent evidence that the ECU's own
+programming route ran.
+
+### 3f. EEPROM block 8, before (#38; S12)
+
+`patches/ff_fuel/test/procedure_d2.md` §B1: on the **stock** image, log the
+`eep_blk8_*` mirror with `logging/sessions/ff_fuel.json`. Rehearse [Mac]:
+
+```bash
+./.venv/bin/python3 logging/med9log.py log --sim --eeprom work/eeprom.bin --session logging/sessions/ff_fuel.json --seconds 3 -o work/sim_blk8.csv
+```
+
+```
+session ff_fuel: 95 variables, 37 chunks on 0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 157 bytes per sample
+```
+
+The full EEPROM image also belongs in the BDM backup before the first write
+(`docs/07` §6.2, S4). This non-destructive read shows what a used car's block 8
+holds. Per `docs/05` §3.8 (note of 2026-09-23), **+2 … +18 are the 17
+adaptation-channel slots**. Record them. G7 picks the new offset from this read.
+
+**Why step 3 comes before any flash:** every row above is a read of the
+**stock** image. After a flash it would no longer be a stock read. Flash 1's
+decision table (step 6) takes 3c's raster-counter read as its first input.
