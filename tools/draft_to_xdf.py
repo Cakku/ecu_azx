@@ -120,6 +120,7 @@ FR_MODULES = {
     "LAMBTS": "LAMBTS - lambda component protection",
     "LAMKO": "LAMKO - lambda coordination",
     "ATM": "ATM - exhaust gas temperature model",
+    "ATMHEX": "ATMHEX - lambda-probe hexagon temperature model",
     "ESUK": "ESUK - transient (wall film) compensation",
     "BGSRM": "BGSRM - intake manifold / charge model",
     "HDRPSOL": "HDRPSOL - rail pressure setpoint",
