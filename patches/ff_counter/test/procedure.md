@@ -146,6 +146,16 @@ falsifiable here, independently of our patch.
 Record which of the two it was. Without it, outcomes **D** and **E** of section
 4 cannot be told apart.
 
+> **Correction 2026-09-24 (integration, from brief G6, `docs/08_bench_playbook.md`
+> step 5).** The Flash 0 read-back **cannot** tell "written" from "stock": the
+> file written in Flash 0 *is* the stock image, so the on-chip array reads back
+> identical whether KESSv2 wrote it or skipped it. Keep the Flash 0 read-back as
+> the test of the read-back tool itself and of the `5A 5A` marker, but take
+> column **3b** of the decision table from **Flash 1's own read-back of
+> 0x404000-0x47FFFF** `bindiff`ed against `work/ff_counter.bin`: *written* = the
+> set-A hook word at 0x432940 is in the ECU, *stock* = it is not (`docs/07` §3.4
+> already requires that read-back). Rows A-I are unchanged in meaning.
+
 ### 3c. The counter and the source byte
 
 Log at least: `nmot_w`, `rl_for_fuel`, `ti_sum`, `tmot_w`, `prist_w`,
