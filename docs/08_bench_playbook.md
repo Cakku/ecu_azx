@@ -462,7 +462,7 @@ and read-back files in #26 (its deliverable).
 | KESS "corrected" something | its correction is not a no-op on a file that verifies | S7. Stop, find out what it changed |
 | bindiff shows changes outside the on-chip region | an unknown check, or a bad read | stop, S13. Roll back per `docs/07` §6 |
 | an on-chip difference | a damaged or partial write of the array | S8. Roll back; do not go to Flash 1 |
-| the ECU stays in the loader | the `5A5A` marker (§3.3 check 2, §6.3) | recoverable. Re-flash; see `re/findings/ram_loader.md` for the route |
+| the ECU stays in the loader | the `5A5A` marker (§3.3 check 2, §6.3) | recoverable, not a brick (`docs/07` §6.3). Stop, and choose the recovery route. The loader speaks SCI1 serial, not CAN (`re/findings/ram_loader.md`; F5's note on #26). The shop/BDM write-back of M1 is the planned route (`docs/01` §6) |
 | a CRC other than 0x5562139F | the flash is not the file you wrote | S13 |
 
 **Why before Flash 1:** Flash 0 changes nothing, so it proves the route, the
@@ -620,8 +620,9 @@ Each item is its own procedure. Only the order and the gates are given here.
    with `ff_pid52_enable` = 0 mode 01 is observably stock
    (`patches/ff_fuel/README.md` "Stock-instruction edits (PID 0x52)" and "What a
    tester sees"; `re/findings/obd.md` §9). Bench check: set `ff_pid52_enable` =
-   1, which is a calibration change (`docs/07` chapter 1, §2.4), **disconnect and
-   reconnect the generic scan tool**, and then `01 40` shows bit 0x40 of its
+   1. That is a calibration change to FFCAL001, and so a flash of its own
+   (`docs/07` chapter 1, §2.4, S11). Then **disconnect and reconnect the generic
+   scan tool** once the ECU is up. After that, `01 40` shows bit 0x40 of its
    third byte and `01 52` answers `41 52 A`, E% = A × 100 / 255. The reconnect
    is needed because the support bitmap is rebuilt once per new diagnostic
    connection (`obd.md` §10.3, G3). The 0x7DF/0x7E8 transport itself has never
