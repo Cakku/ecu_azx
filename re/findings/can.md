@@ -87,6 +87,7 @@ So every message buffer of every module is accounted for:
   frames plus 0x7C4-0x7C7 (CCP) — VERIFIED-STATIC.
 - **Module C (0x707800) never transmits.** It only receives.
   - *Correction 2026-09-22 (brief F6, `re/findings/obd.md` §1.1):* true of `tbl_can_tx` (0x2BDF0), the only source this section checked, but **not** of `can_cfg_struct` (0x2BF50): its record [5] registers id **0x7E8 on module C buffer 13 with flags = 0x01**, the OBD-II response object. Module C transmits exactly one identifier, 0x7E8; read the sentence as "module C carries no `tbl_can_tx` object".
+  - *Note 2026-09-24 (brief H3, `re/findings/obd.md` §11.2) — the frame format on 0x7E8.* MB13 is loaded by `can_tx_frame` 0x13C4CC (handle 0x6A): CODE 1000, id word 0xFD00 (0x7E8 << 5), eight data bytes, **DLC always 8**, then CODE 1100. The data are ISO 15765-2: a single frame `0N` + N bytes + **0x00 padding** (`isotp_transmit` 0x1429BC, 0x142A74-0x142AB8), or a first frame `1L LL` + 6 bytes followed by consecutive frames `2n` + 7 bytes after the tester's flow control on 0x7E0, the last one padded with 0x00. The request side is module C **MB15**: range objects 0xD8 (0x7DF → 0x0B5534) and 0xD9 (0x7E0 → 0x1420A0) of the table 0x2C054, DLC 8 required, single frames only on 0x7DF. VERIFIED-STATIC, VERIFIED-DYNAMIC (emulated, `tests/test_ecu_sim_obd.py`).
 - **All three modules use identical bit timing**: `can_module_cfg_a/b/c`
   (0x2C1D8 / 0x2C1F8 / 0x2C218) all end in `07 08 04 03 02`, which
   `can_module_configure` turns into PRESDIV 6, PROPSEG 7, PSEG1 3, PSEG2 2,
