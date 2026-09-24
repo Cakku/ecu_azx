@@ -357,6 +357,27 @@ def _sim_clock(sim):
     return lambda: runner.sim_t
 
 
+def _sim_flash_crc_arg(args) -> "bool | float":
+    """`Med9Handlers(flash_crc=...)` from --sim-flash-crc / --sim-t-bg-ms.
+
+    False (no CRC task), True (T_bg = ecu_sim's default) or T_bg in ms.
+    --sim-t-bg-ms without --sim-flash-crc is a clear refusal rather than a
+    silently ignored option.
+    """
+    t_bg = getattr(args, "sim_t_bg_ms", None)
+    on = getattr(args, "sim_flash_crc", False)
+    if t_bg is None:
+        return bool(on)
+    if not on:
+        raise SystemExit("--sim-t-bg-ms sets the flash CRC task's background "
+                         "loop period; it needs --sim-flash-crc")
+    from ecu_sim import BG_LOOP_MS_MAX, BG_LOOP_MS_MIN
+    if not BG_LOOP_MS_MIN <= t_bg <= BG_LOOP_MS_MAX:
+        raise SystemExit(f"--sim-t-bg-ms {t_bg:g} is outside the static bound "
+                         f"{BG_LOOP_MS_MIN}-{BG_LOOP_MS_MAX} ms (boot.md 6.8(c))")
+    return float(t_bg)
+
+
 def start_simulator(args):
     """`logging/ecu_sim.py` on an in-process virtual bus, per the --sim flags.
 
@@ -385,7 +406,8 @@ def start_simulator(args):
         seed=kw.pop("seed"), patch_dir=kw.pop("patch_dir", None),
         eeprom=kw.pop("eeprom", None),
         stock_tasks=getattr(args, "sim_stock_tasks", False),
-        flash_crc=getattr(args, "sim_flash_crc", False),
+        flash_crc=_sim_flash_crc_arg(args),
+        dtcs=tuple(getattr(args, "sim_seed_dtc", None) or ()),
         time_scale=getattr(args, "time_scale", 1.0),
         ram=AnimatedRam(live_task_set=getattr(args, "sim_task_set", "A"),
                         statics=dict(DEFAULT_STATICS)))
@@ -571,8 +593,15 @@ def cmd_dump(args) -> int:
     out_json = out_bin.with_suffix(".json")
 
     total = sum(end - start + 1 for start, end in ranges)
+    # Each range is its own 0x35/0x36.../0x37 sequence, so its last block is
+    # short: count blocks per (sub-)range, not ceil(total / 62).  Corrected
+    # 2026-09-24 (H4): the stock ram_snapshot.json is 1,034 blocks, not the
+    # 1,032 this line printed before (re/findings/ram.md 9).
+    blocks = sum(-(-sub_size // 0x3E)
+                 for start, end in ranges
+                 for _, sub_size in split_around_protected(start, end - start + 1))
     print(f"{len(ranges)} ranges, {total} bytes, "
-          f"{-(-total // 0x3E)} TransferData blocks")
+          f"{blocks} TransferData blocks")
 
     pieces: list[dict] = []
     blob = bytearray()
@@ -780,8 +809,21 @@ def _add_bus_args(p) -> None:
                    help="with --sim: also run the firmware's own flash CRC-32 "
                         "task (0x11CB10) in the simulated background, so "
                         "logging/sessions/flash_crc.json has something to "
-                        "watch. It needs 246 simulated seconds to publish, so "
-                        "give it --seconds and --time-scale")
+                        "watch. It publishes after 4,926 background loops of "
+                        "T_bg (--sim-t-bg-ms, default 50 ms, i.e. about 246 "
+                        "simulated seconds; the real T_bg is bounded "
+                        "0.51-300.75 ms, boot.md 6.8(c)), so give it "
+                        "--seconds and --time-scale")
+    p.add_argument("--sim-t-bg-ms", type=float, default=None, metavar="MS",
+                   help="with --sim --sim-flash-crc: the simulated background "
+                        "loop period T_bg in ms (ecu_sim --flash-crc T_BG_MS; "
+                        "0.51-300.75, default 50). A HYPOTHESIS inside the "
+                        "static bound, not a measurement")
+    p.add_argument("--sim-seed-dtc", action="append", default=[], metavar="DTC",
+                   help="with --sim: store this DTC (e.g. P0601) in the "
+                        "firmware's RAM fault memory at power-on (ecu_sim "
+                        "--seed-dtc; a MODEL of the fault-path manager). "
+                        "Repeatable")
     p.add_argument("--sim-node", action="store_true",
                    help="with --sim: also run logging/ethanol_frame_send.py's "
                         "node on the same in-process bus, so the whole bench "
