@@ -483,6 +483,8 @@ prediction rather than an observation. The first write is called **Flash 0**
 issue #27) — Flash 1 first, because it changes **two flash words** (one of them
 on-chip since brief F1, 2026-09-22 — see the note in §3.4) and nothing else.
 
+> **2026-09-24 (G6):** the day-one order across this chapter, `logging/README.md` §8, the #44 reads, the #23 RAM snapshots and the Flash 1 decision table, with the stop list, is [`08_bench_playbook.md`](08_bench_playbook.md) — follow it on the bench day; this chapter stays the procedure it points at.
+
 What the dump *does* now tell us comes from brief **E6**,
 `re/findings/flash_programming.md` (2026-09-17, VERIFIED-STATIC), and it is
 better news than this chapter assumed when it was drafted. Quoting that file:
