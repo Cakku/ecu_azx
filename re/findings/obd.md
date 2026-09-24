@@ -115,6 +115,10 @@ VAG tester can read OBD data without being address 0x33.
 0x13C000-0x145000 and was **not** pinned to a single function in this brief —
 see §8.
 
+> **2026-09-24 (H3):** pinned — `isotp_rx_indication` 0x1420A0, reached from
+> the range object 0xD8 (0x7DF) through `obd_func_rx_ind` 0x0B5534; the
+> `[0x7FDA7C]` channel record read at 0x1443CC is not on this path. §11.1.
+
 ---
 
 ## 2. Mode 01 — `obd_mode01_h1` at 0x05D0F4 (VERIFIED-STATIC)
@@ -367,10 +371,10 @@ plus a RAM record are enough, and both the answer and the support bitmap follow.
 
 | # | Item | State |
 |---|---|---|
-| 1 | The ISO 15765-2 single-frame parser: which function reads module C MB15 and hands the payload to `kwp_service_dispatch`. Traced as far as the ISR at 0x404000 kind-4 arm (0x4040C4) and the channel table `[0x7FDA7C] + idx*0x14` (0x1443C4). | OPEN |
+| 1 | The ISO 15765-2 single-frame parser: which function reads module C MB15 and hands the payload to `kwp_service_dispatch`. Traced as far as the ISR at 0x404000 kind-4 arm (0x4040C4) and the channel table `[0x7FDA7C] + idx*0x14` (0x1443C4). | **SETTLED (2026-09-24, H3, §11.1-11.2)**: MB15 → `can_poll_iflag_c` 0x1366EC → ISR body 0x404000 kind-4 range object 0xD8 (0x7DF) → `obd_func_rx_ind` 0x0B5534 → **`isotp_rx_indication` 0x1420A0** (PCI check, SF only on 0x7DF, DLC 8 required) → connection layer 0x13F18C / `kwp_conn_cyclic` → `kwp_service_dispatch` with descriptor 0x803D60; answer by `isotp_transmit` 0x1429BC → `can_tx_frame` 0x13C4CC on MB13 id 0x7E8, SF `0N` + 0x00 padding, DLC 8. The `[0x7FDA7C]` table is not on this path |
 | 2 | Where the dispatch-table **h2** field (+0xC, 0x5CBE8 for mode 01) is called from. 0x5CBE8 is referenced only by the table word at 0x2B9BC, and the dispatcher itself (0x13E98C) only ever calls +0x8; the three `blrl`s at 0x13EB74/0x13EB90/0x13EBAC take handlers from the *config struct*, not the entry. So the bitmap builder runs from a second walker not yet found. | **SETTLED (2026-09-23, G3, §10)**: `kwp_service_h2_walk` **0x13ECB0** calls every non-NULL entry +0xC of the 28-entry table (`blrl` at 0x13ED10). It is called only from `kwp_conn_cyclic` 0x13E650 (0x13E71C, 0x13E840), which runs every **10 ms** from the set-A 10 ms task (0x432BC0 → 0x4328B4 → 0x4328C4), and fires the walk **once per new diagnostic connection** (and on a transport channel re-selection), not on every request. The bitmaps are therefore current as of the connection's first 10 ms tick |
 | 3 | Whether the 0xFF runs at 0x5C2188 / 0x5C6AF6 / 0x5C8262 are genuinely free calibration. | **SETTLED (2026-09-23, G1, §9.1): EXCLUDED** — none is free: 0x5C6AF6 and 0x5C8262/0x5C8282 are live tables with r2-relative readers, 0x5C2188 is in the calibration segment header, and so are the other 0xFF runs of 24 B or more in the window |
-| 4 | Whether internal session 6 is actually reachable on the car: it needs `[0x803D6A] == 4` and `[0x7F804B] == 0x33`, and 0x7F804B has exactly one reader and no statically resolvable writer (it is inside the word written by `stw` at 0x15BB8/0x15C0C and possibly by the `stswi` at 0x1443A0). Session 4 (`10 86`) reaches the OBD services regardless. | OPEN |
+| 4 | Whether internal session 6 is actually reachable on the car: it needs `[0x803D6A] == 4` and `[0x7F804B] == 0x33`, and 0x7F804B has exactly one reader and no statically resolvable writer (it is inside the word written by `stw` at 0x15BB8/0x15C0C and possibly by the `stswi` at 0x1443A0). Session 4 (`10 86`) reaches the OBD services regardless. | **SETTLED (2026-09-24, H3, §11.1 steps 11-14, §11.4)**: reachable, and it is what a generic scan tool gets. The 0x7DF rx map entry carries address **0x33**, the connection's address list maps 0x33 to channel type **4**, `kwp_conn_open` 0x13F18C writes 0x7F804B at **0x13F1E4** (base+displacement, missed by the lis-pair scan), and the connection's h2 walk sets session **6**. Physical 0x7E0 is refused by its gate 0x2C29C (`li r3,0`), and session 4 cannot be entered from the ISO 15765-4 route. VERIFIED-DYNAMIC (emulated). Bench check: `01 00` on 0x7DF → an answer on 0x7E8 (and `3E` on 0x7DF → silence) |
 | 5 | Modes 0x02-0x09 handlers (0x37804, 0x37D2C, 0x37E1C, 0x427B50, 0x37EA0, 0x37FE0, 0x381B0) are named only from the dispatch table; none was read. | NOT DONE (out of scope) |
 
 ---
@@ -559,6 +563,10 @@ one it saw last time (0x803D70):
   request (the dispatcher 0x13E98C is reached from 0x13D890 / 0x13E260, not
   traced here) is open; a tester that sends `01 00` as its very first frame
   could in principle see the previous connection's bitmap.
+  *2026-09-24 (H3, §11.3), VERIFIED-DYNAMIC (emulated) on the ISO 15765-4
+  route:* the connection opens and the h2 walk runs on the first 10 ms tick
+  after the frame, the request is dispatched on the second, so a scan tool's
+  first `01 00` already sees the new connection's bitmap.
 * So a scan tool's `01 00` sees the record `valid` bytes **as they were when
   it connected**. A PID whose `valid` byte goes 0 → 1 during a session (for G1:
   `ff_obd_pid52_rec.valid` after `ff_cal_ok()` and the enable byte) appears in
@@ -588,3 +596,176 @@ one it saw last time (0x803D70):
 The emulated check: `Med9Handlers(animate=False)` from `logging/ecu_sim.py`;
 `emu.call(0x5CBE8, reset=False)`, keep the 12 bytes at 0x801215; fill them with
 0xAA, write 0x0002BA50 to 0x803DDC, `emu.call(0x13ECB0, reset=False)`, compare.
+
+---
+
+## 11. Brief H3 (2026-09-24): the ISO 15765-2 route, 0x7DF → 0x7E8, and session 6 — §8 items 1 and 4
+
+Brief **H3**, issue **#48** (#39 bench prerequisite). Everything below is
+**VERIFIED-STATIC** (disassembly, `tools/blobdis.py`) unless tagged; the
+emulated runs are **VERIFIED-DYNAMIC (emulated)** — the firmware's own code
+under the `emu/` Unicorn harness with the start-up and harness pieces listed in
+§11.5 — and say nothing about a car. The short answer:
+
+* **A 0x7DF single frame reaches `kwp_service_dispatch` and is answered on
+  0x7E8 in internal session 6.** The ISO 15765-2 layer is a complete,
+  table-driven implementation (single frame, first/consecutive frame, flow
+  control) at 0x1420A0 / 0x1429BC; the functional channel accepts **single
+  frames only**, the ISO 15765-4 functional address byte **0x33** comes from a
+  flash table, becomes 0x7F804B, and SID 0x10's h2 selects session 6 at the
+  connection's first 10 ms tick.
+* **A physical 0x7E0 request is received and then refused**: its connection
+  gate is `li r3,0` (0x2C29C), so the ECU never answers 0x7E0. Session 4 is
+  therefore **not** reachable from the ISO 15765-4 route at all (SID 0x10 is
+  not in session 6's mask 0x50); it stays the TP2.0 route of §1.2.
+
+### 11.1 The request path, function by function
+
+| # | Step | Where | Evidence / note |
+|---|---|---|---|
+| 1 | TouCAN **C** MB15 accepts 0x7C0-0x7FF (RX15MSK 0x7C0, `can.md` §6); IFLAG bit 15 | hardware | — |
+| 2 | Module C interrupt: ISR wrapper **0x41797C** (the sixth of `scheduler.md` §3) → thunk 0x40C1B0 (`bl` at 0x4179B0) → **`can_poll_iflag_c` 0x1366EC** (IFLAG ≠ 0) → ISR body **0x404000** with r3 = CANMCR 0x707880, r4 = 2 | 0x136700 `lhz r11,0x24(r4)`, 0x136714 `bl 0x404000`; `sda_xref.py --code 0x1366EC 0x404000` | hardware-interrupt level, not a task |
+| 3 | `can_mb_owner_map` 0x804088 entry of C/MB15 has kind 4; the kind-4 arm (0x4040C4) indexes the group map **0x2C1BC** (`00 01 02 05 09 0E`, one byte per (module, MB14/15) pair) with `mb + 2·module − 14`, converts the buffer's id word (`bl 0x13C5FC` on `lwz 0x82`), walks the **range objects** of that group until `lo <= id <= hi`, then `blrl` +0x10 with r3 = the object's handle byte | 0x4040C4-0x4041F8 | |
+| 4 | Range-object table **0x2C054**, 18 × 0x14 `{u8 handle; u32 lo; u32 hi; u8 flags, mb, module; u32 callback}`, registered by `can_range_obj_register` **0x13C288** (r3 = table, r4 = group map, r5 = 18; the tail `b` at 0x12E704 inside init entry 44). Module C MB15 carries four: **0xD7** 0x7D0 → 0x0A953C, **0xD8 0x7DF → 0x0B5534**, **0xD9 0x7E0 → 0x1420A0**, 0xDA unused (range 0xFFFFFFFF) | table dump; `[0x7FB994]` = 0x2C054, `[0x7FB998]` = 0x2C1BC after init entry 44 (emulated) | |
+| 5 | **`obd_func_rx_ind` 0x0B5534** (0x7DF): if `[0x803DE0]` = 9 (the active connection is a TP2.0 one, §11.3) it calls 0x13AE18 and `kwp_session_set(0)`; then tail-branches to 0x1420A0 with the same handle | 0x0B5548-0x0B5574 | a 0x7DF frame ends a running TP2.0 session (HYPOTHESIS that 0x13AE18 is the TP2.0 disconnect) |
+| 6 | **`isotp_rx_indication` 0x1420A0**: `can_rx_obj_read` 0x136AF4(handle, buf, …, &dlc) copies the 8 data bytes out of the buffer; the rx map **0x2C55C** (6-byte entries `{handle, channel, ext_addr, addr, need_dlc8, ff_allowed}`, entries `cfg[0]`..`cfg[2]-1` = 3..6 of the transport config **0x2C5F8**) gives the channel: 0xD9 → ch 3 addr 0x10, **0xD8 → ch 4 addr 0x33, ff_allowed 0** | 0x1420D0, 0x1420E0-0x142158 | |
+| 7 | the **PCI byte** = data[0] (normal addressing, `ext_addr` = 0): type = `pci & 0xF0`; > 0x30 → dropped; **DLC ≠ 8 → dropped** (`need_dlc8` = 1 on both OBD entries, 0x142170-0x142180 — ISO 15765-4's fixed DLC); **FF (0x10) → dropped when `ff_allowed` = 0** (0x142184-0x142194), i.e. on 0x7DF | | |
+| 8 | channel state (**0x804734** + ch·0x1C) must be armed (`flags & 0x82` = 0x82, set by `isotp_request` 0x141E58 from the connection layer) or the frame is dropped; for normal addressing both address bytes +0x12/+0x13 := the rx map's `addr` byte, and the SF limit is **7** | 0x14231C-0x1423B8 | |
+| 9 | **SF (`0N`)**: needs 1 ≤ N ≤ 7 and DLC ≥ N+1, else dropped silently; copies N bytes to the channel buffer (0x142000), sets +0xA/+0xC = N and signals `isotp_event(ch, 1)` 0x141F74 (flags bit 0 = "message received") | 0x1423D8-0x14245C | |
+| 10 | **FF / CF / FC** are implemented (0x142460 FF: 12-bit length, overflow → FC `32`; `isotp_send_fc` 0x142CA8 builds `30`/`31`/`32` BS STmin + **0x00 padding** to 8; CF sequence check at 0x1425F4); a FC for the tx channel is matched through the rx channel's descriptor +1 (0x1421CC) | | not exercised: the functional channel refuses FF |
+| 11 | **Connection layer** (10 ms, `kwp_conn_cyclic` 0x13E650 → the channel search 0x13CC5C → 0x13F688 …): `isotp_flags_take(ch, mask)` 0x141F0C sees bit 0; the connection table **0x2C324** (4 × 0x24, `[0x7FD954]`) pairs ISO-TP channel 4 (entry 3) and channel 3 (entry 0) with the address list **0x2C310** = {0x10 → type 0, **0x33 → type 4**} and with a gate at +0x20 | 0x13F3B4-0x13F42C | |
+| 12 | `kwp_addr_accept` **0x13CDCC**(target = +0x13, source = +0x12): the target must be in the connection's address list → **0x803D6A = type (4), 0x803D6B = 0x33, 0x803D6C = 0x33**. Then the gate: channel 4 → **0x386E4** (`lbz 0x5CEE6E`, > 0 → accept; the byte is **1** in this dataset, one reader), channel 3 (0x7E0) → **0x2C29C `li r3,0`** | emulated: 0x803D6B := 0x33 at 0x13CE60, 0x803D6A := 4 at 0x13CE70 | |
+| 13 | **`kwp_conn_open` 0x13F18C**: copies 0x803D6B → **0x7F804B** (`stb r9,0x1F(r31)`, r31 = 0x7F802C, at **0x13F1E4**) and 0x803D6A → 0x7F804C (0x13F1EC); `[0x803DE0]` := entry +8 (5), `[0x803DE1]` := entry +4 (4) | emulated: `write 0x7f804b = 0x33 pc 0x13f1e4` | the writer §8 item 4 was missing (§11.4) |
+| 14 | the next `kwp_conn_cyclic` tick sees a new connection (0x13E71C) → `kwp_service_h2_walk` 0x13ECB0 → SID 0x10's h2 **0x370F8** → **`kwp_session_set(6)`** (0x37154) | emulated: 0x803D3E := 0, then 6, pc 0x13CEE8 | |
+| 15 | the request descriptor **0x803D60** `{ptr buf, u16 len, +6 new, …, +0xA type, +0xB target, +0xC source}` goes to `kwp_service_dispatch` 0x13E98C from 0x13D890 (r4 = 0x803D60) | emulated: `pc 0x13e98c r4=0x803d60` | |
+
+The request buffer is **0x803C0C** (`[state+0]` of channels 3/4); the handler
+writes its answer into the same buffer (§1.4, §2).
+
+### 11.2 The answer path: dispatcher → MB13 / 0x7E8
+
+| # | Step | Where |
+|---|---|---|
+| 1 | status (io +0xA) selects the action through the jump table at **0x13D8C4** (0x13D8A8 `slwi`, `bctr`): 1 → **`kwp_send_positive` 0x13D25C** (writes SID+0x40 in front of the body at 0x13D2B8 and calls the connection's send vector `[[0x803D70]]`); 2 → 0x13D454 (negative `7F sid nrc`); **3 → no answer, only re-arm reception** (0x13D95C) | 0x13D894-0x13D9E4 |
+| 2 | the send vector ends in **`isotp_request` 0x141E58**(ch 0, buf, len) and **`isotp_transmit` 0x1429BC**: len ≤ 7 → **single frame `0N` + data + 0x00 padding to 8 bytes** (0x142A74-0x142AB8, `stbu r27` with r27 = 0), DLC always 8; len > 7 → FF `1L LL` + 6 bytes and wait for FC (0x142B28-0x142C1C) | |
+| 3 | `isotp_can_send` 0x142940 → **`can_tx_frame` 0x13C4CC**(handle 0x6A = rx map entry 0, data, id, 8): the buffer at 0x7079D0 (module C **MB13**) gets CODE 1000, id word 0x7E8 << 5 = **0xFD00**, the 8 bytes, DLC 8, then CODE **1100** (transmit, `ori 0xC0` at 0x13C8E8) | emulated: writes at 0x13C890-0x13C8EC |
+| 4 | the transmit-complete flag (C IFLAG bit 13, owner-map kind 2, handle 0x6A) runs the tx confirmation; the functional rx channel 4 is re-armed (`isotp_request(4, 0x803C0C, …)`) | emulated |
+
+**What is suppressed on the functional channel** (dispatcher tail
+0x13EABC-0x13EC80; config struct 0x2BA50 bytes +0x1F = 5, +0x20 = 2;
+`[0x803DE1]` = 4 for this connection): status is forced to **3 (silence)**
+when no table entry passed the session gate or the SID is unknown
+(0x13EACC-0x13EB14), and for a negative answer with NRC **0x10, 0x11 or
+0x12** on a type-4 or type-1 connection (0x13EBC4-0x13EC18). A handler that
+returns status 3 itself (mode 01 with an unsupported PID, §2) is silent too.
+So on 0x7DF, `3E`, `10 xx`, `21 xx`, `1A xx` and `01 20` on this image draw
+**no frame at all** — VERIFIED-DYNAMIC (emulated). That is ISO 15765-4
+behaviour and it matters on the bench: silence means "not supported", not
+"not connected".
+
+### 11.3 Timing and lifetime (VERIFIED-DYNAMIC, emulated)
+
+* The frame is copied at interrupt level; the connection opens and the session
+  is set on the first 10 ms tick, the answer is loaded into MB13 on the
+  **second** 10 ms tick (10-20 ms after the frame).
+* The connection **closes 5.00 s after the last answer** (`[0x803D70]` := 0 at
+  0x13E6E8; `kwp_session_current` back to 0). A request inside the 5 s keeps
+  it; the first request after it opens a **new connection** and with it a new
+  h2 walk — which is what rebuilds the support bitmaps (§10). The constant
+  0x010BB2AA ticks × 285 ns = 5.000 s is the `lis/ori` pair at
+  0x2C278-0x2C27C (stored to 0x803D58); HYPOTHESIS that this is the value the
+  timeout reads (the 5.00 s is measured, the link is not traced).
+* `[0x803DE0]` = 5 for this connection, 9 for the TP2.0 ones (entries 1/2 of
+  0x2C324 +8); step 5 of §11.1 uses it.
+
+### 11.4 §8 item 4: who writes 0x7F804B
+
+0x7F804B is byte +0x1F of a connection-parameter block at **0x7F802C**
+(+0x1E = 0x7F804A, the ECU's own address 0x10, written at init by
+`kwp_addr_config_set` 0x13D0F4 from the flash record **0x14493C**
+`10 33 7D 00 …`; +0x20 = 0x7F804C the channel type; +0x4A the connection
+index). Its writer is **0x13F1E4** (`stb r9,0x1F(r31)` after `lis r31,0x80 ;
+addi r31,r31,-0x7FD4`) — a base-plus-displacement store, which is why
+`tools/find_abs_refs.py` (lis + D-form on the same register) did not list it.
+The two candidates §8 named are not it: the `stswi r7,r11,8` at 0x1443A0
+writes **0x7FDA04-0x7FDA0B** (r11 = `lis 0x80 ; addi -0x25FC`), and the `stw`
+at 0x15BB8/0x15C0C (`-0x7FA8(r13)` = 0x7F8048) sit in the boot block's own
+time-base seed loop (0x15BEC-0x15C08) and were not executed on this path
+(HYPOTHESIS that they run only under the boot software).
+
+### 11.5 The simulator route and what in it is the harness
+
+`emu/obd_can.py` (`ObdCanRoute`) runs §11.1-11.2 under Unicorn;
+`logging/ecu_sim.py --obd-can` (`Med9Handlers(obd_can=True)`) puts it on a
+python-can bus and `logging/obd_client.py` is the tester. **The firmware's
+code** does: the ISR body, the range-object dispatch, the ISO 15765-2 parser
+and transmitter, the connection layer (open, 0x7F804B, the 5 s timeout), the
+h2 walk (session 6, the bitmap rebuild), the dispatcher and the handlers, and
+its own start-up — init entry **44** (`can_rx_arm_all` 0x12E570: owner map,
+range objects, `[0x7FB994]`/`[0x7FB998]`) and init entry **281** (0x1344C0:
+transport config 0x2C5F8 → `[0x803E0C]`, connection tables, address config
+0x14493C, …), both return in the emulator (6,844 and 2,171 instructions).
+**The harness** does, and says so in the module docstring:
+
+1. the TouCAN buffers: MB15 is written (CODE 0010, DLC, `id << 5`, data) and
+   IFLAG bit 15 raised only if RX15MSK passes the id; an MB13 CODE 1100 is
+   taken off as a transmitted frame, CODE set to 1000, IFLAG bit 13 raised
+   (an immediate acknowledge). During init entry 44 CANMCR reads return
+   FRZACK = HALT so the freeze handshake of `can_module_start` (0x13B714)
+   does not spin;
+2. the time base: the 44 `mftb` (TBL) words in 0x134000-0x144FFF are
+   rewritten in the emulator's flash copy into `lwz` of the virtual time
+   base's low word (`emu/time_base.py`); nothing on disk changes;
+3. the raster: 0x1427BC + 0x13A5B4 every 2 ms (the body of the set-A 2 ms
+   epilogue 0x424884) and 0x1447C0 + 0x13E650 every 10 ms (the body of
+   `task_10ms_int_epilogue` 0x4328B4), without their OS tails; idle stretches
+   longer than 80 ms are one jump of the time base.
+
+`seed_pid_records` (a MODEL, labelled) makes the 41 stock PID records valid
+for tests that want a realistic bitmap; a cold emulator has them all 0 and
+answers `01 00` with `41 00 00 00 00 00`.
+
+### 11.6 What the bench will see (the rehearsal, VERIFIED-DYNAMIC emulated)
+
+`bench_rehearsal.py --only pid52_obd` (`logging/samples/ff_fuel_sim_pid52_obd.csv`,
+`# simulated: true`), all 41 stock records valid (model):
+
+```
+7DF 02 01 00                 <- 7E8 06 41 00 bf 9f a8 93 00
+7DF 02 01 40                 <- 7E8 06 41 40 fe d0 05 00 00     (switch off = stock)
+7DF 02 01 52                 <- (no answer)
+7DF 04 01 00 20 40           <- 7E8 10 10 41 00 bf 9f a8 93 | 7DF->7E0 FC 30 00 00
+                                7E8 21 20 a0 05 b1 19 40 fe | 7E8 22 d0 05 00 00 00 00 00
+ff_pid52_enable := 1, same connection: 01 40 unchanged
+6 s of silence, new connection:  7E8 06 41 40 fe d0 45 00 00   (bit 0x40 of byte 2 = PID 0x52)
+7DF 02 01 52 at E0 / E85     <- 7E8 03 41 52 00 ... / 7E8 03 41 52 d9 00 00 00 00
+```
+
+The multi-PID request exercises the firmware's first-frame / flow-control /
+consecutive-frame transmit path (§11.1 step 10, §11.2 step 2) end to end.
+
+**Bench check for §8 item 4 (and the precondition of #39's scan-tool check):**
+with a generic scan tool or `logging/obd_client.py --bus <adapter> --pids` on
+the OBD connector, `01 00` on 0x7DF must be answered on 0x7E8 by a single
+frame `06 41 00 …` padded with 0x00, and `3E` on 0x7DF must draw **no** frame
+(session 6 gates it out; in session 4 it would answer). No answer to `01 00`
+at all means the route is not what §11 says (gate byte 0x5CEE6E, the
+gateway, or a different dataset). A read of 0x7F804B (= 0x33) and 0x803D3E
+(= 6) over TP2.0 within 5 s of the scan tool's request would confirm it
+directly, but the TP2.0 connect itself ends the OBD one (§11.1 step 5), so the
+scan-tool behaviour is the check.
+
+### 11.7 Reproduction
+
+```bash
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x2000C4 --addr 0x4040C4 --len 0x140
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0xB5534 --addr 0xB5534 --len 0x44
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x1420A0 --addr 0x1420A0 --len 0x710
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x1429BC --addr 0x1429BC --len 0x2EC
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x13F18C --addr 0x13F18C --len 0x80
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x13CDCC --addr 0x13CDCC --len 0x100
+./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x13EABC --addr 0x13EABC --len 0x1DC
+./.venv/bin/python3 tools/sda_xref.py data/passat_azx_ori.bin --code 0x13C288 0x1420A0 0x1429BC 0x13CDCC
+./.venv/bin/python3 -c "d=open('data/passat_azx_ori.bin','rb').read();[print(hex(0x2C054+20*i),d[0x2C054+20*i:0x2C068+20*i].hex()) for i in range(18)]"
+./.venv/bin/python3 -m unittest tests.test_ecu_sim_obd -v
+```

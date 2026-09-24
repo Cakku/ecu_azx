@@ -1,0 +1,43 @@
+# session: pid52_obd (a scripted KWP conversation, logging/bench_rehearsal.py)
+# transport: ISO 15765-4 single frames, 0x7DF -> 0x7E8 (ecu_sim --obd-can, the firmware's ISO 15765-2 route)
+# simulated: true
+# simulated_by: logging/ecu_sim.py -- NOT a recording of an ECU
+# sim_patch: /Users/carlo/ecu_azx/.claude/worktrees/agent-af31d870cb0249e57/patches/ff_fuel
+# modelled: every stock mode-01 PID record valid (seed_pid_records), ff_state at E0/E85 (_ff_state_at), ff_pid52_enable := 1 written into the emulated FFCAL001 (stands in for a calibration flash); the frames, the connection, session 6 and the bitmap rebuild are the firmware's (emu/obd_can.py lists the harness pieces)
+# obd: stock: 7DF 02 01 00  <- 7E8 06 41 00 bf 9f a8 93 00
+# obd: stock: 7DF 02 01 20  <- 7E8 06 41 20 a0 05 b1 19 00
+# obd: stock: 7DF 02 01 40  <- 7E8 06 41 40 fe d0 05 00 00
+# obd: stock: 7DF 02 01 52  <- (no answer)
+# obd: stock: 7DF 02 01 05  <- 7E8 03 41 05 26 00 00 00 00
+# obd: stock: 7DF 02 01 0c  <- 7E8 04 41 0c 57 74 00 00 00
+# obd: stock: 7DF 04 01 00 20 40  <- 7E8 10 10 41 00 bf 9f a8 93 | 7E8 21 20 a0 05 b1 19 40 fe | 7E8 22 d0 05 00 00 00 00 00
+# obd: shipped: 7DF 02 01 00  <- 7E8 06 41 00 bf 9f a8 93 00
+# obd: shipped: 7DF 02 01 20  <- 7E8 06 41 20 a0 05 b1 19 00
+# obd: shipped: 7DF 02 01 40  <- 7E8 06 41 40 fe d0 05 00 00
+# obd: shipped: 7DF 02 01 52  <- (no answer)
+# obd: shipped: 7DF 02 01 05  <- 7E8 03 41 05 26 00 00 00 00
+# obd: shipped: 7DF 02 01 0c  <- 7E8 04 41 0c 57 74 00 00 00
+# obd: shipped: 7DF 04 01 00 20 40  <- 7E8 10 10 41 00 bf 9f a8 93 | 7E8 21 20 a0 05 b1 19 40 fe | 7E8 22 d0 05 00 00 00 00 00
+# step: ff_pid52_enable := 1 in the emulated FFCAL001
+# obd: same_connection: 7DF 02 01 40  <- 7E8 06 41 40 fe d0 05 00 00
+# step: 6 simulated s of bus silence; the connection times out (5 s) and the next request opens a new one
+# obd: reconnected: 7DF 02 01 40  <- 7E8 06 41 40 fe d0 45 00 00
+# obd: E0: 7DF 02 01 52  <- 7E8 03 41 52 00 00 00 00 00
+# obd: E85: 7DF 02 01 52  <- 7E8 03 41 52 d9 00 00 00 00
+time_s,var,value,unit
+0.0000,stock_session,6,-
+0.4895,shipped_frames_equal_stock,1,-
+0.4895,shipped_0152_answered,0,-
+0.4895,shipped_session,6,-
+0.4896,shipped_tester_target,51,-
+0.5170,same_connection_0140_bit52,0,-
+0.5170,same_connection_open,1,-
+0.5336,closed_after_idle,1,-
+0.5636,reconnected_0140_bit52,1,-
+0.5636,reconnected_new_connection,1,-
+0.5895,e0_0152_frame_ok,1,-
+0.5895,e0_0152_a,0,-
+0.6147,e85_0152_frame_ok,1,-
+0.6147,e85_0152_a,217,-
+0.6147,session,6,-
+0.6147,connections,2,-

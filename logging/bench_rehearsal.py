@@ -23,6 +23,15 @@ bitmaps are rebuilt once per connection.  Their transcripts are
 `ff_fuel_sim_dtc.csv` / `ff_fuel_sim_pid52.csv`, and what in them is modelled
 rather than the firmware says so in a `# modelled:` line.
 
+`pid52_obd` (brief H3, 2026-09-24) is the same PID 0x52 rehearsal the way a
+generic scan tool does it: ISO 15765-4 single frames on **0x7DF**, answers on
+**0x7E8**, through the firmware's own ISO 15765-2 parser and dispatcher
+(`logging/ecu_sim.py --obd-can`, `emu/obd_can.py`, `re/findings/obd.md` 11).
+With the switch off every answer is byte-for-byte the stock image's; with it
+on, `01 40` advertises 0x52 only after a reconnect (a request after more than
+5 s of silence opens a new connection) and `02 01 52` answers `03 41 52 A`
+for E0 and E85.  Transcript `ff_fuel_sim_pid52_obd.csv`.
+
 Usage::
 
     python3 logging/bench_rehearsal.py                 # everything, ~3 min
@@ -321,6 +330,25 @@ def checks_for(name: str, s: dict, *, eeprom_file: str | None = None
             last(s, "reconnected_0140_bit52") == 1
             and last(s, "reconnected_0152_positive") == 1,
             f"A={last(s, 'reconnected_0152_a')}")
+        return out
+    if name == "pid52_obd":
+        chk("O1 switch off: every 0x7E8 frame byte-for-byte the stock image's",
+            last(s, "shipped_frames_equal_stock") == 1
+            and last(s, "shipped_0152_answered") == 0)
+        chk("O2 a 0x7DF request runs in session 6, tester address 0x33",
+            last(s, "shipped_session") == 6 and last(s, "stock_session") == 6
+            and last(s, "shipped_tester_target") == 0x33,
+            f"session={last(s, 'shipped_session')}")
+        chk("O3 enabled: 01 40 unchanged on the same connection",
+            last(s, "same_connection_0140_bit52") == 0
+            and last(s, "same_connection_open") == 1)
+        chk("O4 after 5 s of silence a new connection: 01 40 advertises 0x52",
+            last(s, "closed_after_idle") == 1
+            and last(s, "reconnected_new_connection") == 1
+            and last(s, "reconnected_0140_bit52") == 1)
+        chk("O5 02 01 52 -> 03 41 52 A on 0x7E8 for E0 and E85",
+            last(s, "e0_0152_frame_ok") == 1 and last(s, "e85_0152_frame_ok") == 1,
+            f"A(E0)={last(s, 'e0_0152_a')} A(E85)={last(s, 'e85_0152_a')}")
         return out
 
     magic = last(s, "ff_magic")
@@ -674,12 +702,130 @@ def script_pid52(step: Step, eeprom_file: str | None) -> None:
     tr.write()
 
 
+#: the requests of the switch-off proof, as a scan tool sends them on 0x7DF
+OBD_PROOF_REQUESTS = (b"\x01\x00", b"\x01\x20", b"\x01\x40", b"\x01\x52",
+                      b"\x01\x05", b"\x01\x0c", b"\x01\x00\x20\x40")
+#: E percent -> the J1979 byte A = round(E * 255 / 100) (obd.md 5, G1)
+OBD_E_LEVELS = ((0, 0x00), (85, 0xD9))
+
+
+def _ff_state_at(e_pct: int) -> bytes:
+    """MODEL: `struct ff_state` as the patch holds it after the Pico reported E.
+
+    The same stand-in `tests/test_ff_obd_patch.py` uses: the reference model
+    with `e_filt` = E and a long FAULT hold, so the patch's own 10 ms tick
+    keeps E while it builds the PID 0x52 record.  Labelled in the transcript.
+    """
+    st = _ff.FlexFuelModel(_ff.Cal())
+    st.state.e_filt = e_pct * 16
+    st.state.hold_ticks = 0xFFFF
+    st.seal()
+    return st.full_bytes()
+
+
+def script_pid52_obd(step: Step, eeprom_file: str | None) -> None:
+    """G1's PID 0x52 over the generic scan-tool route, 0x7DF -> 0x7E8 (H3).
+
+    Two simulators: the stock image, and the patched image with its hooks
+    running.  Both get the same MODELLED sensor state -- every stock PID
+    record valid (`emu.obd_can.seed_pid_records`) and, on the patched one,
+    an ff_state at a given E (`_ff_state_at`) -- and are then asked the same
+    ISO 15765-4 questions.  Everything between the 0x7DF frame and the 0x7E8
+    frame is the firmware's (obd.md 11); the harness pieces are in
+    `emu/obd_can.py`.
+    """
+    sys.path.insert(0, str(PATCH))
+    import ffcal001                                            # noqa: E402
+    from ecu_sim import (AnimatedRam, DEFAULT_STATICS, FFCAL001_BASE,
+                         Med9Handlers)
+    from emu.obd_can import seed_pid_records
+    tr = Transcript(step, [
+        f"sim_patch: {PATCH}",
+        "modelled: every stock mode-01 PID record valid (seed_pid_records), "
+        "ff_state at E0/E85 (_ff_state_at), ff_pid52_enable := 1 written "
+        "into the emulated FFCAL001 (stands in for a calibration flash); "
+        "the frames, the connection, session 6 and the bitmap rebuild are "
+        "the firmware's (emu/obd_can.py lists the harness pieces)"])
+    tr.lines[1] = ("# transport: ISO 15765-4 single frames, 0x7DF -> 0x7E8 "
+                   "(ecu_sim --obd-can, the firmware's ISO 15765-2 route)")
+
+    def new(patched: bool):
+        kw = dict(patch_dir=str(PATCH)) if patched else {}
+        h = Med9Handlers(str(DUMP), time_scale=step.scale, obd_can=True,
+                         ram=AnimatedRam(live_task_set="A",
+                                         statics=dict(DEFAULT_STATICS)), **kw)
+        seed_pid_records(h.emu)
+        return h
+
+    def ask(h, tag, request):
+        frames = h.obd_request(request)
+        rx = " | ".join(f"{c:03X} {d.hex(' ')}" for c, d in frames) or "(no answer)"
+        tr.lines.append(f"# obd: {tag}: 7DF {bytes([len(request)]).hex()} "
+                        f"{request.hex(' ')}  <- {rx}")
+        return frames
+
+    def settle(h, e_pct=None):
+        """The patch's own 10 ms tick, a few times (it builds the record)."""
+        if e_pct is not None:
+            h.emu.write(0x7FFB00, _ff_state_at(e_pct))
+        for _ in range(5):
+            h.runner._one_tick()
+
+    def bit52(frames):
+        if not frames or frames[0][1][1:3] != b"\x41\x40":
+            return 0
+        return int(bool(frames[0][1][5] & (0x80 >> ((0x52 - 1) & 7))))
+
+    stock = new(False)
+    want = {r: ask(stock, "stock", r) for r in OBD_PROOF_REQUESTS}
+    tr.value("stock_session", stock.obd.session)
+
+    h = new(True)
+    settle(h, 85)
+    got = {r: ask(h, "shipped", r) for r in OBD_PROOF_REQUESTS}
+    tr.value("shipped_frames_equal_stock", int(got == want))
+    tr.value("shipped_0152_answered", int(bool(got[b"\x01\x52"])))
+    tr.value("shipped_session", h.obd.session)
+    tr.value("shipped_tester_target", h.obd.tester_target)
+
+    params = ffcal001.load_params(FFCAL_JSON)
+    params["ff_pid52_enable"] = 1
+    h.emu.write(FFCAL001_BASE, ffcal001.build(params))
+    tr.lines.append("# step: ff_pid52_enable := 1 in the emulated FFCAL001")
+    settle(h, 85)
+    conns = h.obd.connections
+    same = ask(h, "same_connection", b"\x01\x40")
+    tr.value("same_connection_0140_bit52", bit52(same))
+    tr.value("same_connection_open", int(h.obd.connections == conns))
+    h.obd_idle(6.0)
+    tr.value("closed_after_idle", int(not h.obd.connection_open))
+    tr.lines.append("# step: 6 simulated s of bus silence; the connection "
+                    "times out (5 s) and the next request opens a new one")
+    again = ask(h, "reconnected", b"\x01\x40")
+    tr.value("reconnected_0140_bit52", bit52(again))
+    tr.value("reconnected_new_connection", int(h.obd.connections == conns + 1))
+    for e_pct, a in OBD_E_LEVELS:
+        settle(h, e_pct)
+        frames = ask(h, f"E{e_pct}", b"\x01\x52")
+        data = frames[0][1] if frames else b""
+        tr.value(f"e{e_pct}_0152_frame_ok",
+                 int(len(frames) == 1 and frames[0][0] == 0x7E8
+                     and data == bytes([0x03, 0x41, 0x52, a, 0, 0, 0, 0])))
+        tr.value(f"e{e_pct}_0152_a", data[3] if len(data) > 3 else -1)
+    tr.value("session", h.obd.session)
+    tr.value("connections", h.obd.connections)
+    tr.write()
+
+
 _insert_after("fault6", KwpStep(
     "dtc", "docs/07 3.4 step 1: read stored DTCs, clear them, read them back",
     script_dtc))
 _insert_after("d2_restart", KwpStep(
     "pid52", "G1/#39: ff_pid52_enable on, reconnect, 01 40 advertises PID 0x52",
     script_pid52))
+_insert_after("pid52", KwpStep(
+    "pid52_obd", "H3/#48: PID 0x52 as a scan tool reads it, 0x7DF -> 0x7E8",
+    script_pid52_obd))
 BY_NAME = {s.name: s for s in STEPS}
 
 
