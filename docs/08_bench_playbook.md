@@ -319,3 +319,69 @@ adaptation-channel slots**. Record them. G7 picks the new offset from this read.
 **Why step 3 comes before any flash:** every row above is a read of the
 **stock** image. After a flash it would no longer be a stock read. Flash 1's
 decision table (step 6) takes 3c's raster-counter read as its first input.
+
+---
+
+## Step 4 — The RAM snapshots (#23, dynamic half)
+
+**Drives:** `re/findings/ram.md` §9 (the six sessions and the pass criteria),
+`logging/sessions/ram_snapshot.json` (the ranges), `logging/README.md` §3b and
+§8 ("A RAM snapshot takes about a minute"), and `tools/ram_snapshot_diff.py`.
+**Unit:** SW `1037382557` only (S2). The ranges and the patch block 0x7FFB00
+belong to this software.
+
+### 4a. Rehearse [Mac]
+
+```bash
+./.venv/bin/python3 logging/med9log.py dump --sim --ranges logging/sessions/ram_snapshot.json -o work/sim_snap.bin --session-name key-on
+./.venv/bin/python3 tools/ram_snapshot_diff.py --self-test
+```
+
+```
+63932 bytes in 60.836 s -> work/sim_snap.bin
+self-test OK
+```
+
+A simulated snapshot carries `"simulated"` and never goes into the comparison
+set (`logging/README.md` §4).
+
+### 4b. The six snapshots [bench-only / car-only]
+
+One `dump` per state, with `--session-name` naming it (`logging/README.md` §8):
+
+| # | State (`ram.md` §9) | Where |
+|---|---|---|
+| 1 | **key-on**, engine not started. Read 0x7F8012 first (0x41 = 32 KB, 0x44 = 64 KB, `ram.md` §7) | bench or car |
+| 2 | **idle**, warm, ≥ 2 min after start | **car** |
+| 3 | **after a drive** that exercised knock control, the fuel adaptations and the rail controller, engine off, ignition on | **car, road** |
+| 4-6 | **key cycle 1, 2, 3**: key off, wait for the main relay to drop (~10 s), key on, snapshot immediately | bench or car |
+
+Then:
+
+```bash
+python3 tools/ram_snapshot_diff.py logging/sessions/snap_*.json --free 64 --csv work/ramdiff.csv
+```
+
+### 4c. Pass, and what a failure means
+
+Quoting the criteria of `ram.md` §9, not restating them:
+
+* **Pass:** every byte of **0x7FF770-0x7FFFEB** is `blank` in all six. The
+  stack range 0x7FF000-0x7FF76F has a `changed` floor below 0x7FF770.
+  0x804990-0x807FFF does not change between the six.
+* **A `changed` byte in 0x7FF770-0x7FFFEB:** the block is live. §9 names the
+  fall-back (candidate 2, 0x7FE0C0-0x7FE587). The patches' `build.ram` has to
+  move, and that is a desk brief, not a bench fix.
+* **Stack floor above 0x7FF770:** the recommendation is wrong and is withdrawn
+  immediately (§9).
+
+**On a pass:** mark `ram.md` §10's rows and #23's "Dynamic" checkbox. Then
+change `"ram_status"` to `"verified"` in `patches/ff_counter/patch.json` and
+`patches/ff_fuel/patch.json`, as a reviewed desk commit that cites the six
+files. That is what lifts gate **S3** (`docs/07` §2.3). The #23 exit criterion,
+"unchanged across runtime dumps at idle, driving and key-off/on", is then met.
+
+**Why before Flash 0:** Flash 0 writes no RAM block, so strictly it does not
+need this. But `docs/07` §6.4 forbids every image whose `ram_status` is not
+`verified`. Doing the snapshots first also means the whole day's logging runs
+on a stock ECU. A snapshot of a flashed ECU would contain our own block.
