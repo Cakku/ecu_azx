@@ -448,9 +448,12 @@ Q15 at those instructions, **COMMUNITY** for the names. That closes the
 > catalyst / diagnostic phases, never below 0.700. So the sentence above is
 > wrong: **the ethanol factor at the `rk` hook multiplies a stock
 > enrichment whenever one is active** (docs/05 §3.3, note of 2026-09-24). The
-> controller statement stays true — 0x802CDE is built from 0x80303E (before
-> the division) and 0x80303A (after it), so the loop's setpoint carries the
-> requested λ.
+> controller statement stays true, and now reads more precisely:
+> `lam_ist_from_rk` 0x43E164 forms 0x802CDE as the ratio of 0x80303E (the
+> mass *before* the division) to its own `div32_sat_u16(0x80303E, lamsbg_w)`
+> once `B_stend_raw` is set (0x5C63A4 = 1, so the second branch at 0x43E1xx is
+> the live one), i.e. the loop's setpoint **is** the requested λ, and it is
+> formed upstream of `fr` and of the flex-fuel hook.
 
 ## 10. Verification: the Python model
 
