@@ -382,7 +382,7 @@ is computed at run time (0x038C04, 0x038C44, 0x038C84, 0x038D20, 0x038DF0,
 | 5 | 0x140 | +2..+17 | 0x1343F0 (11 B @ +2), 0x134430 (3 B @ +13), 0x134470 (2 B @ +16) |
 | 6 | 0x160 | +2..+21 | 0x0FF95C, 0x0FF984, 0x11F134-0x11F284 and 0x245F10-0x246028 (eight u16 at +2,+4,…,+16) |
 | 7 | 0x180 | +2..+8, +12..+13 | 0x0A274C, 0x0A284C, 0x0A287C (6 B @ +2, from KWP **SID 0x3B local id 0xBC**), 0x115994/0x115A58/0x115A8C, 0x134284/0x134314, 0x236150/0x236178 |
-| 8 | 0x1C0 | **only +14** | 0x134380 (1 byte) |
+| 8 | 0x1C0 | ~~**only +14**~~ **+2..+18** (the 17 tester adaptation channels, channel *k* at +(k+1)) — *2026-09-24 (G7, #38): the constant-offset scan sees only +14 = channel 13; the channel paths load the block number from 0x0A3AD8 (§5 note of 2026-09-24)*; +19 = the ff_fuel E% store since G7 | 0x134380 (1 byte, +14); 0x12E4A4 `adaptation_restore_all` (read-back); 0x038C04 / 0x038C44 / 0x038C84 (KWP adaptation service 0x038708, sub-function 0x83 commit); 0x038D20 (read-back); 0x038DF0 / 0x038E2C (reset-all 0x038D64) |
 | 10 | 0x260 | +2..+21 | 0x036DC4-0x036EDC (12 B @ +2, 4 B @ +14, 1 B @ +18, 1 B @ +19, 2 B @ +20) |
 | 11 | 0x280 | +11..+13 | 0x0364B8, 0x036650, 0x036B34 (2 B @ +12), 0x0D1110 (1 B @ +11) — plus the direct SPI path of §2 |
 | 12 | 0x2C0 | +4..+9, +19 | 0x120878, 0x1208A8, 0x121760, 0x121790, 0x1217C0, 0x125C7C, 0x12EA5C, 0x24B030 |
@@ -413,12 +413,12 @@ before reading the table below:
 
 | blk | EEPROM | flags&3 | free payload offsets | contiguous free |
 |---|---|---|---|---|
-| **8** | 0x1C0 (+ copy 0x1E0) | 1 | ~~+0..+13~~ **+2..+13**, +15..+28 | ~~14~~ **12** + 14 bytes |
+| **8** | 0x1C0 (+ copy 0x1E0) | 1 | ~~+0..+13~~ ~~**+2..+13**, +15..+28~~ **+19..+28** (G7, 2026-09-24: +2..+18 are the adaptation channels) | ~~14~~ ~~**12** + 14 bytes~~ **10** bytes |
 | 11 | 0x280 (+ copy 0x2A0) | 1 | +0..+10, +14..+28 | 11 + 15 bytes, but the immobiliser writes this block behind the manager's back — avoid |
 | 12 | 0x2C0 | 0 | +0..+3, +10..+18, +20..+29 | 4 + 9 + 10 bytes |
 | 3 | 0x100 | 0 | +0..+1, +9..+29 | 21 bytes |
 | 7 | 0x180 (+ copy 0x1A0) | 1 | +0..+1, +9..+11, +14..+28 | 15 bytes, but this is the coding block a tester rewrites |
-| **24** | 0x620 | 0 | +0..+1, +3..+252 | **252 bytes**, single copy, 255-byte block (8 pages per write) |
+| **24** | 0x620 | 0 | +0..+1, +3..+252 | **252 bytes**, single copy, 255-byte block (8 pages per write) — **excluded (G7, 2026-09-24)**: the fault-clear service zeroes and commits it (G5, §7 item 4 note of 2026-09-24) |
 
 > **2026-09-17 (E4, #38) — correction to this whole table.** Payload **+0 and
 > +1 of every block are a {block id, version} stamp** that
@@ -476,10 +476,51 @@ before reading the table below:
 > Call and range VERIFIED-STATIC (`blobdis.py --file-off 0xD1068 --addr
 > 0xD1068 --len 0xD8`); who sets the bit is **HYPOTHESIS/open**. At +19 the
 > E% survives it; at +2 it did not.
+>
+> **Emulated (VERIFIED-DYNAMIC, emulated; `tests/test_ff_diag_patch.py::
+> TestPersistOffsetOffTheChannels` and `::TestPersistenceThroughTheDeviceAt19`,
+> stock code on the §10 device model):**
+>
+> * `adaptation_restore_all` (entry 0x12E3F4) over a block carrying E% 85 at
+>   +19 leaves every channel cell 0x7FD062-0x7FD06D at its default and
+>   0x7FD06B at 0; the whole-SRAM difference against the default block is the
+>   mirror byte 0x7F9F93 and the checksum. At +2 the loop copies the E% into
+>   0x7FD06B.
+> * the reset-all routine 0x038D64 + the pump: both device copies carry the
+>   channel defaults at +2..+18, a valid checksum and **+19 unchanged**; with
+>   the E% at +2 the stored 85 becomes **0**. The handle record reads
+>   `{blk 8, off 2, len 0x11, case 8, status 2}` — case 8 writes the **whole**
+>   record from the mirror (ReplV +29 moves, checksum regenerated). After it a
+>   power cut and a fresh start-up read hand the E% back to the patch.
+> * **the tester path does less than F4's §10.1 wording suggests on this
+>   dataset.** The service tests channel bit (ch − 1) against three access
+>   words, 0x5CF004 / 0x5CF008 / 0x5CF00C (0x5CF00C and 0x5CF008 only together
+>   with the state byte 0x7FB745 = 2 / 1), and all three are **0x00000040** —
+>   channel 7 only (`xxd -s 0x1CF004 -l 12`). So 0x81 on channel 1 (and on 2,
+>   4, 8, 10, 13) is refused with **0x33**, the state machine at 0x439780
+>   never reaches 0x82/0x83 for it, and a channel-0 reset (0x81 ch 0, 0x82,
+>   0x83) **changes no channel at all** — the reset loops at 0x038848 and
+>   0x038B24 skip every channel whose bit is clear while any access word is
+>   non-zero, and skip n = 6 (channel 7) explicitly — though the 0x83 still
+>   commits the block. With the three words opened to 0xFFFFFFFF in the
+>   emulator (a dataset whose tester may reset every channel) the same
+>   sequence zeroes +2 and spares +19. So on this dataset the brief's three
+>   tester exposures of the E% at +2 (channel-0 reset, a channel-1 write, a
+>   channel-1 read) do **not** occur; the one real exposure was the stock
+>   reset-all path above. The move to +19 closes both.
 
 ### Recommendation for a one-byte ethanol store
 
-**Block 8, payload offset ~~+0~~ +2, one byte.** Reasons:
+**Block 8, payload offset ~~+0~~ ~~+2~~ +19, one byte.** Reasons:
+
+> *2026-09-24 (G7, #38): **+19**, not +2. +2..+18 are the 17 tester
+> adaptation channels (note of 2026-09-24 above); +2 is channel 1, which the
+> stock reset-all path 0x038D64 (and, on a dataset whose access words admit
+> channel 1, a workshop channel-0 reset + commit)
+> overwrites with its default 0. +19 is the lowest byte of the exclusion set
+> above; `ff_persist_offset` = 19 in `patches/ff_fuel/ffcal001.json`. The
+> bullet "only one stock client" below is wrong in the same way: one
+> constant-offset client, plus the adaptation-channel paths.*
 
 * Block 8 is **duplicated** (copies at 0x1C0 and 0x1E0), so the manager's own
   fallback-to-second-copy logic protects the value for free.
@@ -494,14 +535,15 @@ Write path, using only stock code:
 
 ```c
 u8 e_pct = <0..100>;                       /* or 0..255 for 0.5 % resolution */
-FUN_0006131C(8, 0, 1, 0, &e_pct, 0);       /* stage into mirror 0x7F9F80    */
+FUN_0006131C(8, 19, 1, 0, &e_pct, 0);      /* stage into mirror 0x7F9F93 (G7) */
 FUN_0006131C(8, 0, 0, 0, 0, &handle);      /* commit: checksum + both copies */
 /* poll handle until != 0 */
 ```
 
 Read path at start-up: the block is already in the mirror after
-`FUN_00062280`, so `FUN_0006131C(8, 0, 1, 0, &dst, 0)` returns it, or read
-**0x7F9F80** directly.
+`FUN_00062280`, so `FUN_0006131C(8, 19, 1, 1, &dst, 0)` returns it (mode 1,
+§8.1), or read **0x7F9F93** directly (G7, 2026-09-24; the offsets 0 in this
+block were D2's, see §10.5).
 
 **Checksum implications: none that the patch has to handle.** The commit path
 calls `FUN_00061A48`/`FUN_00061AC4`, which recomputes the 16-bit sum over
@@ -509,9 +551,18 @@ bytes +0..+29 and rewrites the complement at +30..+31 before the device write.
 A patch must *not* write the EEPROM through the raw SPI primitives of §2, or it
 would have to replicate that itself and would race the manager's mirror.
 
-Fallback if block 8 turns out to be occupied on a real ECU: **block 24 offset
+~~Fallback if block 8 turns out to be occupied on a real ECU: **block 24 offset
 +3**, which has 250 unused payload bytes, at the cost of an 8-page (~40 ms)
-write per commit — acceptable at key-off, not in a cyclic task.
+write per commit — acceptable at key-off, not in a cyclic task.~~
+
+> *2026-09-24 (G7, #38): **block 24 is not a fallback.** G5 found
+> (§7 item 4, note of 2026-09-24) that `kwp_sid_14_h1`
+> (clearDiagnosticInformation) commits block 24 — `nvm_block_request(0x18, …)`
+> at 0x3536C/0x353B0 — after zeroing a 251-byte stack buffer, so block 24 is
+> fault-memory family and a DTC clear would wipe anything stored there. If
+> block 8 +19..+28 turns out to be occupied on a real ECU, move within
+> +19..+28 first (`--set ff_persist_offset=20`), and otherwise use the
+> external-SRAM route below.*
 
 Second fallback, and the one to prefer during bench development: keep the byte
 in the external SRAM (§6) and only mirror it to the EEPROM at key-off.
@@ -764,6 +815,16 @@ piggyback is trivial". It is not trivial, and for block 8 it does not exist.
 What the search established, all VERIFIED-STATIC:
 
 **1. Block 8 has exactly one stock client, and it never commits.**
+*(2026-09-24, G7, #38 — corrected in place, after F4's note in
+`calibration_names.md` §10.1: exactly one **constant-offset** client. The KWP
+adaptation service 0x038708 **does commit block 8**, in sub-function 0x83 —
+0x038C44 `(8, 2, 17, …, &0x8001D8)` after a channel-0 reset and 0x038C84
+`(8, ch + 1, 1, 0, &0x8001E6, &0x8001D8)` for one channel — and so does the
+reset-all routine 0x038D64 (0x038E2C), called from 0x0D10D0 after the
+fault-clear state machine. Those commits write the **whole mirror**, so a
+byte the patch has staged goes to the device with them; nothing in them
+writes past +18. §5, note of 2026-09-24, has the exclusion set. What follows
+holds for the constant-offset sites.)*
 `tools/eeprom_map.py data/passat_azx_ori.bin --clients` resolves all 87 call
 sites of `nvm_block_request`. Exactly one names block 8:
 
@@ -974,7 +1035,12 @@ byte the patch reads back is `0x08` — a perfectly plausible **8 %**, not the
 `0xFF` that means "nothing known". The value never survives a key cycle and
 the failure is silent. The fix is one calibration byte,
 `ff_persist_offset = 2` (procedure_d2.md §B4 already documents the lever),
-and §5's "free payload offsets +0..+13" for block 8 must read **+2..+13**.
+and §5's "free payload offsets +0..+13" for block 8 must read ~~**+2..+13**~~
+**+19..+28** (*2026-09-24, G7, #38: +2..+18 are the 17 tester adaptation
+channels — §5, note of 2026-09-24 — so +2 was channel 1; `ff_persist_offset`
+is now 19. The stamp check below is unchanged: it compares payload +0 only,
+so +19 is accepted exactly as +2 was, emulated in
+`tests/test_ff_diag_patch.py::TestPersistOffsetOffTheChannels`*).
 The same correction applies to blocks 1, 3, 7, 11 and 12 in that table.
 
 ### 10.6 The full #38 path, emulated end to end

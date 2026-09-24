@@ -993,6 +993,29 @@ Three things follow:
 
 #### Hazard, added 2026-09-23 (brief G2, issue #38) — block 8 is also the adaptation-channel block, and payload +2 is channel 1
 
+> **SETTLED (2026-09-24, G7, `re/findings/eeprom.md` §5 note of 2026-09-24;
+> `patches/ff_fuel/README.md` "E% across power loss").** The store moved to
+> block 8 payload **+19** (`ff_persist_offset` 2 → 19, FFCAL001 stays v5: a
+> default value, not a layout change). +19 is the lowest byte of +19..+28 that
+> no stock path writes — exclusion set in `eeprom.md` §5. Consequence (a) was
+> already benign on this dataset by the clamp fact of the integrator note
+> below (0x46B0BC passes channel 1 as the *value* of `clamp` 0x410ACC with
+> `lo` = `hi` = 0); consequence (b) is removed. In the emulator
+> (`tests/test_ff_diag_patch.py::TestPersistOffsetOffTheChannels`): the real
+> `adaptation_restore_all` 0x12E3F8 over a block carrying the E % at +19 moves
+> no channel byte and leaves 0x7FD06B at 0; the stock **reset-all routine
+> 0x038D64** — called from 0x0D10D0 after the fault-clear state machine, no
+> tester and no access check involved — rewrites +2..+18 with the defaults
+> and commits, which **zeroed an E % at +2 and leaves +19 as it was**. The
+> *tester* channel-0 reset turned out to be a smaller risk than (b) assumed
+> on this dataset: the service's three access words 0x5CF004/08/0C are all
+> 0x40 (channel 7 only), so it refuses channel 1 with 0x33 and its channel-0
+> reset changes no channel; with the words opened in the emulator it zeroes
+> +2 and spares +19 as well (`re/findings/eeprom.md` §5, note of
+> 2026-09-24). `ff_persist_enable` keeps its D2 default of 1
+> (it predates the ships-disabled rule; `docs/08` S12 builds the bench image
+> with 0 until the human rules on it).
+
 The fuel side of this hazard is in §3.3, note of 2026-09-23. Here is the
 persistence side. **The layout is VERIFIED-STATIC**: it rests on F4's
 `re/symbols.csv` row for 0x12E3F8 and on the descriptor bytes below, and the

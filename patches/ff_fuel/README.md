@@ -1457,20 +1457,24 @@ and nothing else.
 > resets all of them to their defaults and 0x83 commits block 8;
 > `re/findings/calibration_names.md` §10.1). Channel 1's only reader clamps it
 > to 0/0, so the engine never saw the stored E % (docs/05 §3.8, integrator note
-> of 2026-09-24) — but a **channel-0 reset + commit zeroed the store**, and the
-> patch accepts 0 as a valid E0: lean on an E85 tank. The stock reset-all
-> routine 0x038D64 does the same after the fault-clear state machine
-> (`re/findings/eeprom.md` §5, note of 2026-09-24). `ff_persist_offset` is now
+> of 2026-09-24) — but a **reset of the channels zeroed the store**, and the
+> patch accepts 0 as a valid E0: lean on an E85 tank. On this dataset the
+> reset that does it is the stock reset-all routine 0x038D64, run after the
+> fault-clear state machine (0x0D10D0); the tester's channel-0 reset is
+> blocked by the service's access words (channel 7 only) but would do the
+> same on a dataset that opens them (`re/findings/eeprom.md` §5, note of
+> 2026-09-24). `ff_persist_offset` is now
 > **19**, the lowest byte no stock path writes; the exclusion set is in
 > `eeprom.md` §5. **FFCAL001 stays v5**: a default *value* changed, nothing
 > moved, so there is no VERSION bump and `ff_cal_ok()` is unchanged; only
 > `ffcal001.bin`, `patch.json`'s FFCAL001 bytes and the patched image's
 > SHA-256 (§ Applying it) follow. The emulator proofs are
 > `tests/test_ff_diag_patch.py::TestPersistOffsetOffTheChannels` — the E4
-> end-to-end path at +19, the real `adaptation_restore_all` over a block
-> carrying the E % at +19 (no channel byte moves, 0x7FD06B stays 0), and the
-> real service's channel-0 reset + commit (the byte survives at +19, and is
-> zeroed at +2).
+> end-to-end path at +19 (`::TestPersistenceThroughTheDeviceAt19`), the real
+> `adaptation_restore_all` over a block carrying the E % at +19 (no channel
+> byte moves, 0x7FD06B stays 0), and the real reset-all routine and tester
+> channel-0 reset + commit (the byte survives at +19, and is zeroed at +2),
+> each with a whole-SRAM or whole-device diff.
 
 > **Corrected 2026-09-17 (brief E4, `re/findings/eeprom.md` §10.5): the offset
 > was 0, and that was a bug.** Payload **+0 and +1 are a

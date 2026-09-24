@@ -69,7 +69,8 @@ PATCH_RAM = tff.PATCH_RAM
 #: G7 (2026-09-24, #38): payload +2..+18 are the 17 tester adaptation
 #: channels (channel k at +(k+1); `adaptation_restore_all` 0x12E3F8 and the
 #: KWP adaptation service 0x038708), so E4's +2 was channel 1 and a
-#: channel-0 reset zeroed the store.  The offset is **19**, the lowest byte no
+#: channel reset (the stock reset-all 0x038D64) zeroed the store.  The offset
+#: is **19**, the lowest byte no
 #: stock path writes (eeprom.md section 5, note of 2026-09-24).
 BLK8_STAMP = bytes((8, 1))
 PERSIST_OFF = 19
