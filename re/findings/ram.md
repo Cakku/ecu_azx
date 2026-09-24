@@ -215,7 +215,7 @@ source there as well.
 | 0x7FD2CC-0x7FD2EB | `immo_eeprom_mirror` | VERIFIED-STATIC | `eeprom_read_immo_block` 0x085F44 |
 | 0x7FE588-0x7FE837 | `os_kernel_ram` | HYPOTHESIS | kernel configuration block 0x09B5EC-0x09B76C |
 | 0x7FE588 / 0x7FE5A0 / 0x7FE5A4 | stack-pointer chain, kernel object ptr | VERIFIED-STATIC | scheduler.md 7 |
-| ↳ 0x7FE59C / 0x7FE5A0 | **CORRECTED 2026-09-24 (G3, integration): the ERCOSEK process cursor — 0x7FE59C = next process slot, 0x7FE5A0 = current process slot; the "stack-pointer chain" reading of 0x7FE5A0 was wrong** (`scheduler.md` §13, `boot.md` §6.8; `tools/ram_survey.py`'s `os_stack_ptr_chain_ext` label and `re/ram_map.csv` still carry the old name) | VERIFIED-STATIC | scheduler.md 13 |
+| ↳ 0x7FE59C / 0x7FE5A0 | **CORRECTED 2026-09-24 (G3, integration): the ERCOSEK process cursor — 0x7FE59C = next process slot, 0x7FE5A0 = current process slot; the "stack-pointer chain" reading of 0x7FE5A0 was wrong** (`scheduler.md` §13, `boot.md` §6.8; `tools/ram_survey.py`'s `os_stack_ptr_chain_ext` label and `re/ram_map.csv` still carry the old name; **fixed 2026-09-24 (H4):** the survey now labels 0x7FE59C `os_proc_next_slot` and 0x7FE5A0 `os_proc_cur_slot`, the `re/symbols.csv` names, and `re/ram_map.csv` was regenerated with `tools/ram_survey.py data/passat_azx_ori.bin --csv re/ram_map.csv` — only rows 0x7FE580 and 0x7FE5A0 changed) | VERIFIED-STATIC | scheduler.md 13 |
 | 0x7FE5FC-0x7FE644 | `os_task_activation_flags` | VERIFIED-STATIC | `tbl_os_task_control_blocks` +0x14 |
 | 0x7FF01C-0x7FF3BF | `stack_overshoot_estimate` | HYPOTHESIS | section 5 |
 | 0x7FF3C0-0x7FF76F | `os_task_stack` | VERIFIED-STATIC | kernel stack descriptor + the fill at 0x12C40C |
