@@ -169,7 +169,8 @@ On the bench the same command runs with `--bus gs_usb:0` (`logging/README.md`
 `re/findings/boot.md` §6.8(c) and (e).
 
 Rehearse [Mac]. `--sim-flash-crc` runs the firmware's own CRC task. In 45 s
-the cursor walks 0x21004 → 0x9B69C, and the publish is still minutes away:
+the cursor walks from 0x21004 to between 0x9B69C and 0xC2F6C (two runs; it
+depends on host load). The publish is still minutes away:
 
 ```bash
 ./.venv/bin/python3 logging/med9log.py log --sim --sim-flash-crc --time-scale 8 --seconds 45 --session logging/sessions/flash_crc.json -o work/sim_flash_crc.csv
@@ -713,5 +714,7 @@ from the log.
    §2 check 4 says the counter runs with KL15 only) with the engine-running
    comparison deferred to #28. Decide before the baselines of step 3d are
    recorded.
-5. `logging/README.md` §3b says a snapshot is 1,032 TransferData blocks, and
-   `ram.md` §9 says 1,031. It does not matter for the procedure.
+5. `logging/README.md` §8 says a snapshot is 1,032 TransferData blocks, and
+   `ram.md` §9 says 1,031. The tool prints `5 ranges, 63932 bytes, 1032
+   TransferData blocks`, because each of the five ranges rounds up. It does not
+   matter for the procedure.
