@@ -267,10 +267,10 @@ Record the results as dated notes in `calibration_names.md` §11:
 
 | Id | Cell | How | Expect | Source |
 |---|---|---|---|---|
-| 43 | 0x80304A `lamsbg_w` | in **no** stock group (`re/findings/measuring_groups.txt`) and in no session file, so it needs a DDLI entry that does not exist yet (open question 3) | 1.000 at steady part load | §11.8; `re/symbols.csv` row 0x80304A |
+| 43 | 0x80304A `lamsbg_w` | in **no** stock group (`re/findings/measuring_groups.txt`) and in no session file, so it needs a DDLI entry that does not exist yet (open question 3) | 1.000 (G4's expectation; 4096 = 1.0) | §11.8; `re/symbols.csv` row 0x80304A |
 | 85 | 0x8021CC, intake air `tans` | `groups 4` (field 4), against VCDS 004.4 | same °C | §11.1 |
 | 130 | 0x80223B `gangi` | `groups 51` (field 3), or `gangi` in `logging/sessions/tuning_checklist.json`, **while shifting** | 0 … 6, 7 = reverse | §11.7 |
-| 171 | 0x80315C `rkte_w` | `groups 73` (field 4) **during canister purge** | non-zero while purging | §11.5 |
+| 171 | 0x80315C `rkte_w` | `groups 73` (field 4) **during canister purge** | log it during purge; the subtraction assumes gasoline vapour, so it is a tuning-checklist item on E85 | §11.5 |
 
 (`./.venv/bin/python3 logging/med9log.py groups --sim 4 51 73` [Mac] prints
 all three groups. Their simulated values mean nothing.)
