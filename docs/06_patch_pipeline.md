@@ -376,6 +376,12 @@ a check we do not know about). Roll back by writing the original read.
 > that range, not whether the ECU can take it — and the read-back below
 > answers it.
 >
+> *Corrected 2026-09-23 (brief G2): the list above has six words. E5's rail
+> hook **0x45845C** is on-chip as well, so `patches/ff_fuel` has **seven
+> on-chip hook words out of eight**. The source of truth is the hook table in
+> `patches/ff_fuel/README.md` ("The eight hook sites"). 0x45845C is inside
+> 0x404000-0x47FFFF too, so the conclusion stands.*
+>
 > Two ranges the firmware refuses outright, so no tool driving the OBD route
 > can touch them: **0x000000-0x01FFFF** (vectors, boot, the RAM loader image)
 > and **0x080000-0x09FFFF** (the resident programming module: the code
