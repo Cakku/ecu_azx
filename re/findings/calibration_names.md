@@ -587,6 +587,18 @@ and 0x83 commits it to the EEPROM. Channels whose bit is set in the mask
 **0x382C2** (1, 6, 7, 9, 11, 12, 13) are displayed signed, i.e. offset by
 −0x80. Sub-function 0x82 with channel 0 restores every channel to its default.
 
+> **Correction 2026-09-24 (brief G7, `re/findings/eeprom.md` §5; integration).**
+> On *this* dataset the tester cannot do that: the adaptation service's access
+> words at 0x5CF004/08/0C are all 0x40, which admits **channel 7 only** —
+> channel 1 is refused with NRC 0x33 and a channel-0 reset changes **no**
+> channel (VERIFIED-STATIC, `xxd -s 0x1CF004`; emulated). The routine that does
+> rewrite every block-8 channel byte is the stock **reset-all 0x038D64**, called
+> from 0x0D10D0 after a fault clear when block 11 payload +11 bit 0 (mirror
+> 0x7FA02B) is set — who sets that flag is open (a candidate is the raw EEPROM
+> write at 0x087844 in the KWP programming module, i.e. possibly the first boot
+> after a reflash). The fuel-trim hazard therefore comes from *that* path, not
+> from a workshop basic setting, on a stock-coded ECU.
+
 **Three of the twelve are fuel trims, and all three matter for flex fuel:**
 
 * **channel 10 → `fgru_trim`.** `FUN_000E8D9C`:

@@ -332,6 +332,18 @@ error nobody put into FFCAL001. The reverse also happens: a workshop that
 *sets* a channel (to fix a lean code on petrol, say) changes an E85 tune it
 knows nothing about. For the flex strategy this means:
 
+> **Correction 2026-09-24 (brief G7, `re/findings/eeprom.md` §5; integration).**
+> On *this* dataset the tester cannot do that: the adaptation service's access
+> words at 0x5CF004/08/0C are all 0x40, which admits **channel 7 only** —
+> channel 1 is refused with NRC 0x33 and a channel-0 reset changes **no**
+> channel (VERIFIED-STATIC, `xxd -s 0x1CF004`; emulated). The routine that does
+> rewrite every block-8 channel byte is the stock **reset-all 0x038D64**, called
+> from 0x0D10D0 after a fault clear when block 11 payload +11 bit 0 (mirror
+> 0x7FA02B) is set — who sets that flag is open (a candidate is the raw EEPROM
+> write at 0x087844 in the KWP programming module, i.e. possibly the first boot
+> after a reflash). The fuel-trim hazard therefore comes from *that* path, not
+> from a workshop basic setting, on a stock-coded ECU.
+
 * **Calibrate with all three at 128**, and read them (sub-function 0x81)
   before trimming `ff_F_curve` on the wideband. Record the values with the
   calibration.
@@ -1070,6 +1082,14 @@ the store moves to a payload byte outside +2 … +18 — brief
 2 → 19, no layout change; emulator proofs for the restore loop and the
 channel-0 reset; `eeprom.md` §4/§5/§9/§10.5 corrected in place). Until G7 is
 merged, `ff_persist_enable` stays 0 on any bench image.
+
+**Correction 2026-09-24 (after brief G7 merged).** The "channel-0 reset" above
+is not reachable by a tester on this dataset (access words 0x5CF004/08/0C = 0x40,
+channel 7 only); the store at +2 was zeroed in the emulator by the stock
+**reset-all 0x038D64** (after a fault clear, gated by block 11 +11 bit 0). With
+G7's move to **+19** neither path touches the E% byte — proven in
+`tests/test_ff_diag_patch.py` (`TestPersistOffsetOffTheChannels`,
+`TestPersistenceThroughTheDeviceAt19`); exclusion set in `eeprom.md` §5.
 
 ## 4. New calibration data
 
