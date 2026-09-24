@@ -62,15 +62,25 @@ PATCH_RAM = tff.PATCH_RAM
 #: `nvm_read_all_blocks` (0x06227C) validates against the flash default table
 #: at 0x060458-0x060470; a mismatch discards the block and reloads the
 #: defaults (re/findings/eeprom.md section 10.5, brief E4).  That is why
-#: `ff_persist_offset` is **2** and not 0, and why the two bytes below must
-#: never be written by this patch.
+#: `ff_persist_offset` is not 0, and why the two bytes below must never be
+#: written by this patch.
+#:
+#: G7 (2026-09-24, #38): payload +2..+18 are the 17 tester adaptation
+#: channels (channel k at +(k+1); `adaptation_restore_all` 0x12E3F8 and the
+#: KWP adaptation service 0x038708), so E4's +2 was channel 1 and a
+#: channel-0 reset zeroed the store.  The offset is **19**, the lowest byte no
+#: stock path writes (eeprom.md section 5, note of 2026-09-24).
 BLK8_STAMP = bytes((8, 1))
-PERSIST_OFF = 2
+PERSIST_OFF = 19
+ADAP_CHANNELS = range(2, 19)          # payload +2..+18
+PERSIST_OFF_E4 = 2                    # where E4 put it: adaptation channel 1
 
 
-def blk8_stored(pct: int) -> bytes:
-    """A block-8 image whose stamp is intact and whose E% sits at +2."""
-    return blk8(BLK8_STAMP + bytes([pct]) + b"\xFF" * (BLK8_LEN - 2 - 3))
+def blk8_stored(pct: int, off: int = PERSIST_OFF) -> bytes:
+    """A block-8 image whose stamp is intact and whose E% sits at `off`."""
+    b = bytearray(BLK8_STAMP + b"\xFF" * (BLK8_LEN - 2 - 2))
+    b[off] = pct
+    return blk8(bytes(b))
 
 
 def blk8(payload: bytes) -> bytes:
@@ -427,7 +437,10 @@ class TestPersistence(DiagEmuBase):
         self.assertEqual(raw[PERSIST_OFF], e_pct, "the mirror carries the new E%")
         self.assertEqual(raw[:2], BLK8_STAMP,
                          "the {block id, version} stamp must survive (E4, #38)")
-        self.assertEqual(raw[3:30], b"\xFF" * 27, "+3..+29 untouched")
+        self.assertEqual(raw[2:PERSIST_OFF] + raw[PERSIST_OFF + 1:30],
+                         b"\xFF" * 27,
+                         "+2..+29 untouched but for the E% byte - the "
+                         "adaptation channels +2..+18 above all (G7)")
         self.assertTrue(blk8_csum_ok(raw))
 
         req = int(tff.load_patch()["build"]["symbols"]["ff_nvm_req"], 0)
@@ -540,7 +553,7 @@ class TestPersistence(DiagEmuBase):
         DISCARD the block and reload the defaults, so an E% stored at +0
         never survives a key cycle and reads back as 0x08 - a plausible 8 %,
         not the 0xFF that means "nothing known".  `ff_persist_offset` = 2
-        fixes it, and this asserts the two bytes stay put through a whole
+        fixed it (and G7 moved it on to 19, past the adaptation channels), and this asserts the two bytes stay put through a whole
         commit cycle, from the cold-start read to the completed write.
         """
         import ffcal001
@@ -567,7 +580,7 @@ class TestPersistence(DiagEmuBase):
 
     def test_the_stage_shape_writes_exactly_one_payload_byte(self):
         """Whatever the offset, the patch stages ONE byte and no other."""
-        for off in (0, PERSIST_OFF, 13):
+        for off in (0, PERSIST_OFF_E4, 13, PERSIST_OFF):
             with self.subTest(offset=off):
                 emu = self.fresh()
                 emu.write(BLK8_MIRROR, blk8(bytes(range(BLK8_LEN - 2))))

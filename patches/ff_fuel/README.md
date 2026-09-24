@@ -551,10 +551,10 @@ v4 block flashed under a v5 blob reads as corrupt, which means mode 0 —
 | +18 | u8 | `ff_mode` | **1** | 0 off / 1 normal / 2 bench override |
 | +19 | u8 | `ff_e_override` | 0 | % |
 | +1A | u8 | `ff_stall_max` | 3 | frames |
-| +1B | u8 | `ff_persist_enable` | **1** | **D2**, 0 makes the patch behave exactly like D1's |
+| +1B | u8 | `ff_persist_enable` | **1** | **D2**, 0 makes the patch behave exactly like D1's. *It predates the 2026-09-17 ships-disabled rule and still ships as 1 (G7 did not change it, on the integrator's ruling); `docs/08_bench_playbook.md` S12 builds the bench image with 0 until the human rules on it* |
 | +1C | u8 | `ff_persist_hyst_pct` | 5 | **D2**, % |
 | +1D | u8 | `ff_persist_block` | 8 | **D2**, EEP_CONF block |
-| +1E | u8 | `ff_persist_offset` | **2** | **D2**, payload offset — 0 until the E4 correction below |
+| +1E | u8 | `ff_persist_offset` | **19** | **D2**, payload offset — 0 until the E4 correction, 2 until the **G7** correction below (+2..+18 are the adaptation channels) |
 | +1F | u8 | `ff_persist_rate_s` | 60 | **D2**, s |
 | +20 | 17×u16 | `ff_F_curve` | formula | 1/1024 over E 0..100 step 6.25 % |
 | +42 | 17×u8 | `ff_fzw_curve` | **ramp** | **E1**, 1/256: 0 at E0 rising to 255 at E50, flat above |
@@ -1195,7 +1195,7 @@ and `::TestProducer::test_the_cost_of_one_activation`, plus D1's
 $ make apply
 ff_fuel: 176 patch range(s) (8157 B), 22 descriptor range(s) (66 B), 0 unexpected
 checksums: ALL OK (65 blocks); identification block unchanged
-sha256: eea9e01412f0f2bc44b23146bdcce79333ac82e7bdf8cd1890bbbc2e473904a8
+sha256: c08a78a6074302639a2038cf8b3d0dc4f4a0bc0e816b88576a35a45a3644c317
 WARNING: ff_fuel: "ram_status": "static" - ... Do not flash this image.
 WARNING: change at 0x42247c+0x4 writes the MPC561 on-chip flash ...
 WARNING: change at 0x432940+0x4 writes the MPC561 on-chip flash ...
@@ -1206,7 +1206,7 @@ WARNING: change at 0x41d40c+0x4 writes the MPC561 on-chip flash ...
 so they do not change and the ranges around them split. The 22 descriptor
 ranges are the sum/~sum words of the **twelve** affected Bosch blocks, ten of
 them described by the code table at file 0x0A0000 and two by the calibration
-table at 0x1C3300 (the output above is G1's build, 2026-09-23):
+table at 0x1C3300 (the output above is G7's build, 2026-09-24 — G1's FFCAL001 with `ff_persist_offset` = 19; G1's image was `eea9e014…04a8`):
 
 | Descriptor | Table entry | Block it covers | Touched by |
 |---|---|---|---|
@@ -1445,8 +1445,32 @@ speaks TP2.0, not ISO 15765-4 — the ISO-TP single-frame parser is not traced
 
 ## E% across power loss (#38)
 
-The estimate is kept in **EEP_CONF block 8, payload +2, one byte**, through
-`nvm_block_request` (0x6131C) and nothing else.
+The estimate is kept in **EEP_CONF block 8, payload +19, one byte** (mirror
+**0x7F9F93**, device 0x1D3 and 0x1F3), through `nvm_block_request` (0x6131C)
+and nothing else.
+
+> **Corrected 2026-09-24 (brief G7, #38): the offset was 2, and +2 is
+> adaptation channel 1.** Block 8 is also the tester adaptation-channel block:
+> channel *k* = 1..17 lives at payload **+(k+1)**, i.e. **+2..+18**
+> (`adaptation_restore_all` 0x12E3F8 restores them at every power-up; the KWP
+> adaptation service 0x038708 writes them, sub-function 0x82 with channel 0
+> resets all of them to their defaults and 0x83 commits block 8;
+> `re/findings/calibration_names.md` §10.1). Channel 1's only reader clamps it
+> to 0/0, so the engine never saw the stored E % (docs/05 §3.8, integrator note
+> of 2026-09-24) — but a **channel-0 reset + commit zeroed the store**, and the
+> patch accepts 0 as a valid E0: lean on an E85 tank. The stock reset-all
+> routine 0x038D64 does the same after the fault-clear state machine
+> (`re/findings/eeprom.md` §5, note of 2026-09-24). `ff_persist_offset` is now
+> **19**, the lowest byte no stock path writes; the exclusion set is in
+> `eeprom.md` §5. **FFCAL001 stays v5**: a default *value* changed, nothing
+> moved, so there is no VERSION bump and `ff_cal_ok()` is unchanged; only
+> `ffcal001.bin`, `patch.json`'s FFCAL001 bytes and the patched image's
+> SHA-256 (§ Applying it) follow. The emulator proofs are
+> `tests/test_ff_diag_patch.py::TestPersistOffsetOffTheChannels` — the E4
+> end-to-end path at +19, the real `adaptation_restore_all` over a block
+> carrying the E % at +19 (no channel byte moves, 0x7FD06B stays 0), and the
+> real service's channel-0 reset + commit (the byte survives at +19, and is
+> zeroed at +2).
 
 > **Corrected 2026-09-17 (brief E4, `re/findings/eeprom.md` §10.5): the offset
 > was 0, and that was a bug.** Payload **+0 and +1 are a
@@ -1463,7 +1487,7 @@ The estimate is kept in **EEP_CONF block 8, payload +2, one byte**, through
 > now asserts the two stamp bytes survive a whole commit cycle.
 >
 > Two consequences for the bench: the free payload offsets for block 8 are
-> **+2..+13**, not +0..+13; and payload **+29 does move** on the first commit
+> ~~**+2..+13**~~ **+19..+28** (G7, above), not +0..+13; and payload **+29 does move** on the first commit
 > (0xFF → 0x00 → 0x01) because it is the manager's own ReplV byte — the rule
 > is "never write it", not "it never changes". `test/procedure_d2.md` §B1/§B2
 > and `logging/sessions/ff_fuel.json` check 7 are corrected to match. The raw SPI primitives are
@@ -1501,8 +1525,10 @@ from the stored value errs *rich* if the tank was refilled while the car was
 off, and the sensor corrects it at the same 2 %/s. A store that reads back 0xFF
 or above 100 is ignored and the patch starts at E0.
 
-**There is no key-off commit to piggyback on.** Block 8 has exactly one stock
-client and it only ever *stages*; the write-all-blocks routine has no
+**There is no key-off commit to piggyback on.** Block 8 has ~~exactly one stock
+client and it only ever *stages*~~ one constant-offset stock client that only
+*stages* (+14), plus the adaptation-channel paths of the G7 note above, whose
+commits run only on a tester request or after a fault clear; the write-all-blocks routine has no
 resolvable trigger; the synchronous-shutdown mode's two setters have no callers
 (`re/findings/eeprom.md` §9). Writing while the engine runs is therefore not a
 compromise — it is the only route, and it is the better one for the case #38

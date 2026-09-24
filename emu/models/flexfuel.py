@@ -198,7 +198,7 @@ class Cal:
     persist_enable: int = 0
     persist_hyst_pct: int = 5
     persist_block: int = 8
-    persist_offset: int = 0
+    persist_offset: int = 19     # G7 (#38): past adaptation channels +2..+18
     persist_rate_s: int = 60
     f_curve: list[int] = field(default_factory=f_curve_from_formula)
     valid: bool = True
