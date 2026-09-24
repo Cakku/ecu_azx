@@ -430,6 +430,53 @@ before reading the table below:
 > below must therefore read **offset +2**, and `ff_persist_offset` in
 > `patches/ff_fuel/ffcal001.json` — which ships as 0 — has to move.
 
+> **2026-09-24 (G7, #38) — second correction: block 8 +2..+18 are the
+> adaptation channels, and +19 is the byte that is really free.**
+> F4's `adaptation_restore_all` 0x12E3F8 (`re/symbols.csv`) and the KWP
+> adaptation service 0x038708 (`calibration_names.md` §10.1) address block 8
+> with the block number and base index **loaded from 0x0A3AD8** (`08 02`), so
+> `eeprom_map.py --clients`, which resolves immediates only, never saw them:
+> channel *k* = 1..17 lives at payload **+(k+1)**, i.e. **+2..+18**, and the
+> "one client at +14" of §4 is channel 13's slot. E4's "+2..+13" therefore put
+> the ethanol store on **channel 1**. The table row for block 8 now reads
+> **free: +19..+28** (10 bytes; +0/+1 stamp, +2..+18 channels, +29 ReplV,
+> +30/+31 checksum). `ff_persist_offset` moves 2 → **19** (brief G7).
+>
+> **The exclusion set for +19..+28** (VERIFIED-STATIC unless stated; every
+> command runs against `data/passat_azx_ori.bin`):
+>
+> | # | Who could write block 8 +19..+28 | Result | Evidence |
+> |---|---|---|---|
+> | a | the flash default record (what a stamp or checksum failure reloads) | `+19..+28 = 00` — the defaults write **0x00** there, not 0xFF, exactly as they write 0x00 at +2 (channel 1's default); the patch reads that as E0, the same behaviour as before the move | record at file **0xB32DC** (table entry +6 = 0x00A4 from 0xB3238): `08 01 00 80 80 80 80 00 00 80 00 80 80 FF` then 00 × 18; `eeprom_map.py` block row + `xxd -s 0xB32DC -l 0x20` |
+> | b | every constant-offset call site of `nvm_block_request` | 87 sites; the only block-8 one is **0x134380, stage 1 B at +14** (channel 13) | `tools/eeprom_map.py data/passat_azx_ori.bin --clients` |
+> | c1 | 0x038C04 — service 0x83 "commit all" (after a channel-0 reset) | stages each implemented channel's default at `n + 2` for **n = 0..16** (`cmpwi r11,0x11; blt` at 0x038C10) → +2..+18 | `blobdis.py --file-off 0x38B10 --addr 0x38B10 --len 0x120` |
+> | c2 | 0x038C44 — the queued block-8 request that follows c1 | `(8, 2, 17, 0, buf 0, &0x8001D8)`: offset **2**, length **17** → +2..+18 | same listing |
+> | c3 | 0x038C84 — service 0x83, one channel | `(8, ch + 1, 1, 0, &0x8001E6, &0x8001D8)` with ch = the byte at **0x8001E5**. Its only writer is 0x038740 (sub-function 0x81, `sda_xref.py --var 0x8001E5 0x8001E5`), which stores it *before* the `ch ≤ 0x11` test at 0x03875C — but the KWP caller at 0x439780 (id 0x103, frame 0xB9) enters state **0xB** (0x4398E0), the only state from which 0x82 (0x439A94) and then 0x83 (0x43A2EC, state 0xC) are reachable, **only when that 0x81 returned 2**; a refused channel leaves the state at 0xA. So ch ≤ 17 at every 0x83 → at most **+18** | `blobdis.py --file-off 0x235780 --addr 0x439780 --len 0x380`, `--file-off 0x236044 --addr 0x43A044 --len 0x2B0`; `sda_xref.py --var 0x7FB7D0 0x7FB7D0` (all 28 state writes) |
+> | c4 | 0x038D20 — the function at 0x038CBC (counts channels that differ from their default) | mode **1** (read-back) at n + 2, n < 17 | `blobdis.py --file-off 0x38CBC --addr 0x38CBC --len 0xA8` |
+> | c5 | 0x038DF0 / 0x038E2C — the function at 0x038D64, "restore every channel to its default and commit" | stages n + 2 for n < 17 (`cmplwi r31,0x11` at 0x038DF8), then `(8, 2, 17, …)` → +2..+18. **Called from 0x0D10D0** — see the note below | `blobdis.py --file-off 0x38D64 --addr 0x38D64 --len 0xD0`; `find_abs_refs.py … --target 0x038D64` |
+> | c6 | 0x12E4A4 — `adaptation_restore_all` | mode 1 read-back of n + 2, n < 17 → +2..+18, into RAM, never into the mirror | `blobdis.py --file-off 0x12E3F8 --addr 0x12E3F8 --len 0xCC` |
+> | c7 | 0x0A35F8 — the generic block walker | block index from 0x7FB834, but `r6 = 1` (**mode 1**, read) is a constant at 0x0A35F4 — it never writes | `blobdis.py --file-off 0xA3560 --addr 0xA3560 --len 0x200` |
+> | c8 | 0x11FC0C / 0x12F238 | block **24** is an immediate at both; only the offset is computed | `eeprom_map.py --clients` |
+> | d | `nvm_read_all_blocks` payload validation | one halfword compare of payload **+0** against the default record's +0 (`lhz r12,0(r29)` / `lhzx r11,…` / `cmpw` at 0x060458-0x06046C); no other payload byte is compared, so a non-default +19 is kept exactly as +2 was (§10.5 table; emulated again at +19 by `tests/test_ff_diag_patch.py`) | `blobdis.py --file-off 0x60420 --addr 0x60420 --len 0x70` |
+> | e | the raw SPI writers behind the manager's back (§2) | `eeprom_write_byte` has one caller, inside `eeprom_write_bytes`; the 22 `eeprom_write_bytes` sites write **0x274 and 0x288-0x2B8** (blocks 10 and 11, immediate `li r3,…`), and 0x089508 is gated to 0x280/0x2A0 (0x0894E4/0x0894EC). Nothing addresses 0x1C0-0x1FF | `sda_xref.py --code 0x085A8C 0x085B54`; `blobdis.py` at 0x87700, 0x87F40, 0x880F0, 0x89480 |
+> | f | a direct store into the block-8 mirror 0x7F9F80-0x7F9F9F | **0 store sites**, and no indexed store with a base up to 0x200 below it (the manager reaches the mirror through the base pointer at file 0xB3184) | `tools/store_xref.py data/passat_azx_ori.bin --control` (PASS) then `--window 0x7F9F80 0x7F9FA0 --near 0x200` |
+>
+> So **no stock path writes block 8 +19..+28** except the manager's own
+> whole-record copies (commit, write-all, defaults reload), which carry the
+> mirror byte through unchanged or replace it with the default 0x00.
+> The caveat of note 2 above still applies: this is the firmware's view, not
+> a read of a real ECU's EEPROM (bench step, `docs/08` S12 / step 3f).
+>
+> *Tangent, not pursued:* **0x0D1068** drives the fault-clear state machine
+> 0x035300 (`kwp14_clear_state` 0x7FB718, which also commits block 24, G5's
+> §7 item 4 note of 2026-09-24) when 0x7FEB59 is set and bit 0 of block 11
+> payload +11 (mirror 0x7FA02B) is set, and when that finishes it calls
+> 0x038D64 (c5) — i.e. **a stock, tester-free path also resets all 17
+> channels**, then clears the bit and stages block 11 +11 (0x0D1110).
+> Call and range VERIFIED-STATIC (`blobdis.py --file-off 0xD1068 --addr
+> 0xD1068 --len 0xD8`); who sets the bit is **HYPOTHESIS/open**. At +19 the
+> E% survives it; at +2 it did not.
+
 ### Recommendation for a one-byte ethanol store
 
 **Block 8, payload offset ~~+0~~ +2, one byte.** Reasons:
