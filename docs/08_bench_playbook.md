@@ -398,6 +398,8 @@ Flash 0 that goes wrong cannot cost you the stock reads.
 
 ## Step 5 — Flash 0: the unmodified file (#26)
 
+> **2026-09-24 (H6, #26/#27):** build the kit first: `make bench-kit` — all four images of steps 5-7 in `work/bench_kit/`, with `MANIFEST.json` (SHA-256, changed ranges, expected flash CRC per file) and a kit `README.md` (`tools/bench_kit.py`).
+
 **Drives:** `docs/07` §3.1 (pre-flight, all eight rows), §3.2 (write), §3.3
 (read back, then the three E6 checks), §3.4 items 1-2, and
 `re/findings/flash_programming.md` §7.2 (the read-back checklist; also
