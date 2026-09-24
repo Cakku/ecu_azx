@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import functools
+import json
 import os
 import shutil
 import sys
@@ -48,7 +50,63 @@ SAMPLES = REPO / "logging" / "samples"
 SESSION = REPO / "logging" / "sessions" / "ff_fuel.json"
 PATCH = REPO / "patches" / "ff_fuel"
 PATCH_JSON = PATCH / "patch.json"
+FFCAL_JSON = PATCH / "ffcal001.json"
 TOLERANCE = PATCH / "test" / "tolerance.json"
+DUMP = REPO / "data" / "passat_azx_ori.bin"
+
+
+# ---------------------------------------------------------------------------
+# where the patch stores the ethanol percent -- read, never restated
+# ---------------------------------------------------------------------------
+@functools.lru_cache(maxsize=None)
+def persist_location(ffcal_json: str = str(FFCAL_JSON)) -> dict:
+    """Block, payload offset and addresses of the stored E%, at run time.
+
+    `ff_persist_block` / `ff_persist_offset` come out of the patch's own
+    calibration source (`patches/ff_fuel/ffcal001.json`), and the block's RAM
+    mirror and EEPROM address out of the firmware's EEP_CONF table
+    (`tools/eeprom_map.py`), so a later brief that moves the store (G7 takes
+    the offset from 2 to 19: block 8 payload +2..+18 are the 17 KWP
+    adaptation channels, docs/05 section 3.8, note of 2026-09-23) changes
+    nothing here.  Brief G5.
+    """
+    import eeprom_map                                          # noqa: E402
+    import med9lib                                             # noqa: E402
+
+    cal = json.loads(Path(ffcal_json).read_text(encoding="utf-8"))
+    block = int(cal["ff_persist_block"])
+    offset = int(cal["ff_persist_offset"])
+    blk = eeprom_map.read_blocks(bytes(med9lib.load_dump(str(DUMP))))[block]
+    if blk.mirror_cpu is None:
+        raise SystemExit(f"EEP_CONF block {block} has no RAM mirror")
+    if not 0 <= offset < blk.payload:
+        raise SystemExit(f"ff_persist_offset {offset} is outside block "
+                         f"{block}'s {blk.payload}-byte payload")
+    return {"block": block, "offset": offset,
+            "mirror": blk.mirror_cpu + offset,
+            "eeprom": blk.copy_addr(0) + offset,
+            "label": f"block {block} payload +{offset}"}
+
+
+@functools.lru_cache(maxsize=None)
+def persist_variable(session: str = str(SESSION),
+                     patch_json: str = str(PATCH_JSON)) -> str | None:
+    """The session variable that logs the persist byte's mirror, or None."""
+    want = persist_location()["mirror"]
+    sess = med9log.load_session(session, patch_json)
+    for v in sess.variables:
+        if v.address == want and v.size == 1 and not v.split_bytes:
+            return v.name
+    return None
+
+
+def persist_device_byte(eeprom_file: str | None) -> int | None:
+    """The stored byte in copy 0 on the simulated M95160, or None."""
+    if not eeprom_file or not os.path.exists(eeprom_file):
+        return None
+    raw = Path(eeprom_file).read_bytes()
+    at = persist_location()["eeprom"]
+    return raw[at] if at < len(raw) else None
 
 #: simulated seconds per wall second.  The 10 ms hook costs about 0.5 ms of
 #: host CPU, so five simulated seconds per wall second leaves plenty of room
@@ -183,7 +241,8 @@ def ecu_slope(s, name) -> float:
 # ---------------------------------------------------------------------------
 # the checks, per step
 # ---------------------------------------------------------------------------
-def checks_for(name: str, s: dict) -> list[tuple[str, bool, str]]:
+def checks_for(name: str, s: dict, *, eeprom_file: str | None = None
+               ) -> list[tuple[str, bool, str]]:
     """-> [(what, ok, detail)], the numbered checks of ff_fuel.json."""
     out = []
 
@@ -262,10 +321,23 @@ def checks_for(name: str, s: dict) -> list[tuple[str, bool, str]]:
             f"writes={last(s, 'ff_persist_writes')} "
             f"fails={last(s, 'ff_persist_fails')} "
             f"err={last(s, 'ff_persist_err')}")
-        chk("7 the mirror read over DDLI agrees with ff_e_persist",
-            last(s, "eep_blk8_mirror_b2") == last(s, "ff_e_persist"),
-            f"mirror+2={last(s, 'eep_blk8_mirror_b2')} "
-            f"e_persist={last(s, 'ff_e_persist')}")
+        loc, var = persist_location(), persist_variable()
+        stored = persist_device_byte(eeprom_file)
+        e_persist = last(s, "ff_e_persist")
+        if var is not None:
+            chk("7 the mirror read over DDLI agrees with ff_e_persist",
+                last(s, var) == e_persist,
+                f"{var} ({loc['label']}, {loc['mirror']:#08x})="
+                f"{last(s, var)} e_persist={e_persist}")
+        else:
+            chk("7 the mirror read over DDLI agrees with ff_e_persist", False,
+                f"{SESSION.name} logs no 1-byte variable at {loc['mirror']:#08x}"
+                f" ({loc['label']}, from ffcal001.json) -- add one; the device"
+                f" image holds {stored}")
+        chk("7c the EEPROM device holds ff_e_persist at the calibrated offset",
+            stored is not None and stored == e_persist,
+            f"{loc['label']} = EEPROM {loc['eeprom']:#05x}: {stored} "
+            f"e_persist={e_persist}")
         chk("7 the queue is idle in almost every sample",
             sum(1 for _t, v in s.get("nvm_queue_state", [])
                 if v not in (0x20, 0x21)) <= max(2, len(s.get("nvm_queue_state", [])) // 10),
@@ -275,18 +347,19 @@ def checks_for(name: str, s: dict) -> list[tuple[str, bool, str]]:
             50 <= last(s, "ff_e_persist", 0) <= 100,
             f"e_key={last(s, 'ff_e_key')} e_persist={last(s, 'ff_e_persist')} "
             f"err={last(s, 'ff_persist_err')} -- 8 means the mirror was "
-            "reloaded from the flash defaults, i.e. ff_persist_offset = 0 "
-            "sat on the block-id byte (eeprom.md 10.5)")
+            "reloaded from the flash defaults, i.e. the store sat on the "
+            "block-id byte (eeprom.md 10.5); the store is "
+            f"{persist_location()['label']} per ffcal001.json")
     return out
 
 
 def _csum_always_ok(s) -> bool:
-    """The session only logs +0..+2, +14, +29 and the checksum, so this is weak.
+    """The session only logs a few payload bytes and the checksum, so this is weak.
 
     It checks the one thing the log can: the checksum word never changes
-    without the payload byte changing with it.
+    without the stored byte (wherever ffcal001.json puts it) changing with it.
     """
-    pairs = list(zip(s.get("eep_blk8_mirror_b2", []),
+    pairs = list(zip(s.get(persist_variable() or "", []),
                      s.get("eep_blk8_mirror_csum", [])))
     if not pairs:
         return False
@@ -396,7 +469,8 @@ def main(argv=None) -> int:
     for step in steps:
         if not step.path.exists():
             continue
-        for what, ok, detail in checks_for(step.name, series(step.path)):
+        for what, ok, detail in checks_for(step.name, series(step.path),
+                                           eeprom_file=a.eeprom):
             results.append((step.name, what, ok, detail))
     if not a.no_compare and (a.only is None or
                              {"stock", "e0"} <= set(a.only)):
