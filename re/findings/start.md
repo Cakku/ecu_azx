@@ -355,7 +355,7 @@ Note that during the start there is no knock protection acting on this value
 (the knock retard is bypassed), so the offset must be small and should be
 limited to `tmst` below about 40 °C.
 
-### 5.1 Warm-up ignition: an efficiency request, not a `dzwwl` map
+### 5.1 Warm-up ignition: an efficiency request, not a `dzwwl` map (H1 2026-09-24: a *lambda* request — see the correction below)
 
 > **Note 2026-09-23 (G4, #41, calibration_names.md §11.8):** 0x803046 / 0x803044
 > are very probably per-bank **lambda** setpoints, not efficiency setpoints:
@@ -363,6 +363,21 @@ limited to `tmst` below about 40 °C.
 > mass by, and `%ATM` keys its lambda correction `KFATLAMS` with it. The
 > dataflow below is unchanged; read "efficiency demand" as "lambda setpoint"
 > (HYPOTHESIS until the inputs of `eta_coordinator` are traced).
+
+> **CORRECTED 2026-09-24 (H1, #46, `calibration_names.md` §12.2-§12.3) —
+> VERIFIED-STATIC now.** `FUN_00442c18` is FR `%LAMKO` (entry 0x442C14): 0x803046
+> / 0x803044 are the per-bank **lambda** setpoints `lamhsbg_w` / `lamhsbg2_w`
+> (4096 = 1.0, clamped to 0.700 … 1.200), 0x803042 is their mean (the FR's
+> `lambas`) and 0x7FD271 its u8 copy, so the x axis of 0x5C76D5 is a **λ axis
+> 0.65 … 1.20** and the map is **0 at λ = 1** (+7.5 … +8.25 °CA at λ 0.65).
+> Consequence for this section: the "warm-up ignition" below acts **only while
+> a stock enrichment is active**. After start the only warm-up requester is
+> `KFLANS` 0x5C6F36 (B8's `cand_KFETAKS`, renamed), which is 1.000 for every
+> start above about +10 °C `tmst`; catalyst heating does **not** reach this
+> path (its lambda `lamkh_w` is never selected by `%LAMKO`, §12.2). So for a
+> normal warm or mild start 0x800004 and 0x7FD313 are both 0, and the
+> catalyst-heating retard is elsewhere (`cand_KFZWMNKH`, §11.4). The rest of
+> the dataflow below is right; each "efficiency" in it reads "lambda setpoint".
 
 The FR's `ZWWL` (`dzwwl`, `KFZWWLNM`, `KFZWWLRL`) has no direct equivalent.
 Once the start has finished, the warm-up / catalyst-heating retard reaches

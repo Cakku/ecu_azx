@@ -386,7 +386,7 @@ one belonging to the current segment. Bank-A path, in order
 | base | `(0x801CF2 * 0x80302C) >> 7` (or a 3-term product in the second mode) | -> 0x80302E |
 | fuel/air | `* 0x7FED38 >> 11` | |
 | additive | `+ (s16)0x8030F8` | -> 0x80303E (x2) |
-| per-injection normalisation (mode-dependent) | `(x << 12) / 0x80304A` | |
+| **division by the lambda setpoint** `lamsbg_w` (H1 2026-09-24; was "per-injection normalisation (mode-dependent)"), only while 0x7FEA33 (start end) is set | `(x << 12) / 0x80304A` (bank B: `/ 0x803048`) | |
 | **`fr`** closed-loop lambda factor, Q15 | `* 0x802DF8 >> 15` (bank B: 0x802E00) | |
 | **`fra`** additive adaptation | `+ (s16)0x801D1A` | |
 | **`frm`** multiplicative adaptation, Q15 | `* 0x801E36 >> 15` (bank B: 0x801E28) | -> 0x803034 / 0x803032 |
@@ -435,6 +435,25 @@ Q15 at those instructions, **COMMUNITY** for the names. That closes the
 > of this dataset**, and an ethanol factor at the `rk` hook of §3 is not
 > fighting a hidden one. `calibration_names.md` §10.2 has the exclusion with
 > the commands.
+
+> **CORRECTED 2026-09-24 (H1, #46, `calibration_names.md` §12).** The table
+> above had the missing term all along: the row now named *division by the
+> lambda setpoint*. 0x7FEA33 is set at start end (`gk_seg_a` 0x41AE3C on
+> `B_stend_raw`), so from then on the bank masses are divided by `lamsbg_w`
+> 0x80304A / `lamsbg2_w` 0x803048, the `%LAMKO` outputs; the same flag switches
+> the base from `ksta_adapted` to `0x7FD270 × fgru_trim × mixture_running`.
+> On this dataset the setpoint goes below 1.0 for full load (`cand_LAMFA`,
+> 0.891), component protection (`cand_KFLBTS`, 0.820; 0.730 on a strong
+> retard), cold starts below about +10 °C (`KFLANS`, 0.801) and brief
+> catalyst / diagnostic phases, never below 0.700. So the sentence above is
+> wrong: **the ethanol factor at the `rk` hook multiplies a stock
+> enrichment whenever one is active** (docs/05 §3.3, note of 2026-09-24). The
+> controller statement stays true, and now reads more precisely:
+> `lam_ist_from_rk` 0x43E164 forms 0x802CDE as the ratio of 0x80303E (the
+> mass *before* the division) to its own `div32_sat_u16(0x80303E, lamsbg_w)`
+> once `B_stend_raw` is set (0x5C63A4 = 1 has bit 1 clear, which selects this ratio
+> branch; with bit 1 set the setpoint would be `lamsbg_w` itself), i.e. the loop's setpoint **is** the requested λ, and it is
+> formed upstream of `fr` and of the flex-fuel hook.
 
 ## 10. Verification: the Python model
 
