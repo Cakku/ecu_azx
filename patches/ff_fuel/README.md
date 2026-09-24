@@ -1595,6 +1595,13 @@ zero" side of the line and only the fuel factor is held.
   `measuring_var_dispatch` per id against the model, **`21 6F` end to end
   through `logging/ecu_sim.py` on the patched image**, and the E% store through
   the real `nvm_block_request` with the QSPI left as the emulator's zero stub.
+  **G7 (2026-09-24) added a sixth layer (52 tests in the file now)**:
+  `TestPersistOffsetOffTheChannels` runs the stock `adaptation_restore_all`,
+  the stock reset-all 0x038D64 and the KWP adaptation service's channel-0
+  reset on the QSPI device model with the E% at +19 and at +2, with
+  whole-SRAM and whole-device diffs, and `TestPersistenceThroughTheDeviceAt19`
+  re-runs E4's end-to-end #38 path of `tests/test_qspi_eeprom.py` at the
+  shipped offset, plus a reset-all between the commit and the power cut.
 * `tests/test_ff_ign_patch.py` (51) — E1's half over six layers: the stock
   facts (the `add` at 0x41D40C is not a branch, the clamp that follows it, the
   free TKMWL and group slots with the three negative searches, the latch bits,
