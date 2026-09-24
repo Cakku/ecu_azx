@@ -35,8 +35,9 @@ What is **not** real, and why (details in `re/findings/kwp.md` section 12):
   `tools/kwp_seckey_verify.py` does.  `27 01` is not overridden: its seed is
   the virtual time base and the key follows from it.
 
-**Power-on state (2026-09-22, brief F3, `re/findings/boot.md` section 6.5).**
-`power_on` no longer hand-seeds the KWP security cells.  It calls ten of the
+**Power-on state (2026-09-22, brief F3, `re/findings/boot.md` section 6.5;
+two more entries 2026-09-24, brief G5).**
+`power_on` no longer hand-seeds the KWP security cells.  It calls twelve of the
 1,028 entries of the firmware's own one-shot init table (`INIT_ENTRIES`), in
 the table's order, the way `os_start` does -- so `kwp_sec_level_flags`,
 `kwp_sec_lfsr_rounds`, `nvm_mode`, the TP buffer pointers and the DDLI entry
@@ -63,7 +64,28 @@ cell                                 reason
                                      them** (`boot.md` section 6.3), so
                                      `NvmDeviceBinding` still installs the
                                      two trampolines (`eeprom.md` 7 Q1)
+0x803DDC = 0x2BA50 (G5)              the KWP config-struct pointer the h2
+                                     walk reads.  Written by the real
+                                     `kwp_register_table` 0x13E974, whose
+                                     only caller is inside init entry 281
+                                     (the whole diagnostic-stack start-up,
+                                     not run); power_on calls just 0x13E974
 ===================================  ====================================
+
+**The fault services (2026-09-24, brief G5, `re/findings/kwp.md` 12.7).**
+`18 00 FF 00`, `17 hi lo` and `14 FF 00` are the firmware's own handlers
+through the ordinary dispatch path, reading the firmware's RAM fault memory
+(0x7F8890, 20 x 0x5C bytes).  Three pieces around them are the simulator's
+and labelled as such: `DtcStore.seed` (`--seed-dtc`) stands in for the
+fault-path manager that would have stored a fault; a pending (`7F xx 78`)
+service is re-dispatched with the NVM queue pumped in between until it
+answers (`14` commits EEP_CONF block 24 and then holds off ~0.8 s, so it needs
+`--eeprom`); and after a positive `14` `DtcStore.after_clear` empties the
+store, which on the car is done later by DFPM processes the simulator does not
+run.  On every new TP2.0 channel the firmware's `kwp_service_h2_walk`
+(0x13ECB0) runs once, as `kwp_conn_cyclic` does per new connection
+(`obd.md` 10.1): it rebuilds the OBD support bitmaps and puts the session back
+to 0.
 
 One ordering difference from the part, deliberate: the simulator attaches the
 EEPROM and runs `cold_start()` *before* the init entries, so `kwp_sec_init`
@@ -159,8 +181,20 @@ INIT_ENTRIES = (
     # idx   address     name                    what it leaves behind
     (18, 0x0BA0F4, "nvm_set_sync_mode"),     # nvm_mode (0x7FCD68) = 2 ...
     (24, 0x0BA104, "nvm_set_normal_mode"),   # ... then 1: normal, async mode
+    (34, 0x12F10C, "dtc_code_table_select"), # G5: 0x7FBA58 = 0x5D9F06 if cal
+                                             #   0x5CF642 == 1, else 0x5DA6DE
+                                             #   (= 2 here); what 0x14 matches
     (38, 0x12F138, "kwp_tp_buf_init"),       # RAM buffer pointers 0x8037E4,
                                              #   0x8037E8, 0x8037EC, 0x8038D4
+                                             #   (G5: they point INTO fault-
+                                             #   memory entry 0 at 0x7F8890,
+                                             #   +2/+3/+0xA/+0x1C, so the name
+                                             #   is doubtful; kwp.md 12.7)
+    (39, 0x12EC00, "dfp_init"),              # G5: the fault-memory manager's
+                                             #   start-up; among others the
+                                             #   lock pair 0x7FBA5C = 0 /
+                                             #   0x7FBA60 = 0xFFFFFFFF that
+                                             #   `14` needs, else NRC 0x10
     (71, 0x036AB8, "kwp_sec_init"),          # 0x7FB781 = 0x7FB780 = 0x7FB770
                                              #   = 0; lockout 0x7FB748 from
                                              #   the EEPROM mirror 0x7FA02C
@@ -1024,6 +1058,165 @@ class FlashCrcTask:
                    f" ({100.0 * self.activations / FLASH_CRC_ACTIVATIONS:.1f} %)"))
 
 
+# ---------------------------------------------------------------------------
+# the fault memory: what 18 / 17 / 14 read and clear (brief G5, kwp.md 12.7)
+# ---------------------------------------------------------------------------
+#: The firmware's RAM fault memory ("Fehlerspeicher"), VERIFIED-STATIC from
+#: `dfp_list_active` 0x43E080 and `dfp_entry_read` 0x43DB20 (both on-chip):
+#: up to 20 entries of 0x5C bytes at 0x7F8890; 0x7F91CA = entries in use,
+#: 0x7F91CB = length of the 1-based order list at 0x7F91AA.  An entry is
+#: reported by `18` when its halfword +0 has bit 0x2000 clear, its fault-path
+#: id +2 is non-zero and bit 0x0800 of +0x1C is set.
+FAULT_MEMORY = 0x7F8890
+FAULT_ENTRY_LEN = 0x5C
+FAULT_SLOTS = 20
+FAULT_USED = 0x7F91CA
+FAULT_ORDER_LEN = 0x7F91CB
+FAULT_ORDER = 0x7F91AA
+#: four SAE-encoded DTCs per fault path, u16 at +(path*4 + k)*2; `18` always
+#: reads this one (0x3519C-0x351B8), `14` the one `dtc_code_table_select`
+#: (init entry 34) put into 0x7FBA58 -- 0x5DA6DE in this dump.
+DTC_TABLE_18 = 0x5D9F06
+DTC_TABLE_PTR = 0x7FBA58
+#: the fault-memory lock `14` takes through 0x43D7AC: {0x7FBA5C, ~0x7FBA5C}
+#: must read {0, 0xFFFFFFFF} (what `dfp_init` leaves) and becomes {0xFA, ~0xFA}
+DFP_LOCK = 0x7FBA5C
+#: `kwp_sid_14_h1`'s state byte (0 idle, 1 committing, 2 done)
+DTC_CLEAR_STATE = 0x7FB718
+#: the per-path "readiness" bytes `18` reads for status bit 0x10
+DFP_PATH_FLAGS = 0x7F9C46
+#: `kwp_register_table` 0x13E974 stores the config-struct pointer 0x803DDC,
+#: which `kwp_service_h2_walk` 0x13ECB0 walks (obd.md 10.1).  Its only caller
+#: is 0x13C9FC inside init entry 281 (0x1344C0, the diagnostic-stack start-up,
+#: far too wide to run here), so power_on calls just this one function.
+KWP_REGISTER_TABLE = 0x13E974
+KWP_SERVICE_H2_WALK = 0x13ECB0
+#: how long the simulator keeps re-dispatching a pending (0x78) service, in
+#: simulated seconds.  `14` waits 0x2AD4E9 time-base ticks (~0.8 s) after its
+#: NVM commit before it answers, so a clear takes about a second.
+PENDING_BUDGET_S = 5.0
+PENDING_STEP_S = 0.1
+
+
+def dtc_text(code: int) -> str:
+    """SAE J2012 text of a two-byte DTC: 0x0601 -> 'P0601'."""
+    return "PCBU"[code >> 14] + f"{(code >> 12) & 3}{code & 0xFFF:03X}"
+
+
+def dtc_code(text: str) -> int:
+    """The inverse of :func:`dtc_text`."""
+    text = text.strip().upper()
+    if len(text) != 5 or text[0] not in "PCBU":
+        raise ValueError(f"not an SAE DTC: {text!r}")
+    return ("PCBU".index(text[0]) << 14) | (int(text[1]) << 12) | int(text[2:], 16)
+
+
+def parse_read_dtc(answer: bytes) -> list[tuple[int, int]]:
+    """`58 n (hi lo status)*n` -> [(code, status)].  Raises on a bad shape."""
+    if len(answer) < 2 or answer[0] != 0x58:
+        raise ValueError(f"not a readDTCByStatus answer: {answer.hex()}")
+    n = answer[1]
+    if len(answer) != 2 + 3 * n:
+        raise ValueError(f"{n} DTCs need {2 + 3 * n} bytes, got {len(answer)}")
+    return [(int.from_bytes(answer[2 + 3 * i:4 + 3 * i], "big"),
+             answer[4 + 3 * i]) for i in range(n)]
+
+
+class DtcStore:
+    """Seed and inspect the firmware's own RAM fault memory.
+
+    `18 00 FF 00` (readDiagnosticTroubleCodesByStatus), `17 hi lo`
+    (readStatusOfDiagnosticTroubleCodes) and `14 FF 00`
+    (clearDiagnosticInformation) are all answered by the **real handlers**
+    through the ordinary dispatch path (`kwp_sid_18_h1` 0x35064,
+    `kwp_sid_17_h1` 0x36024, `kwp_sid_14_h1` 0x35410); this class only puts
+    entries where those handlers look.  Two things here are a MODEL, not the
+    firmware, and say so:
+
+    * :meth:`seed` writes an entry in the layout `dfp_entry_read` reads,
+      standing in for the fault-path manager (DFPM) that debounces a fault
+      into memory on the car.  The simulator runs no DFPM task.
+    * :meth:`after_clear` empties the store and releases the lock once the
+      real `14` has answered positively.  On the ECU `14` only takes the
+      lock (0x43D7AC) and commits EEP_CONF block 24; the erase itself is done
+      later by DFPM processes behind the lock state machine 0x7FBA5C
+      (0xFA..0xFD, e.g. 0x0D4D74, 0x125C18 in task 8) that the simulator does
+      not run.  The observable result -- an empty `18` after a positive `14`
+      -- is what the bench sequence needs, and it is labelled.
+    """
+
+    def __init__(self, emu):
+        self.emu = emu
+        self.clears = 0
+
+    # -- the tables ----------------------------------------------------------
+    def code_of(self, path: int, kind: int, table: int = DTC_TABLE_18) -> int:
+        return struct.unpack(">H", self.emu.read(table + (path * 4 + kind) * 2,
+                                                 2))[0]
+
+    def find(self, code: int, table: int = DTC_TABLE_18) -> tuple[int, int]:
+        """The first (fault path, kind 0..3) whose code is `code`."""
+        for path in range(1, 0xFA):
+            for kind in range(4):
+                if self.code_of(path, kind, table) == code:
+                    return path, kind
+        raise KeyError(f"{dtc_text(code)} is in no fault path of the table "
+                       f"at {table:#08x}")
+
+    # -- the store -----------------------------------------------------------
+    @property
+    def used(self) -> int:
+        return self.emu.read(FAULT_USED, 1)[0]
+
+    def entries(self) -> list[dict]:
+        out = []
+        order = self.emu.read(FAULT_ORDER, self.emu.read(FAULT_ORDER_LEN, 1)[0])
+        for idx in order:
+            raw = self.emu.read(FAULT_MEMORY + (idx - 1) * FAULT_ENTRY_LEN,
+                                FAULT_ENTRY_LEN)
+            out.append({"slot": idx - 1,
+                        "path": struct.unpack_from(">H", raw, 2)[0],
+                        "kinds": raw[0x0A],
+                        "reported": bool(struct.unpack_from(">H", raw, 0x1C)[0]
+                                         & 0x0800)})
+        return out
+
+    def seed(self, dtc: "str | int | None" = None, *, path: int | None = None,
+             kind: int = 0) -> tuple[int, int]:
+        """MODEL: store one active fault, as the DFPM would have.
+
+        Give a DTC ("P0601" or 0x0601) or a fault path and a kind 0..3.
+        Returns (path, kind).  Kind k sets bit k of entry +0x0A, which is
+        how `18` picks the path's k-th code and sets status bit 1 << k.
+        """
+        if dtc is not None:
+            code = dtc_code(dtc) if isinstance(dtc, str) else int(dtc)
+            path, kind = self.find(code)
+        if path is None or not 1 <= path < 0xFA or not 0 <= kind <= 3:
+            raise ValueError(f"fault path {path} / kind {kind}")
+        slot = self.used
+        if slot >= FAULT_SLOTS:
+            raise ValueError("the fault memory holds 20 entries")
+        entry = bytearray(FAULT_ENTRY_LEN)
+        struct.pack_into(">H", entry, 2, path)
+        entry[0x0A] = 1 << kind
+        struct.pack_into(">H", entry, 0x1C, 0x0800)
+        self.emu.write(FAULT_MEMORY + slot * FAULT_ENTRY_LEN, bytes(entry))
+        n = self.emu.read(FAULT_ORDER_LEN, 1)[0]
+        self.emu.write(FAULT_ORDER + n, bytes([slot + 1]))
+        self.emu.write(FAULT_USED, bytes([slot + 1]))
+        self.emu.write(FAULT_ORDER_LEN, bytes([n + 1]))
+        return path, kind
+
+    def after_clear(self) -> None:
+        """MODEL: what the DFPM does after a positive `14` (class docstring)."""
+        self.emu.write(FAULT_MEMORY, bytes(FAULT_SLOTS * FAULT_ENTRY_LEN))
+        self.emu.write(FAULT_ORDER, bytes(FAULT_SLOTS))
+        self.emu.write(FAULT_USED, b"\x00\x00")
+        self.emu.write(DFP_LOCK, struct.pack(">II", 0, 0xFFFFFFFF))
+        self.clears += 1
+
+
 class FrameTap:
     """A `CanLink` proxy that shows every received frame to a callback.
 
@@ -1059,7 +1252,7 @@ class Med9Handlers:
                  time_scale: float = 1.0, run_patch: bool = True,
                  stock_tasks: bool = False, wip_polls: int = 0,
                  time_base: bool = True, flash_crc: "bool | float" = False,
-                 flash_crc_warm: bool = False):
+                 flash_crc_warm: bool = False, dtcs=()):
         from emu import Med9Emu
         from emu.time_base import VirtualTimeBase
         if patch_dir:
@@ -1115,6 +1308,13 @@ class Med9Handlers:
                 self.ram.flexfuel = False
                 self.ram.owns_patch_ram = False
         self.power_on()
+        #: the firmware's RAM fault memory, and what seeds it (a MODEL of the
+        #: DFPM; the read and clear services are the firmware's own)
+        self.dtc = DtcStore(self.emu)
+        for d in dtcs:
+            self.dtc.seed(d)
+        #: new TP2.0 connections seen (:meth:`on_connect`)
+        self.connections = 0
         #: built after `power_on`, so `flash_crc_init` (init entry 75) has put
         #: the state byte back to 0 and the shadow scan sees the final flash.
         #: `flash_crc` is True (T_bg = BG_LOOP_MS_DEFAULT) or T_bg in ms.
@@ -1183,6 +1383,12 @@ class Med9Handlers:
                 self.log.append(
                     f"init entry {idx} ({name} {addr:#08x}) did not return: "
                     f"{res.stop_reason} at {res.pc:#08x}")
+        # the config-struct pointer the h2 walk reads (see KWP_REGISTER_TABLE)
+        res = self.emu.call(KWP_REGISTER_TABLE, args=[KWP_CONFIG_STRUCT],
+                            regs={"r1": TASK_STACK_TOP}, reset=False)
+        if not res.ok:                                       # pragma: no cover
+            self.log.append(f"kwp_register_table did not return: "
+                            f"{res.stop_reason} at {res.pc:#08x}")
         self.ram.power_on(self.emu)
         if self.time_base is not None:
             self.time_base.advance(0.0)
@@ -1222,6 +1428,61 @@ class Med9Handlers:
 
     def read_ram(self, addr: int, size: int) -> bytes:
         return self.emu.read(addr, size)
+
+    def on_connect(self) -> None:
+        """A new diagnostic connection: run the firmware's `h2` walk once.
+
+        `kwp_conn_cyclic` (0x13E650) calls `kwp_service_h2_walk` (0x13ECB0)
+        once per new connection from the set-A 10 ms task (obd.md 10.1, G3).
+        The walk calls every dispatch-table h2 -- among them the OBD support
+        bitmap builder 0x5CBE8, the DDLI wipe and `14`'s state reset -- and
+        puts the session back to 0.  The simulator has no 10 ms task, so
+        `EcuSimulator` calls this when `Tp20Server` opens a channel: the
+        trigger is modelled, the walk is the firmware's.
+        """
+        res = self.emu.call(KWP_SERVICE_H2_WALK, regs={"r1": TASK_STACK_TOP},
+                            reset=False, max_insns=2_000_000)
+        self.connections += 1
+        if not res.ok:                                       # pragma: no cover
+            self.log.append(f"kwp_service_h2_walk did not return: "
+                            f"{res.stop_reason} at {res.pc:#08x}")
+
+    def _pump_nvm(self, n: int = 8) -> None:
+        """What the two 10 ms tasks do for the EEP_CONF queue (eeprom.md 8.4)."""
+        if self.eeprom is None:
+            return
+        for _ in range(n):
+            self.emu.call(NVM_PUMP_WRAPPER, regs={"r1": TASK_STACK_TOP},
+                          reset=False, max_insns=4_000_000)
+
+    def _finish_pending(self, entry: "KwpEntry", sid: int, data: bytes):
+        """Re-dispatch a service that answered 'response pending' (status 8).
+
+        The ECU sends `7F sid 78` and dispatches the same request again until
+        the handler leaves the pending state (kwp.md 1.3, the 0x803DB8/B9
+        bytes).  The simulator does that here, in one go: between two calls
+        it pumps the NVM queue (so `14`'s EEP_CONF commit can finish; that
+        needs `--eeprom`) and moves the virtual time base on by
+        PENDING_STEP_S, which the `14` handler compares against its own
+        0x2AD4E9-tick hold-off.  The loop is the simulator's; every call is
+        the firmware's handler.  -> (status, body) of the last call.
+        """
+        t = self.sim_time()
+        status, body = STATUS_PENDING[0], b""
+        steps = int(PENDING_BUDGET_S / PENDING_STEP_S)
+        for _ in range(steps):
+            self._pump_nvm()
+            t += PENDING_STEP_S
+            if self.time_base is not None:
+                self.time_base.advance(t)
+            status, body = self._call(entry.h1, sid, data, entry.arg)
+            if status not in STATUS_PENDING:
+                return status, body
+        self.log.append(
+            f"SID {sid:#04x} still pending after {PENDING_BUDGET_S:g} simulated "
+            "s" + ("" if self.eeprom is not None else
+                   " -- no --eeprom, so its NVM commit cannot complete"))
+        return status, body
 
     # -- calling a real handler -------------------------------------------
     def _call(self, handler: int, sid: int, data: bytes, arg: int = 0):
@@ -1305,6 +1566,15 @@ class Med9Handlers:
             return self._start_session(data[0] if data else 0)
 
         status, body = self._call(entry.h1, sid, data, entry.arg)
+        if status in STATUS_PENDING and sid != 0x27:
+            status, body = self._finish_pending(entry, sid, data)
+            if status == STATUS_POSITIVE and sid == 0x14:
+                self.dtc.after_clear()                       # MODEL, see DtcStore
+            final = ([bytes([(sid + 0x40) & 0xFF]) + body]
+                     if status == STATUS_POSITIVE else
+                     [bytes([0x7F, sid, body[0] if body and status ==
+                             STATUS_NEGATIVE else 0x10])])
+            return [bytes([0x7F, sid, 0x78])] + final
         if sid == 0x27 and data[:1] == b"\x03" and self.seed_override is not None \
                 and status == STATUS_POSITIVE:
             # substitute the time-base seed the emulator cannot produce
@@ -1333,14 +1603,16 @@ class EcuSimulator:
                  session_timeout_s: float | None = None, animate: bool = True,
                  dump: str = DUMP, patch_dir: str | None = None,
                  eeprom: str | None = None, ram: AnimatedRam | None = None,
-                 trace: list[str] | None = None, verbose: bool = False):
+                 trace: list[str] | None = None, verbose: bool = False,
+                 dtcs=()):
         #: `dump` is how a PATCHED image is driven end to end: the handlers are
         #: the firmware's own, so `21 <group>` on patches/ff_fuel's image runs
         #: the patch's measuring handlers (brief D2, issue #39).  `patch_dir`
         #: goes one further and runs the patch's own hooks (brief E4).
         self.handlers = handlers or Med9Handlers(
             dump, seed=seed, animate=animate, patch_dir=patch_dir,
-            eeprom=eeprom, ram=ram, session_timeout_s=session_timeout_s)
+            eeprom=eeprom, ram=ram, session_timeout_s=session_timeout_s,
+            dtcs=dtcs)
         runner = self.handlers.runner
         self.link = FrameTap(link, runner.on_frame) if runner else link
         link = self.link
@@ -1351,6 +1623,7 @@ class EcuSimulator:
             self.server.drop_next_acks(drop_ack)
         self.verbose = verbose
         self.requests = 0
+        self._channels_seen = 0
         self._stop = threading.Event()
         self.error: BaseException | None = None
 
@@ -1369,6 +1642,10 @@ class EcuSimulator:
     def poll(self, timeout: float = 0.05) -> bool:
         """Service the bus once.  True if a request was answered."""
         request = self.server.poll(timeout)
+        if self.server.channels_opened != self._channels_seen:
+            # a new diagnostic connection: the firmware re-runs its h2 walk
+            self._channels_seen = self.server.channels_opened
+            self.handlers.on_connect()
         # the patch keeps ticking whether or not a tester is talking to us
         self.handlers.step()
         if request is None:
@@ -1463,6 +1740,15 @@ def self_test(dump_path: str = DUMP) -> bool:
     step("35 protected window", b"\x35\x7f\x9e\x00\x00\x00\x02\x00",
          b"\x7f\x35\x31")
     step("21 F0 after session change", b"\x21\xf0", b"\x7f\x21\x12")
+    # the fault services (brief G5): real handlers, an empty then a seeded
+    # store (the seeding is the MODEL, DtcStore.seed)
+    step("10 89 again", b"\x10\x89", b"\x50\x89")
+    step("18 00 FF 00 no DTCs", b"\x18\x00\xff\x00", b"\x58\x00")
+    h.dtc.seed("P0601")
+    step("18 00 FF 00 seeded P0601", b"\x18\x00\xff\x00",
+         b"\x58\x01\x06\x01")
+    step("17 06 01 status of P0601", b"\x17\x06\x01", b"\x57\x01\x06\x01")
+    step("18 02 FF 00 -> NRC 0x12", b"\x18\x02\xff\x00", b"\x7f\x18\x12")
 
     width = max(len(r[0]) for r in results)
     for label, hexed, good in results:
@@ -1528,6 +1814,13 @@ def main(argv=None) -> int:
                          "--dump (or for --sim-patch applied to it) and exit: "
                          "the recomputation flash_crc.json item 6 asks for "
                          "before a bench run of a patched image")
+    ap.add_argument("--seed-dtc", action="append", default=[], metavar="DTC",
+                    help="store this DTC (e.g. P0601) in the firmware's RAM "
+                         "fault memory at power-on, so 18/17 have something "
+                         "to report. A MODEL of the fault-path manager; the "
+                         "18/17/14 handlers are the firmware's. Repeatable. "
+                         "14 (clear) needs --eeprom: it commits EEP_CONF "
+                         "block 24 before it answers")
     ap.add_argument("--time-scale", type=float, default=1.0, metavar="X",
                     help="simulated seconds per wall-clock second (default 1)")
     ap.add_argument("--task-set", choices=("A", "B"), default="A",
@@ -1559,7 +1852,7 @@ def main(argv=None) -> int:
         patch_dir=args.sim_patch, eeprom=args.eeprom,
         stock_tasks=args.sim_stock_tasks,
         flash_crc=args.flash_crc if args.flash_crc is not None else False,
-        flash_crc_warm=args.flash_crc_warm,
+        flash_crc_warm=args.flash_crc_warm, dtcs=args.seed_dtc,
         time_scale=args.time_scale, wip_polls=args.wip_polls,
         ram=AnimatedRam(live_task_set=args.task_set,
                         statics=dict(DEFAULT_STATICS)))
