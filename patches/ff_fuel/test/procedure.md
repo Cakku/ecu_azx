@@ -192,6 +192,15 @@ temperature, **with the Pico disconnected or sending E0**:
 70-120 s   a gentle drive cycle, part load, no WOT
 ```
 
+> **Engine-off bench baselines, by ruling (Carlo, 2026-09-24; dated note H4,
+> G6 open question 4).** The scenario above needs a running engine; a bench
+> mule has none (`re/findings/hardware_prep.md` §3.5). On the bench the stock
+> and patched E0 logs are both taken **engine-off: KL15 on, no crank**, same
+> duration — the raster counters still run, so the alignment below still
+> works, and at E0 the patched path must still leave every logged variable
+> equal. The idle / load-step / drive-cycle comparison is issue **#28**, on
+> the car.
+
 At E0, `ff_f_q10` is exactly **1024** and the patched `ff_rk_scale()` takes its
 early return without writing 0x803038 at all, so the two logs must be the same
 run twice:

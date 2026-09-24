@@ -533,6 +533,11 @@ pairing or component protection to make something work.
 
 ### 3.2 Write
 
+> **Gate, 2026-09-24 (ruling; dated note H4):** nothing is written — Flash 0
+> included — before the #23 RAM snapshots are in (§6.4's ruling, `docs/08`
+> step 4). §3.1's table does not list it because it is not a property of the
+> file; it is a precondition of every write.
+
 Per docs/06 §6: write with **KESSv2 (protocol 179)** from the Windows machine.
 KESS applies its own checksum correction; **because our file already verifies,
 its correction must be a no-op** — if KESS reports that it corrected something,

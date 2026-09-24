@@ -352,6 +352,12 @@ no-op. Read back after writing and compare; if the read-back differs from
 what we wrote outside the descriptors, stop and investigate (that would mean
 a check we do not know about). Roll back by writing the original read.
 
+> **Gate, by ruling (Carlo, 2026-09-24; dated note H4):** no write of any
+> kind — **Flash 0 included** — before issue #23's runtime RAM snapshots are
+> in (`docs/07` §6.4, `docs/08` step 4 before step 5). The `ram_status`
+> warning of §5 is the tool's per-patch check, not the whole gate: the rule is
+> "snapshots first", not "patches only".
+
 > **2026-09-17 (E6, blocker of #26 #27 #28 #32) — what the ECU's own route
 > can write, and what to check on the first flash. VERIFIED-STATIC from
 > `data/passat_azx_ori.bin`; see `re/findings/flash_programming.md`.**

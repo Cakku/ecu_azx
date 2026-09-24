@@ -31,6 +31,12 @@ prediction, and the log is what turns it into a fact.
 | **Flash 0 done, and its on-chip read-back recorded** | `re/findings/flash_programming.md` §7.2 item 1. This is now an input to section 4, not an afterthought: without it, a counter that does not move has two explanations instead of one |
 | A stock baseline log of the scenario in section 3 | record it *before* flashing |
 
+> **2026-09-24 (ruling, Carlo; dated note H4):** the #23 snapshots gate
+> **every** write, Flash 0 included — not only the patches whose `ram_status`
+> is `static` (`docs/07` §6.4, `docs/08` step 4). So by the time this
+> procedure runs the dynamic half of the first row is done; if it is not,
+> no flash of any kind has happened yet either.
+
 Without the logger, sections 2 and 3 can also be done with VCDS advanced
 measuring blocks for the stock variables, but the counter itself needs a
 DDLI — it is not in any stock measuring block.
@@ -110,6 +116,15 @@ temperature:
 40-70 s    idle again
 ```
 
+> **Engine-off bench baselines, by ruling (Carlo, 2026-09-24; dated note H4,
+> G6 open question 4).** A bench mule has no crank or cam signal and stays
+> "engine not running" (`re/findings/hardware_prep.md` §3.5), so the scenario
+> above cannot be run there. On the bench the stock baseline and the Flash-1
+> run are both taken **engine-off: KL15 on, no crank**, for the same 70 s —
+> the raster counters still run (§2 check 4), which is all §3a, §3c, §4 and
+> §5 need. The idle-plus-load-step comparison with a running engine is
+> issue **#28**, on the car.
+
 The bench day has **three** measurements, and section 4 needs all three. Take
 them in this order, because each one narrows what the next can mean:
 
@@ -188,6 +203,9 @@ i.e. **+20 counts per 200 ms sample interval, +100 per second** (until
 
 ## 4. The decision table — this flash is also the measurement
 
+> *2026-09-24 (H4): on the bench the log this table reads is the engine-off
+> KL15 run of §3's note; the running-engine repeat is #28.*
+
 > **Rewritten 2026-09-22 after brief E1 (issue #34) and brief F1.** C4 settled
 > the *period*: 0x1205A0 and 0x4328E4 are both **10 ms** rasters
 > (VERIFIED-STATIC from the activation chain, VERIFIED-DYNAMIC from
@@ -238,6 +256,11 @@ flash word, one trampoline and nothing at runtime, and it is the only hook that
 survives a skipped on-chip write — so the default build always carries it.
 
 ## 5. Regression: nothing else changed
+
+> *2026-09-24 (H4, ruling): on the bench both `baseline.csv` and `flash1.csv`
+> are engine-off KL15 logs (§3's note); variables that only move with the
+> engine running will sit still in both and compare trivially. The
+> engine-running regression is #28, on the car.*
 
 ```bash
 python3 tools/logcmp.py patches/ff_counter/test/baseline.csv work/flash1.csv \
