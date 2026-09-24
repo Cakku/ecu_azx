@@ -665,6 +665,16 @@ them as maps**. The evidence, all VERIFIED-STATIC:
 > probably the lambda setpoint `lamsbg_w`. The sentence below is F4's, kept for
 > history; it holds only until the inputs of 0x803046 are traced.
 
+> **CORRECTED 2026-09-24 (H1, #46, §12.3) — the next paragraph's conclusion is
+> wrong.** `gk_rk` divides `rk` by the `%LAMKO` lambda setpoint from start end on
+> (§12.1), and on this dataset that setpoint goes below 1.0 for full load
+> (`cand_LAMFA`, down to 0.891 at a charge request ≥ 110 %), component
+> protection (`cand_KFLBTS`, 0.820 at 7000 rpm, and 0.730 on a strong ignition
+> retard, from `%ATM` temperatures ≥ 875 °C), cold starts below about +10 °C
+> (`KFLANS`, 0.801) and brief catalyst / diagnostic phases, all bounded by the
+> rich limit 0.700. The paragraph is kept for history; points 1-4 above
+> remain true of the multiplicative terms.
+
 **So there is no full-load or component-protection enrichment on the fuel path
 of this dataset.** `%LAMBTS` may exist as code — nothing here proves it does
 not — but it cannot reach `rk`, because every term that can is named and none
@@ -674,7 +684,9 @@ It is also a warning: **there is no stock enrichment to lean out**, so the
 whole E85 fuel increase has to come from the patch, and the ±10 % of the
 adaptation channels is the only stock lever.
 
-What was *not* done, and is the honest remainder: lead (b), `%LAMBTS` through
+What was *not* done, and is the honest remainder (**SETTLED 2026-09-24, H1,
+§12.2**: `%LAMBTS` is `FUN_0042EF0C` + `FUN_000E1054`, fed by `%ATM`
+0x1043C8, and it does reach `rk`): lead (b), `%LAMBTS` through
 the exhaust-temperature model `%ATM`, was time-boxed once the exclusion above
 made it unable to change the fuel path. The candidate module is
 `FUN_00108950` (0x108950-0x10A0DB), a soak/cool-down model over
@@ -1185,6 +1197,16 @@ reverse flag** 0x7FEBD7, and the CAN gear 0x7FD17C with an automatic. So:
 
 ### 11.8 A lambda divisor in `gk_rk` that §10.2 missed (a lead, not a closed item)
 
+> **SETTLED (2026-09-24, H1, §12).** The gate 0x7FEA33 is start end, so the
+> division is on in all running (§12.1); `eta_coordinator` is FR `%LAMKO` and
+> every candidate below is traced (§12.2); the setpoint goes below 1.0 on this
+> dataset for full load, component protection, cold starts and diagnoses, never
+> below 0.700 (§12.3). Two readings in this section change: the "0.970 during a
+> BDE mode change" is unreachable (its trigger 0x7FEBC4 is held 0), and the
+> `dwbho1smn_w` bits 0 / 1 are the per-bank injector cut-off status, so
+> `lamsbg_subst_dwbho` is the FR's `LASOAB` and `lamsbg_fixed_b1/_b2` are
+> `LAMHAP` / `LAMHAP2` (sidecar renamed).
+
 While naming `KFATLAMS` this pass read `gk_rk` again: after the base mass and
 before `fr`, it computes **`rk = (rk << 12) / 0x80304A` whenever 0x7FEA33 is
 set** (set at 0x41AE3C on the 0x7FE920 branch). `injection.md` §9 lists the
@@ -1408,3 +1430,109 @@ values (the NOx-catalyst requests, `lamds_w` 0x80340C, the mode-change trigger
 derate feeding the torque coordinator", B8, #16) is **`KFLANS`**, the
 after-start lambda: it feeds `lamnswl_w`, not a torque path. The sidecar row is
 corrected in place.
+
+### 12.3 The verdict: this ECU does ask for λ < 1 on the fuel path (VERIFIED-STATIC), and how far
+
+**Yes.** After start end (§12.1) `rk` is divided by `lamsbg_w`, and in
+homogeneous running `lamsbg_w` is the `%LAMKO` output of §12.2, which goes
+below 1.000 on this dataset under exactly these conditions (fuel increase =
+1/λ − 1):
+
+| # | condition | requester | minimum λ on this dataset | fuel | static / open |
+|---|---|---|---|---|---|
+| 1 | **charge request above 100 %** (full load): `rlsol_req` 105 % from 3760 rpm, 110 % at any speed | `lamfa_w` (`cand_LAMFA` 0x5D34D8) | **0.891** at ≥ 110 % and 6520 rpm (0.922 at 105 %, 6520 rpm) | **+12.2 %** | map and path VERIFIED-STATIC; whether this engine's `rlsol_req` exceeds 100 % at WOT is a **bench question** (log id 375 with id 376) |
+| 2 | **modelled exhaust temperature ≥ 875 °C** (`%ATM`), high speed and load | `lambts_w` (`cand_KFLBTS` 0x5C6636 / `cand_KFLBTS2` 0x5C66F6) | **0.820** / 0.836 at 7000 rpm, 112 % (1.000 below 3800 rpm) | +22 % | VERIFIED-STATIC; how often the model reaches 875 °C is a car question (the model's temperatures over DDLI) |
+| 3 | component protection on a **strong ignition retard** (predicted) | `lambts_w` via 0x5C68A2 | **0.730** | +37 % | VERIFIED-STATIC for the map; the trigger 0x7FE9F8 is traced only to its inputs |
+| 4 | **low gear** (1st/2nd) with a temperature above 800 °C | `lambts_w` via 0x5D1882 | 0.898 | +11 % | VERIFIED-STATIC |
+| 5 | **cold start below about +10 °C** (`tmst`), first ~5000 injections after start end | `lamnswl_w` (`KFLANS` 0x5C6F36) | **0.801** at −30 °C | +25 % | VERIFIED-STATIC |
+| 6 | catalyst oxygen clear-out (after overrun, < 4000 rpm) | `lamka_w` (0x5D3430) | 0.950 | +5.3 % | VERIFIED-STATIC map; trigger model not traced |
+| 7 | OBD diagnoses (catalyst, probe test) | `lamdiag_w` | 0.960 / 0.950 / **0.750** (probe test) | up to +33 % briefly | VERIFIED-STATIC values; trigger conditions not traced |
+| 8 | **any** of the above is bounded by the LAMKO rich limit `lamko_hom_min` 0x5C54E0 | clamp | **0.700** | **+42.9 %** | VERIFIED-STATIC |
+| 9 | `bdemod_w` bit 0 clear while fuelling (if it ever happens) | `lamds_w` 0x80340C held 0, clamped | 0.700 | +42.9 % | dataflow VERIFIED-STATIC; **whether it happens is open** (§11.4, bench ids 503 / 43) |
+
+**The exclusion set** (inputs that cannot move `lamsbg_w` on this dataset,
+each because its selector or value has no store other than a constant one):
+catalyst heating `lamkh_w` (selector 0x7FEC3B never written — the lean
+`KFLANSKH` up to 1.150 is unused), the BDE mode-change base 0.970, the
+NOx-catalyst requests (0x80341E, 0x803412), and `LAMHAP` (CWBDE1 bit 13
+clear). `LASOAB` 1.008 applies only to a bank with a cut injector and is lean.
+And in normal warm part-load running *none* of 1-7 is active, so **`lamsbg_w`
+reads 1.000 there** — G4's expectation, now with the reason.
+
+So F4's "no full-load or component-protection enrichment on the fuel path"
+(§10.2) is wrong on both counts: the full-load request (`lamfa`) and component
+protection (`lambts`) both exist, are calibrated, and reach `rk` through the
+division. F4's *mechanics* stand — `KFMIXA` / `KFMIXB` are neutral, `fgru_trim`
+is a tester constant and the PI controller tracks the request — they were
+just not the whole fuel path.
+
+**What the setpoint also drives** (VERIFIED-STATIC, all read from the code
+above): `%ATM` keys `KFATLAMS` with `lamsbg_w` (§11.6), so an enrichment lowers
+the modelled manifold temperature by up to 20 % and component protection is a
+closed loop through the model; the mean of the two bank setpoints,
+`eta_mean_w` 0x803042 = (`lamhsbg_w` + `lamhsbg2_w`) / 2 (the FR's `lambas`),
+feeds `zw_eta_offset` 0x4362D4 (an additive angle, exactly 0 at 1.000) and,
+as `eta_mean` 0x7FD271 = 0x803042 >> 5, the ignition map 0x5C76D5 (8 nmot ×
+12 **λ** 0.65 … 1.20: **0 at λ = 1**, +7.5 … +8.25 °CA at λ 0.65, −0.75 °CA
+lean) — renamed from `cand_KFZWETA` to the descriptive `dzw_lambas_map`; the
+FR candidate is `KFDZWKG` (nmot_w, lambas_w), a label B7 already gave to
+0x5C753E, so the choice is left to naming pass 5. `start.md` §5.1 is
+corrected accordingly.
+
+### 12.4 Items settled or changed by this pass
+
+| item | status |
+|---|---|
+| §11.8 "whether any calibrated input ever asks for λ < 1 was not traced" | **SETTLED (2026-09-24, H1, §12.1-§12.3)** |
+| §10.2 conclusion "no full-load or component-protection enrichment on the fuel path" | **CORRECTED (2026-09-24, H1, §12.3)** — both exist |
+| §10.2 remainder (b), `%LAMBTS` through `%ATM` | **SETTLED (2026-09-24, H1, §12.2)** — `%LAMBTS` is `FUN_0042EF0C` + `FUN_000E1054`, fed by `%ATM` 0x1043C8, not `FUN_00108950` |
+| `start.md` §5.1 "efficiency demand" | **CORRECTED (2026-09-24, H1)** — lambda setpoint |
+| `injection.md` §9 step "per-injection normalisation (mode-dependent)" | **CORRECTED (2026-09-24, H1)** — the division by the lambda setpoint |
+| sidecar `cand_KFETAKS` 0x5C6F36, `cand_KFZWETA` 0x5C76D5, G4's `lamsbg_subst_dwbho` / `lamsbg_fixed_b1/_b2` | renamed in place (`KFLANS`, `dzw_lambas_map`, `LASOAB`, `LAMHAP` / `LAMHAP2`) |
+
+### 12.5 Open after this pass
+
+* Whether `rlsol_req` exceeds 100 % on this naturally aspirated engine at WOT
+  (it decides whether condition 1 ever fires) — a log of ids 375 and 376.
+* Whether the ECU fuels with `bdemod_w` bit 0 clear (condition 9) — ids 503
+  and 43 on a cold start (catalyst heating is the candidate phase).
+* The triggers of the predicted protection (0x7FE9F8), of catalyst clear-out
+  (`FUN_00409580`) and of the diagnoses were traced to their inputs only.
+* 0x7FEC3B is never *stored*; that it reads 0 rests on RAM being cleared at
+  reset, which this pass did not re-derive. The bench check is id 410 bit 2
+  (`B_kh`) set on a cold start while id 43 stays 1.000.
+
+### 12.6 Reproducing
+
+```bash
+mkdir -p /tmp/ghidra_H1 && cp -R ghidra_projects/med9.gpr ghidra_projects/med9.rep /tmp/ghidra_H1/
+export GHIDRA_INSTALL_DIR=/usr/local/Cellar/ghidra/12.1.3/libexec
+./.venv/bin/python -m pyghidra.ghidra_launch --install-dir "$GHIDRA_INSTALL_DIR" \
+    ghidra.app.util.headless.AnalyzeHeadless /tmp/ghidra_H1 med9 \
+    -process passat_azx_ori.bin -noanalysis -scriptPath ghidra_scripts -postScript import_symbols.py "$PWD"
+./.venv/bin/python ghidra_scripts/decompile.py --project-dir /tmp/ghidra_H1 --project-name med9 \
+    0x0041ADE4 0x0041AE70 0x0041AA34 0x0041AA48 0x0041AF2C 0x00442C18 0x0041BEA4 0x0041BE04 \
+    0x00443090 0x0010CBCC 0x00453F60 0x000E89F0 0x0042EDF8 0x004545C8 0x000E8AC0 0x0042EF10 \
+    0x000E1058 0x000C5808 0x0043081C 0x00426590 0x004526A8 0x000E6F08 0x000E40D0 0x0041C000
+./.venv/bin/python ghidra_scripts/decompile.py --project-dir /tmp/ghidra_H1 --project-name med9 \
+    --asm 0x0004D1A0 --count 400 --asm 0x000C5F74 --count 60 --asm 0x0041AF2C --count 20 \
+    --asm 0x00432AF8 --count 40 --asm 0x0003CEF8 --count 40 --asm 0x000B0F38 --count 4
+./.venv/bin/python3 tools/sda_xref.py data/passat_azx_ori.bin --var 0x7FEA33   # three stores
+./.venv/bin/python3 tools/sda_xref.py data/passat_azx_ori.bin --var 0x7FEC38 0x7FEC3F   # 0x7FEC3B: one load
+./.venv/bin/python3 tools/sda_xref.py data/passat_azx_ori.bin --var 0x7FEBC4   # only 0x04D390
+./.venv/bin/python3 tools/find_branch_refs.py data/passat_azx_ori.bin 0x7FEA33 0x7FEC3B 0x7FEBC4 0x80340C \
+    0x442C14 0x0FBAE4 0x0C5F74 0x0E8AC0 0x42EF0C 0x0E1054
+./.venv/bin/python3 tools/ercosek_tasks.py data/passat_azx_ori.bin --tasks
+./.venv/bin/python3 tools/measuring_vars.py data/passat_azx_ori.bin --csv /tmp/mv.csv   # ids 43/44/376/377/410/411/1555
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin 0x5D34D8   # cand_LAMFA
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin 0x5C6636   # cand_KFLBTS
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin 0x5C6F36   # KFLANS
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin --raw 0x5C54E0 2 u16   # 2867, 4915
+```
+
+The "any base register" store scan of §12.1 / §12.2 was a throwaway loop over
+every aligned word (D-form opcodes 36-39 / 44-45 / 47 with the variable's
+r13 displacement, any `rA`); it found nothing beyond `tools/sda_xref.py`. FR
+pages read: `%LAMSOLL` p1535-1536, `%LAMKO` p2582-2587, `%LAMKOD` p2588,
+`%LAMBTS` p2572-2581 (parameter list), `%BGFAWU` p324 ABK, `%LANSWL` p1606 ABK,
+`%LRSKA` p2644 ABK, `%LAKH` p2591 ABK, `%BGBVG` ABK.
