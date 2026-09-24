@@ -386,3 +386,85 @@ files. That is what lifts gate **S3** (`docs/07` §2.3). The #23 exit criterion,
 snapshots first, for two reasons. The G6 brief states S3 as "do not flash at
 all". And it keeps every step-3 and step-4 read on a never-written ECU, so a
 Flash 0 that goes wrong cannot cost you the stock reads.
+
+---
+
+## Step 5 — Flash 0: the unmodified file (#26)
+
+**Drives:** `docs/07` §3.1 (pre-flight, all eight rows), §3.2 (write), §3.3
+(read back, then the three E6 checks), §3.4 items 1-2, and
+`re/findings/flash_programming.md` §7.2 (the read-back checklist; also
+`docs/06` §6's note). **Unit:** the software-matching spare. Gates S1-S7 and S4
+in particular: the BDM backup of *this* unit comes first.
+
+### 5a. The file [Mac]
+
+"Re-saved through our tools" is `checksum.py fix` on a copy (`docs/07` §1.3:
+*run `fix` on an untouched dump and it changes nothing*):
+
+```bash
+cp data/passat_azx_ori.bin work/flash0_src.bin
+./.venv/bin/python3 tools/checksum.py fix work/flash0_src.bin -o work/flash0.bin
+./.venv/bin/python3 tools/checksum.py verify -q work/flash0.bin
+./.venv/bin/python3 tools/bindiff.py data/passat_azx_ori.bin work/flash0.bin
+shasum -a 256 work/flash0.bin
+```
+
+```
+0 descriptor(s) updated
+ALL OK (65 blocks)
+0 changed range(s): 0 patch (0 B), 0 descriptor (0 B), 0 unexpected (0 B)
+b15590d3f1874ace3125c5d047c09a686db9b8bb498187663539ebab205609b3  work/flash0.bin
+```
+
+The file you send is byte-identical to the car's read, and its hash says so.
+
+### 5b. Write, then read back [bench-only]
+
+Write with KESSv2 protocol 179 (`docs/07` §3.2). **Its checksum correction must
+be a no-op** (S7). Read the whole ECU back into `work/readback.bin`, then:
+
+1. `bindiff data/passat_azx_ori.bin work/readback.bin` must print **0 changed
+   ranges** (`docs/07` §3.3; for Flash 0 there is no `patch.json`, so run it
+   without `-p`). Anything else means a check we do not know about. Stop (S8,
+   S13).
+2. **0x404000-0x47FFFF read back** (§3.3 check 1). Record it. **What it cannot
+   tell you on Flash 0:** the written file *is* the stock image, so "KESS wrote
+   the array" and "KESS skipped it" give the same bytes. The on-chip answer
+   that `patches/ff_counter/test/procedure.md` §3b wants therefore comes from
+   **Flash 1's own read-back of 0x432940**. `docs/07` §3.4's note,
+   consequence 1, already makes that check part of Flash 1 (step 6b). What
+   Flash 0's read-back *does* prove is that nothing on-chip was damaged.
+3. **`5A 5A 5A 5A` at file 0x1E2500** (§3.3 check 2).
+4. **EEP_CONF block 10 after**, compared with step 3e (§3.3 check 3).
+5. **Power-cycle, then the flash CRC again** with step 2d's command. It must
+   still publish **0x5562139F**: same content, same CRC (`flash_crc.json`
+   items 5-6). This is a read-back that does not depend on KESS's own read
+   routine.
+
+### 5c. Then
+
+Clear DTCs (`docs/07` §3.4 item 1). Run `probe --bus gs_usb:0` again (step
+2b). Read the DTCs with VCDS. Log the step-3d scenario once more and compare it
+with the baselines (`docs/07` §7, chapter 5).
+
+**Pass = the #26 exit criterion:** the ECU runs the re-saved file, the
+read-back equals the written file (items 1 and 5), TesterPresent works, and
+there is no DTC beyond the expected bench faults (`hardware_prep.md` §3.5:
+missing partners set DTCs, which is expected). Record the hashes of the written
+and read-back files in #26 (its deliverable).
+
+**Fail means:**
+
+| Symptom | Meaning | Next |
+|---|---|---|
+| KESS "corrected" something | its correction is not a no-op on a file that verifies | S7. Stop, find out what it changed |
+| bindiff shows changes outside the on-chip region | an unknown check, or a bad read | stop, S13. Roll back per `docs/07` §6 |
+| an on-chip difference | a damaged or partial write of the array | S8. Roll back; do not go to Flash 1 |
+| the ECU stays in the loader | the `5A5A` marker (§3.3 check 2, §6.3) | recoverable. Re-flash; see `re/findings/ram_loader.md` for the route |
+| a CRC other than 0x5562139F | the flash is not the file you wrote | S13 |
+
+**Why before Flash 1:** Flash 0 changes nothing, so it proves the route, the
+no-op checksum correction and the read-back without any of our code in the
+ECU (`docs/07` §3.4 item 2). A failure here is a tool or harness problem, and
+nothing else. `ff_counter` procedure §0 also lists Flash 0 as a prerequisite.
