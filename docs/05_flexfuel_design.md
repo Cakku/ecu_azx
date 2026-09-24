@@ -365,6 +365,112 @@ knows nothing about. For the flex strategy this means:
 The persistence side of the same block (the ethanol store shares EEP_CONF
 block 8 with these channels) is in §3.8, note of 2026-09-23.
 
+> **SETTLED 2026-09-24 (brief H1, #46) — the caveat above.** The stock λ < 1
+> path exists and is calibrated; the design consequence is the next note.
+
+#### Added 2026-09-24 (brief H1, issue #46; the desk half of #32 / #33) — how `F(E)` composes with the stock lambda request
+
+Evidence: `re/findings/calibration_names.md` §12 (VERIFIED-STATIC unless a
+line says otherwise). This note states the argument; **it does not change the
+patch** — whether `ff_fuel` should ever treat a stock enrichment specially is
+the human's decision, listed at the end.
+
+**1. What the stock ECU asks for.** From start end on, `gk_rk` divides each
+bank's fuel mass by the lambda setpoint `lamsbg_w` 0x80304A / `lamsbg2_w`
+0x803048, the output of FR `%LAMKO` (`eta_coordinator` 0x442C14). In warm
+part-load running it is 1.000. It drops below 1.000 for:
+
+| requester | condition | minimum on this dataset | fuel ×(1/λ) |
+|---|---|---|---|
+| full load `lamfa_w` (`cand_LAMFA` 0x5D34D8) | charge request `rlsol_req` > 100 % (105 % from 3760 rpm, 110 % everywhere) | 0.891 at ≥ 110 %, 6520 rpm | 1.122 |
+| component protection `lambts_w` (`cand_KFLBTS` 0x5C6636 / 0x5C66F6) | `%ATM` model ≥ 875 °C, high speed and load | 0.820 / 0.836 at 7000 rpm | 1.220 |
+| predicted protection (0x5C68A2) | strong ignition retard with hot exhaust | 0.730 | 1.370 |
+| after-start `lamnswl_w` (`KFLANS` 0x5C6F36) | start below about +10 °C `tmst` | 0.801 at −30 °C | 1.248 |
+| catalyst clear-out, diagnoses | brief, below 4000 rpm / OBD tests | 0.950 … 0.750 | ≤ 1.33 |
+| `%LAMKO` rich limit (0x5C54E0) | bounds all of them | **0.700** | **1.429** |
+
+**2. The composition is multiplicative, and `F(E)` is downstream of the
+division.** The `rk` hook at 0x42247C scales RAM 0x803038, which `gk_rk`
+writes after the division, `fr`, `fra`, `frm`, the purge subtraction and
+`ZGST`. So the injected fuel is
+
+    rk_injected ∝ base × (1 / λ_stock) × fr × frm × F(E)
+
+and nothing in between clamps the product except `rk` ≤ 0xFFFF; the ceiling
+that matters is the injection window (§3.6). The lambda controller's own
+setpoint 0x802CDE is formed by `lam_ist_from_rk` from the mass *before* the
+division and its own division by `lamsbg_w` (injection.md §9, note of
+2026-09-24), i.e. **upstream of `F(E)`**: the loop targets λ_stock and sees
+only the error of `F(E)`, which is what §3.3 always wanted.
+
+**3. It is also the physically right composition.** λ is defined against the
+stoichiometric AFR of the fuel being burnt. The stock `rk` at λ_stock is the
+*gasoline* mass for that λ; multiplying by `F(E)` = AFR_gasoline / AFR_blend
+turns it into the *blend* mass for the same λ. So with a correct `F(E)` the
+engine runs λ_stock on any blend: no double counting, no missing term, and the
+stock enrichment keeps its meaning (full-load power mixture, component
+cooling) on E85.
+
+**4. What it means for the injection-window margin (#33).** The fuel the
+window has to carry, relative to a stoichiometric gasoline injection at the
+same charge, is `F(E) / λ_stock`:
+
+| blend (shipped `ff_F_curve`) | λ 1.000 | 0.891 (full load) | 0.820 (KFLBTS) | 0.730 (predicted) | 0.700 (floor) |
+|---|---|---|---|---|---|
+| E0, F = 1.000 | 1.00 | 1.12 | 1.22 | 1.37 | 1.43 |
+| E50, F = 1.326 | 1.33 | 1.49 | 1.62 | 1.82 | 1.89 |
+| E85, F = 1.543 | 1.54 | **1.73** | **1.88** | **2.11** | **2.20** |
+| E100, F = 1.633 | 1.63 | 1.83 | 1.99 | 2.24 | 2.33 |
+
+§3.6 (B9) put the hard clamp at about **7.8 ms of `ti` at 6000 rpm, +73 % over
+an assumed 4.5 ms stock WOT injection**. If that 4.5 ms is a *logged* WOT
+value it already contains the stock full-load term, and E85 needs ×1.54 of it
+(6.9 ms, about 12 % reserve). If it is a λ = 1 figure, E85 at full load needs
+×1.73 — **at the clamp** — and component protection (×1.88) or the predicted
+protection (×2.11) is **beyond** it. Either way the stock enrichment is the
+term the #33 rule "not above E50 until `ti` and rail margins are confirmed"
+did not contain. It gains three conditions:
+
+* **judge the margin at the lowest `lamsbg_w` a pull produces**, not at
+  λ = 1: log ids **43 / 44** (`lamsbg_w`, `lamsbg2_w`), **376** (`lamfa_w`),
+  **377 / 1555** (`lambts_w`) and the status byte **410** (which requester is
+  active) with `ff_fuel`'s `win_margin_min` (group 109) on every WOT pull;
+* **at E50, make one pull long and hot enough to reach component protection**
+  (id 410 bit 6, id 377 below 1.000), or show from the model temperatures
+  (DDLI, `tuning_checklist.json`) that this car never reaches 875 °C — before
+  any step above E50;
+* **treat the 0.730 / 0.700 cases as transients of a strong ignition retard**:
+  on E85 the knock retard that triggers them should be rarer, but the window
+  must still not saturate silently there (`awea_ti_to_angle` sets no flag,
+  §3.6) — so a pull that ends in heavy retard is a stop, not a data point.
+
+**5. Should `ff_fuel` *not* apply `F(E)` when the stock target is already
+rich? The argument says no.** Skipping `F(E)` while `lamsbg_w` < 1 would run
+the engine at λ_stock × F(E): at E85 full load 0.891 × 1.543 = **1.37**, lean,
+at the operating point where the stock software asked for cooling fuel. The
+enrichment and the blend correction answer different questions (how rich
+relative to stoichiometric; what stoichiometric is for this fuel), so the
+second must never be switched off by the first. What *is* open, and belongs
+to the human as a separate decision with its own argument:
+
+* whether to **reduce the stock enrichment itself on ethanol** — scale
+  (1/λ_stock − 1) towards 0 with E — on the grounds that ethanol's charge
+  cooling and lower exhaust temperature need less protection fuel. That would
+  be a new `ff_<feature>` with an enable byte defaulting to 0, neutral tables,
+  and its own bench evidence (a thermocouple or at least the model against
+  the car), because the `%ATM` model is calibrated for gasoline: it keys on
+  `lamsbg_w` and the ignition efficiency, not on the fuel, so on E85 it
+  predicts the same temperatures and component protection fires at the same
+  modelled 875 °C whatever the real exhaust does. That is conservative (extra
+  fuel, less window), never dangerous.
+* whether the window margin at E85 × 0.820 (or × 0.730) is **acceptable or
+  needs a limit** — the torque-limit hook of §3.6 at 0x0C7CF8 is the place, a
+  later design.
+
+Nothing in `patches/ff_fuel` changes with this note: `F(E)` multiplies `rk`
+unconditionally, which paragraphs 2-3 show is correct.
+
+
 ### 3.4 Ignition
 Blend factor `f_zw(E)` from a 1D curve (0 at E0, 1 at about E40-50 where
 MBT is usually reached, per prj) applied as
