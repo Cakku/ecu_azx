@@ -115,6 +115,10 @@ VAG tester can read OBD data without being address 0x33.
 0x13C000-0x145000 and was **not** pinned to a single function in this brief —
 see §8.
 
+> **2026-09-24 (H3):** pinned — `isotp_rx_indication` 0x1420A0, reached from
+> the range object 0xD8 (0x7DF) through `obd_func_rx_ind` 0x0B5534; the
+> `[0x7FDA7C]` channel record read at 0x1443CC is not on this path. §11.1.
+
 ---
 
 ## 2. Mode 01 — `obd_mode01_h1` at 0x05D0F4 (VERIFIED-STATIC)
@@ -559,6 +563,10 @@ one it saw last time (0x803D70):
   request (the dispatcher 0x13E98C is reached from 0x13D890 / 0x13E260, not
   traced here) is open; a tester that sends `01 00` as its very first frame
   could in principle see the previous connection's bitmap.
+  *2026-09-24 (H3, §11.3), VERIFIED-DYNAMIC (emulated) on the ISO 15765-4
+  route:* the connection opens and the h2 walk runs on the first 10 ms tick
+  after the frame, the request is dispatched on the second, so a scan tool's
+  first `01 00` already sees the new connection's bitmap.
 * So a scan tool's `01 00` sees the record `valid` bytes **as they were when
   it connected**. A PID whose `valid` byte goes 0 → 1 during a session (for G1:
   `ff_obd_pid52_rec.valid` after `ff_cal_ok()` and the enable byte) appears in
