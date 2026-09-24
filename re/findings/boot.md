@@ -504,7 +504,7 @@ pointers and calls.
 | 35 | 0x0B1AF4 | `0x12F49C` | 48 | calls 0x0B822C |
 | 36 | 0x0B1AF8 | `0x12F578` | 35 | 0x7FBA70=0x0, 0x7FBA71=0x0, 0x7FEBE8=0x1 |
 | 37 | 0x0B1AFC | `0x12F604` | 1 | - |
-| 38 | 0x0B1B00 | `0x12F138` | 33 | ptr 0x8037E4<-0x7F8892, 0x8037E8<-0x7F8893, 0x8037EC<-0x7F889A, 0x8038D4<-0x7F88AC |
+| 38 | 0x0B1B00 | `0x12F138` | 33 | ptr 0x8037E4<-0x7F8892, 0x8037E8<-0x7F8893, 0x8037EC<-0x7F889A, 0x8038D4<-0x7F88AC — **CORRECTED 2026-09-24 (H4):** those four are the ends of a **61-word map**: the loops at 0x12F164/0x12F18C also fill 0x8037F0-0x80387C <- 0x7F88AF.. and 0x803880-0x8038D0 <- 0x7F88D3..; every pointer lands in fault-memory entry 0 (0x7F8890). `dfp_nvm_field_map_init`, see the note below the table |
 | 39 | 0x0B1B04 | `0x12EC00` | 75 | 0x7FBA50=0x0, 0x7F91D4=0x1, 0x7F91CC=0x0, 0x7F91D6=0x0 / calls 0x0B8234, 0x12F1BC, 0x0AA614 |
 | 40 | 0x0B1B08 | `0x132C30` | 13 | - |
 | 41 | 0x0B1B0C | `0x133D8C` | 25 | - |
@@ -573,9 +573,29 @@ Named in `re/symbols.csv` from this window: index 17 `psg_ident_init`
 (0x12DDFC), 18 `nvm_set_sync_mode`, 24 `nvm_set_normal_mode`, 26
 `imo_state_init` (0x0B4BA0), 30 `dtc_freeze_init` (0x134124), 31
 `dtc_mem_init` (0x132384), 32 `dtc_readiness_init` (0x134250), 38
-`kwp_tp_buf_init` (0x12F138), 39 `kwp_chan_init` (0x12EC00) *[`dfp_init` in `re/symbols.csv` since G5 — the fault-memory manager's start-up, not a KWP channel init; H4, 2026-09-24]*, 71
+`kwp_tp_buf_init` (0x12F138) *[renamed `dfp_nvm_field_map_init`, H4 2026-09-24 — note below]*, 39 `kwp_chan_init` (0x12EC00) *[`dfp_init` in `re/symbols.csv` since G5 — the fault-memory manager's start-up, not a KWP channel init; H4, 2026-09-24]*, 71
 `kwp_sec_init` (0x036AB8), 72 `ddli_init` (already named by E4), 75
 `flash_crc_init` (0x12E2D8), 76/77 `prog_state_init` (0x12E4C0 / 0x12E3F4).
+
+> **Corrected 2026-09-24 (H4, #42) — index 38 is the fault memory's EEPROM
+> field map, not a KWP TP buffer init.** `tools/blobdis.py data/passat_azx_ori.bin
+> --file-off 0x12F138 --addr 0x12F138 --len 0x84`: with r4 = 0x7F8890 (fault-memory
+> entry 0, `dfp_fault_memory`, 20 × 0x5C, `kwp.md` §12.7) and r3 = 0x8037E4 it
+> stores r4+0x02, +0x03, +0x0A at 0x8037E4/E8/EC, then **36** words r4+0x1F+i at
+> 0x8037F0+4i (loop 0x12F164-0x12F184), **21** words r4+0x43+i at 0x803880+4i
+> (loop 0x12F18C-0x12F1AC) and r4+0x1C at 0x8038D4 — **61 pointers**, one per
+> byte of a 61-byte record. Its two readers: the gather at 0x11FBA8-0x11FBDC
+> (byte k of record i = `*(map[k] + i*0x5C)`, then `nvm_block_request(0x18,
+> 3 + 61*i, 0x3D, 0, …)` at 0x11FC0C, after the count byte to block offset 2
+> at 0x11FB74; mode 0 there, mode 1 in the restore)
+> and the scatter in **0x12F1BC**, which `dfp_init` (index 39) calls at 0x12EC38:
+> it reads the same records of **EEP_CONF block 24** back into entries 0-3.
+> So index 38 prepares the pack/unpack map for the fault memory's EEPROM
+> copy, and index 39 restores the fault memory through it. Renamed in
+> `re/symbols.csv`: 0x12F138 `dfp_nvm_field_map_init`, new rows 0x8037E4
+> `dfp_nvm_field_map` (0xF4 B) and 0x12F1BC `dfp_nvm_restore`. VERIFIED-STATIC
+> for the stores and the two readers; HYPOTHESIS for the names. The 0x5C-byte
+> entry keeps 61 bytes on EEPROM; which fields the other 31 are is not traced.
 The remaining entries are anonymous per-module `init` functions of the
 ASCET/COSYM generated code; naming all 1,028 would add noise, not knowledge.
 The names above are **HYPOTHESIS** as names — they come from the RAM cells
@@ -691,7 +711,7 @@ index order. Running them, rather than reading them, settled three things
 | idx | entry | after the call |
 |---|---|---|
 | 18, 24 | `nvm_set_sync_mode`, `nvm_set_normal_mode` | `nvm_mode` 0x7FCD68 = **1** *(`nvm_sync_mode` in `re/symbols.csv`; H4, 2026-09-24)* |
-| 38 | `kwp_tp_buf_init` | 0x8037E4 = 0x7F8892, 0x8037E8 = 0x7F8893, 0x8037EC = 0x7F889A, 0x8038D4 = 0x7F88AC |
+| 38 | `kwp_tp_buf_init` *(= `dfp_nvm_field_map_init`, §6.4 note, H4 2026-09-24)* | 0x8037E4 = 0x7F8892, 0x8037E8 = 0x7F8893, 0x8037EC = 0x7F889A, 0x8038D4 = 0x7F88AC |
 | 71 | `kwp_sec_init` | 0x7FB781 = 0, 0x7FB780 = 0, 0x7FB770 = **0**, 0x7FB748 = 0 |
 | 72 | `ddli_init` | 0x80403C = 0x80366C, then 0x80370C + 0x18·n |
 | 75 | `flash_crc_init` | 0x7FB6F4 = 0, 0x801200 = 0 |

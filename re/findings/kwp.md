@@ -779,6 +779,7 @@ EEPROM blocks (`eeprom.md` §7 item 4) — not reversed here.
 0x7F8892, 0x7F8893, 0x7F889A, 0x7F88AC — entry 0's +2, +3, +0x0A and +0x1C —
 so its name is doubtful (HYPOTHESIS that it is a fault-memory pointer init;
 `boot.md` is not this brief's to edit).
+**RESOLVED 2026-09-24 (H4):** it is `dfp_nvm_field_map_init` — a 61-pointer map into entry 0 that packs a fault-memory entry into its 61-byte EEP_CONF block 24 record, read back by `dfp_nvm_restore` 0x12F1BC from `dfp_init` (`boot.md` §6.4 note, `re/symbols.csv`).
 
 **`kwp_sid_14_h1` 0x35410 (clearDiagnosticInformation).** NRC **0x22** if
 byte 0x7FEB65 is set (0x35420; plausibly "engine running" — HYPOTHESIS).

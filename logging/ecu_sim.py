@@ -201,7 +201,7 @@ INIT_ENTRIES = (
     (34, 0x12F10C, "dtc_code_table_select"), # G5: 0x7FBA58 = 0x5D9F06 if cal
                                              #   0x5CF642 == 1, else 0x5DA6DE
                                              #   (= 2 here); what 0x14 matches
-    (38, 0x12F138, "kwp_tp_buf_init"),       # RAM buffer pointers 0x8037E4,
+    (38, 0x12F138, "dfp_nvm_field_map_init"),       # RAM buffer pointers 0x8037E4,
                                              #   0x8037E8, 0x8037EC, 0x8038D4
                                              #   (G5: they point INTO fault-
                                              #   memory entry 0 at 0x7F8890,
