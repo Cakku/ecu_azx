@@ -838,3 +838,15 @@ Details in `calibration_names.md` §11.
 > 0x80223B is the gear, not "the operating-mode index"; the "which value is
 > which combustion mode" question does not exist. Everything else in the row
 > (one writer, the 0..7 axis, groups 051.3 / 068.3) stands.
+
+## 11. Measuring variables naming pass 5 leaned on (H5, 2026-09-24, #49)
+
+Brief H5 took **no** measuring id and changed nothing in `re/measuring_vars.csv`;
+two handlers served as scaling oracles (`calibration_names.md` §13.5, §13.6).
+
+| id | RAM | fmt / A | what this pass established about it |
+|---|---|---|---|
+| **86** | 0x80225E | 0x07 / 0x64 | the (filtered) **vehicle speed**. Handler 0x039C44 emits `min(v >> 7, 255)`, and formula 0x07 with A = 100 is 0.01 × A × B = B km/h, so the u16 is **1/128 km/h** (handler VERIFIED-STATIC, formula meaning COMMUNITY). Its only store is 0x45C924; the copy 0x802260 (`vfzg_w`, 0 while 0x7F9E2F bit 0) keys `SVF07TMUW`, `FATMVHX` and the `NVQUOT*` gear windows |
+| **25** | 0x802257 | 0x07 / 0x7D | a u8 vehicle speed at **1.25 km/h** per LSB (0.01 × 125 × B; handler 0x039494 emits the byte raw). `%GGTFM` compares it with `VBKLHO` / `VBKLHU` / `VBKLNO` / `VBKLNU` (160 / 60 / 6.25 / 0 km/h). HYPOTHESIS for the scale (formula meaning only) |
+
+One VCDS log of ids 25 and 86 against the speedometer settles both on the car.

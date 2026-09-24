@@ -1196,6 +1196,7 @@ $ make apply
 ff_fuel: 176 patch range(s) (8157 B), 22 descriptor range(s) (66 B), 0 unexpected
 checksums: ALL OK (65 blocks); identification block unchanged
 sha256: c08a78a6074302639a2038cf8b3d0dc4f4a0bc0e816b88576a35a45a3644c317
+flash CRC (the firmware's three-range CRC-32, `ecu_sim.py --print-flash-crc`): 0x65BD7A90 (H6 bench kit, 2026-09-24; the pre-G7 image gave 0x32AA60C4)
 WARNING: ff_fuel: "ram_status": "static" - ... Do not flash this image.
 WARNING: change at 0x42247c+0x4 writes the MPC561 on-chip flash ...
 WARNING: change at 0x432940+0x4 writes the MPC561 on-chip flash ...

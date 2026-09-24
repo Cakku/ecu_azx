@@ -467,15 +467,21 @@ before reading the table below:
 > The caveat of note 2 above still applies: this is the firmware's view, not
 > a read of a real ECU's EEPROM (bench step, `docs/08` S12 / step 3f).
 >
-> *Tangent, not pursued:* **0x0D1068** drives the fault-clear state machine
+> *Tangent — SETTLED (2026-09-24, H2, #47, §11).* **0x0D1068** drives the
+> fault-clear state machine
 > 0x035300 (`kwp14_clear_state` 0x7FB718, which also commits block 24, G5's
 > §7 item 4 note of 2026-09-24) when 0x7FEB59 is set and bit 0 of block 11
 > payload +11 (mirror 0x7FA02B) is set, and when that finishes it calls
 > 0x038D64 (c5) — i.e. **a stock, tester-free path also resets all 17
 > channels**, then clears the bit and stages block 11 +11 (0x0D1110).
 > Call and range VERIFIED-STATIC (`blobdis.py --file-off 0xD1068 --addr
-> 0xD1068 --len 0xD8`); who sets the bit is **HYPOTHESIS/open**. At +19 the
-> E% survives it; at +2 it did not.
+> 0xD1068 --len 0xD8`); at +19 the E% survives it; at +2 it did not.
+> **Who sets the bit (was HYPOTHESIS/open) is now VERIFIED-STATIC: the
+> routine-0xC5 progress handler 0x087494 (SID 33 C5, programming stack),
+> raw-writing EEPROM 0x28B/0x2AB with bit 0 set — §11.1.** So it is a
+> reflash-with-component-protection consequence, not a bare download one; a
+> plain tester `14 FF 00` cannot reach 0x038D64 (§11.3). The whole path is
+> emulated end-to-end in `tests/test_adaptation_reset_path.py` (§11.4).
 >
 > **Emulated (VERIFIED-DYNAMIC, emulated; `tests/test_ff_diag_patch.py::
 > TestPersistOffsetOffTheChannels` and `::TestPersistenceThroughTheDeviceAt19`,
@@ -872,7 +878,7 @@ caller**: they appear only as two entries of the function-pointer table at
 nothing that references that table either. The existence of the mode is
 VERIFIED-STATIC; its trigger stays **HYPOTHESIS**.
 
-**4. `engine_not_running` (0x7FEAD0) leads somewhere else.**
+**4. `engine_not_running` (0x7FEAD0; `B_not_running` in `re/symbols.csv`, name note 2026-09-24) leads somewhere else.**
 Twelve sites read or write it (`tools/sda_xref.py --var 0x7FEAD0 0x7FEAD0`).
 The two nearest are the functions on either side of ff_fuel's set-A hook:
 0x0BD9E8 and 0x0BDA64 both gate on `0x7FEAD0 != 0`, take a one-shot latch at
@@ -994,7 +1000,7 @@ not `eeprom_read_bytes` itself (three arguments, returns a count).
 
 ### 10.4 Two sub-states no start-up code seeds
 
-`nvm_dev_block_read` (0x05FCC8) and `nvm_dev_block_write` (0x060524) dispatch
+`nvm_dev_block_read` (0x05FCC8) and `nvm_dev_block_write` (0x060524) — `nvm_device_read_sm` / `nvm_device_write_sm` in `re/symbols.csv` (name note 2026-09-24) — dispatch
 on **0x7FADAC** and **0x7FADAD**; the entry states are 0x40 and 0x50. Each
 routine resets its own byte to that value only **after** it finishes a block
 (`li r9,0x40; stb r9,0(r25)` at 0x060510, `li r9,0x50` at 0x0609D4). On a
@@ -1058,7 +1064,7 @@ The same correction applies to blocks 1, 3, 7, 11 and 12 in that table.
 ### 10.6 The full #38 path, emulated end to end
 
 With `ff_persist_offset = 2`, a factory-shaped device image and the 10 ms
-hook plus the real pump wrapper `nvm_pump_wrapper` (0x061944) called once per
+hook plus the real pump wrapper `nvm_pump_wrapper` (0x061944; `nvm_pump_from_background` in `re/symbols.csv`, name note 2026-09-24) called once per
 simulated activation:
 
 | Step | Result |
@@ -1206,3 +1212,177 @@ For the simulator the practical answer is unchanged and now better founded:
 which is VERIFIED-STATIC. `logging/ecu_sim.py` keeps it, and the residue table
 in its module docstring lists 0x7FAB70/0x7FAB74 as hand-bound with this
 section as the reason.
+
+---
+
+## 11. The adaptation-reset path: who sets the flag, and what a reflash does
+### (H2, 2026-09-24, #47 / #26 / #38)
+
+Brief G7 found the stock, tester-free path `fault_clear_then_adaptation_reset`
+0x0D1068 that clears the fault memory (block 24) and then resets all 17 KWP
+adaptation channels (block 8 +2..+18) — gated on **0x7FEB59 != 0 and bit 0 of
+0x7FA02B** (EEP_CONF block 11 mirror +11) — and left "who sets the bit" open.
+This section closes it. Everything is VERIFIED-STATIC (disassembly) unless
+tagged; the end-to-end run is VERIFIED-DYNAMIC (emulated),
+`tests/test_adaptation_reset_path.py`.
+
+### 11.1 Who sets block 11 +11 bit 0 (the flag)
+
+The flag has three faces: EEPROM **0x28B** (block 11 copy 0 payload +11) and
+its copy **0x2AB**; the EEP_CONF manager mirror **0x7FA02B**; and the
+immobiliser module's *private* 32-byte mirror **0x7FD2CC**
+(`immo_eep_block_280_mirror`, `re/symbols.csv`), +0xB = **0x7FD2D7**. The
+manager mirror is loaded from EEPROM 0x28B by the start-up read
+`nvm_read_all_blocks` (section 3.5) — that is the only way a raw-SPI-written bit
+reaches the gate 0x0D1068 reads.
+
+**The sole setter is the routine-0xC5 progress handler
+`kwp_prog_routine_c5_results` 0x087494** (`re/symbols.csv`;
+`blobdis.py --file-off 0x87494 --len 0x684`). It is dispatched at **0x087AFC**
+as the **SID 0x33 RequestRoutineResults** handler for **local id 0xC5**
+(`cmpwi r3,0xC5; beq 0x87494`), a service of the **programming** KWP stack
+(`flash_programming.md` section 1), so it needs `prog_security_level == 2` and is
+reachable only after `10 85`. It is a step machine on the byte **0x7FD5FC**
+(`routine_c5_step`):
+
+| step | at | what it does |
+|---|---|---|
+| 0x11 | 0x875D0 | after the access/variant/download-state checks pass, stages the immobiliser mirror: `stb r28,0xB(r25)` at **0x876A8** with `r28 = [0x7FD486] \| 1` (**bit 0 set**) into 0x7FD2D7, and its complement at +0x17; sets step 0x12 |
+| 0x12 | 0x876D8 | waits until 0x7FD5FE and 0x7FDA3D are both 1, then sets step 0x14 |
+| 0x14 | 0x87710 | flushes the staged mirror bytes to EEPROM through `eeprom_write_bytes` 0x85B54: **0x087850 writes 0x28B, 0x087894 writes 0x2AB** (both from mirror +0xB, bit 0 set), then reads both copies back and verifies |
+
+So the flag reaches the device **only when a tester runs routine 0xC5** in the
+programming session — the immobiliser / component-protection adaptation step.
+
+**Writers of the gate and the flag — the complete set (VERIFIED-STATIC):**
+
+| target | writer | value / condition |
+|---|---|---|
+| EEPROM 0x28B / 0x2AB (raw SPI) | 0x087850 / 0x087894 in 0x087494 | bit 0 **SET**; routine 0xC5 step 0x14, programming mode only |
+| EEPROM 0x280/0x2A0 whole block (raw SPI) | `eeprom_write_verify_immo_block` 0x0894A0 (one caller 0x0861F4, in the relocated programming driver) | flushes the immo mirror as-is — **preserves** whatever step 0x11 staged; does not decide the bit |
+| other raw-SPI block-11 sites (0x087F80-0x087FE4, 0x088120-0x088154, 0x089508) | programming module | write +0xC/+0xD/+0x18 and the whole 0x280/0x2A0 blocks — **never +0xB** (`find_branch_refs.py ... 0x85b54`; each `li r3,...` checked) |
+| manager mirror 0x7FA02B (direct store) | **none** | `store_xref.py --window 0x7FA020 0x7FA040` = 0 sites; the mirror is only touched by the start-up read (from EEPROM 0x28B) and by `nvm_block_request(11,11,...)` |
+| manager block 11 +11 (`nvm_block_request(11,11,1,0,...)`) | **0x0D1110** inside 0x0D1068 | bit 0 **CLEARED** (`rlwinm r11,r11,0,0x18,0x1E` at 0x0D10D8), staged into the mirror after the reset — one-shot; the other manager block-11 clients (0x0364B8, 0x036650, 0x036B34) write +12/+13 only (section 4) |
+| 0x7FEB59 | **0x134030** in `boot_mode_classifier` 0x133F40 (sole store site) | 1 if any abnormal/just-programmed condition holds — section 11.3 |
+
+### 11.2 The reflash question — the verdict
+
+**The OBD download itself does NOT set the flag.** `10 85` -> `27` -> `34`/`36`/`37`
+-> `37` -> reboot writes flash and EEP_CONF block 10 (`flash_programming.md`
+section 2, section 5.2); none of it touches block 11 +11. The flag is set
+**only** if the tester additionally runs **routine 0xC5** (`31 C5` start /
+`33 C5` poll) in the same programming session — the immobiliser /
+component-protection adaptation step VW flash tools run when they (re)pair or
+virginise the ECU. When that routine reaches its commit (step 0x14) the bit is
+written to EEPROM 0x28B/0x2AB.
+
+**On the first application boot after such a session**, `boot_mode_classifier`
+0x133F40 sets 0x7FEB59 = 1 (the programming magic 0x7F8020 = 0xAABFFB11 is
+still present, and/or the flashed identity differs — section 11.3), and
+`nvm_read_all_blocks` loads bit 0 of 0x7FA02B = 1 from EEPROM 0x28B. Both gates
+of 0x0D1068 are then satisfied. 0x0D1068 is a **process of the 100 ms task
+list** (`tbl_os_process_lists`; its pointer at 0x0B22A4 is in the
+0x0B1FC0-0x0B231C span = task 18, priority 3, 100 ms; `boot.md` section 6.8(c)),
+so it self-fires within 100 ms of the application starting and, over a few
+cycles, runs the fault-clear machine to completion, resets the channels and
+clears the flag. **Consequence for the fuel trims:** channels 4/8/10
+(`docs/05` section 3.3) and every other implemented channel except 7 are forced
+back to their block-8 defaults. **Consequence for #38:** the ff_fuel E% store at
+block 8 **+19** survives untouched (the reset only rewrites +2..+18); at the old
++2 it did not. **Consequence for #28's exit criterion "adaptation values
+unchanged":** it holds **only if no routine 0xC5 was run** in the programming
+session. A flash that includes the component-protection adaptation step *will*
+reset the trims on the next boot, and #28 must read them back (session file
+below) rather than assume they are unchanged. **Flash 0/1 (#26/#27) must record**
+whether routine 0xC5 ran (it is visible on the bus as `31 C5` / `33 C5`, and
+after the fact as a cleared bit 0 of EEPROM 0x28B plus default channels in
+block 8).
+
+**The RAM bootstrap loader (F5, `ram_loader.md`) does NOT set the flag.** It
+speaks SCI1, writes flash by address against a blacklist, and has no KWP routine
+dispatch and no path into the immobiliser module; it cannot write EEPROM 0x28B.
+The serial recovery route therefore does not reset adaptations.
+
+**The immobiliser pairing path IS the writer, but only through routine 0xC5.**
+The setter lives in the immobiliser/programming module and manipulates the
+immobiliser's private block-11 mirror; there is no application-stack path (all
+raw block-11 writers are inside 0x085000-0x08A000, section 5 note of 2026-09-24
+exclusion (e)). So "immobiliser pairing" and "routine 0xC5 in programming mode"
+are the same event.
+
+### 11.3 What 0x7FEB59 means, what else 0x0D1068 does, and the tester `14`
+
+**0x7FEB59** is the **abnormal / just-programmed boot latch**, not G5's
+0x7FEB65 "engine running" gate. Its sole writer 0x134030 sits in
+`boot_mode_classifier` 0x133F40, which first builds a status byte **0x7FD411**
+(`boot_mode_status`):
+
+* bit 0 — the return of `bl 0x6D720(1)`;
+* bit 1 — calibration byte 0x5D78EB != 0;
+* bit 2 — **word 0x7F8020 == 0xAABFFB11** (the programming-request magic a
+  `10 85` leaves behind, `flash_programming.md` section 2.1);
+* bit 3 — a 10-byte flashed HW/SW identity string (flash 0x80280...) differs
+  from the stored copy at RAM 0x7F84A0.
+
+0x7FEB59 is then set to **1 if any of status bits 0-3 is set, or bytes 0x7F846A
+/ 0x7F8468 are non-zero**; else 0. Bits 2 and 3 tie it directly to a reflash.
+The same function sets `boot_mode_flags` bit 2 (`flash_programming.md`
+section 2.2).
+
+**What 0x0D1068 does before 0x038D64** (`blobdis.py --file-off 0xD1068 --len 0xD8`):
+gate on 0x7FEB59 != 0 and bit 0 of 0x7FA02B; clamp the halfword counter
+0x7FB758 to <= 0x258; drive the fault-clear state machine **0x035300** one step
+per call through `kwp14_clear_state` 0x7FB718 (state 0 takes the fault-memory
+lock and queues EEP_CONF **block 24**, state 1 commits block 24, state 2
+completes after its time-base wait); when it reports 2, call **0x038D64** (reset
+every implemented channel except 7 to its default and commit block 8 +2..+18),
+then clear bit 0 of the flag byte and **stage** it back into the manager mirror
+with `nvm_block_request(11,11,1,0,...)` at 0x0D1110. The stage updates the
+mirror 0x7FA02B immediately (so the gate closes for this power cycle); the
+**device** write of the cleared block 11 is deferred to the manager's key-off
+write-all (section 3.5) — the one-shot across power cycles relies on that flush
+happening (caveat, section 11.5).
+
+**A plain tester `14 FF 00` does NOT reset the fuel trims on this dataset.**
+`adaptation_reset_all_commit` 0x038D64 has **exactly one caller, 0x0D10D0**
+(`find_branch_refs.py ... 0x38d64`), inside 0x0D1068 and behind both gates. The
+tester `14` handler `kwp_sid_14_h1` 0x35410 runs the *same* fault-clear machine
+0x035300 directly (commits block 24, `kwp.md` section 12.7) and answers
+`54 FF 00`, but it **never calls 0x038D64**. So a workshop DTC clear wipes the
+fault memory and commits block 24 — it does **not** touch the adaptation
+channels. VERIFIED-STATIC.
+
+### 11.4 The end-to-end run (VERIFIED-DYNAMIC, emulated)
+
+`tests/test_adaptation_reset_path.py`, the G7 pattern on the section 10 device
+model: seed the QSPI device with block 11 +11 bit 0 set and E% 85 at block 8
++19, run init entries 33/34/38/39 and `adaptation_restore_all` (a real boot's
+set-up, which arms the implemented-channel mask 0x8001D4 = 0x77BE), set
+0x7FEB59 = 1, perturb a channel away from its default, then call 0x0D1068 in a
+loop with the NVM pump and the virtual time base between calls. Result:
+`kwp14_clear_state` cycles 0 -> 1 -> 2 -> 0; block 24 is committed to the device
+(stamp `18 02`, valid checksum); the perturbed channel and all of
+0x7FD062-0x7FD06D return to their defaults; **both** copies of block 8 carry the
+channel defaults at +2..+18 and **+19 = 0x55 unchanged**, with a valid checksum;
+the manager mirror 0x7FA02B bit 0 is cleared. The whole-SRAM and whole-device
+difference between an E% of 85 and the default 0 at +19, taken through the
+*entire* path, is the +19 byte and the block checksum of each block-8 copy and
+nothing else.
+
+### 11.5 Open / caveats
+
+* **Device write-back of the cleared block 11.** 0x0D1068 only *stages* the
+  cleared flag into the mirror (0x0D1110); the EEPROM 0x28B copy still reads
+  bit 0 = 1 until the manager's key-off write-all (section 3.5, HYPOTHESIS
+  trigger) flushes block 11. If power is cut before that flush, the next boot
+  reloads the set bit and the reset repeats. Bench read of EEPROM 0x28B before
+  and after a key cycle would settle it.
+* **The RAM fault-memory erase** (0x7F8890, 20 x 0x5C) is not done by 0x035300
+  or 0x0D1068 — only the lock is taken and block 24 committed; DFPM processes
+  behind the lock value erase the RAM entries later (G5, `kwp.md` section 12.7).
+  The test asserts the block-24 commit and the lock cycle, and labels the RAM
+  erase as downstream / not-modelled.
+* **Which conditions actually hold after a *given* flash tool's run** (does the
+  identity string mismatch, does the magic persist to app-init) is tool- and
+  sequence-dependent; the firmware side is settled, the bus capture is the
+  bench proof (`docs/08`, the new session file).

@@ -1,5 +1,7 @@
 """`logging/bench_rehearsal.py`'s own plumbing (brief G5).
 
+* `pid52_obd` (brief H3) runs PID 0x52 over ISO 15765-4 (0x7DF -> 0x7E8)
+  through the firmware's own ISO 15765-2 route and grades it (O1-O5).
 * The EEPROM store of the ethanol percent is located at run time from
   `patches/ff_fuel/ffcal001.json` (`ff_persist_block`, `ff_persist_offset`)
   and the firmware's EEP_CONF table -- never hard-coded as "+2" -- so brief
@@ -103,6 +105,8 @@ class TestTheScriptedKwpSteps(DumpUnchanged):
         self.assertEqual(names.index("dtc"), names.index("fault6") + 1,
                          "the fault read-back follows the FAULT matrix")
         self.assertIn("pid52", names)
+        self.assertEqual(names.index("pid52_obd"), names.index("pid52") + 1,
+                         "the scan-tool route follows the TP2.0 one (H3)")
 
     def test_clear_then_read_dtcs(self):
         results = self._run("dtc")
@@ -113,6 +117,21 @@ class TestTheScriptedKwpSteps(DumpUnchanged):
         results = self._run("pid52")
         self.assertEqual(len(results), 3)
         self.assertEqual([w for w, ok, _d in results if not ok], [])
+
+    def test_pid52_over_0x7df_0x7e8(self):
+        """Brief H3: the same switch, as a scan tool reads it (obd.md 11)."""
+        results = self._run("pid52_obd")
+        self.assertEqual(len(results), 5)
+        self.assertEqual([w for w, ok, _d in results if not ok], [])
+
+    def test_a_failing_pid52_obd_run_is_graded_as_failing(self):
+        """The grader is not vacuous: an empty transcript fails every check."""
+        out = Path(tempfile.mkdtemp()) / "empty.csv"
+        out.write_text("# simulated: true\ntime_s,var,value,unit\n",
+                       encoding="utf-8")
+        results = br.checks_for("pid52_obd", br.series(out))
+        self.assertEqual(len(results), 5)
+        self.assertEqual([w for w, ok, _d in results if ok], [])
 
 
 if __name__ == "__main__":                                    # pragma: no cover

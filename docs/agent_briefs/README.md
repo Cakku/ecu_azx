@@ -4,7 +4,7 @@ Self-contained task briefs for autonomous (Opus-class) sub-agents. Each brief
 maps to one or more GitHub issues, states prerequisites, deliverables and
 acceptance criteria, and assumes the rules in `00_common_rules.md`.
 
-## Status (2026-09-16, updated 2026-09-17; wave G merged 2026-09-24, wave H planned — see their sections)
+## Status (2026-09-16, updated 2026-09-17; waves G and H done 2026-09-24 — see their sections; the bench is next)
 
 Waves A and B are merged into `main` (647efe6). Phase 1 (static RE) is
 closed: 13/13 issues. Phase 0 is blocked on hardware (#1-#4); Phase 2 has
@@ -495,7 +495,7 @@ tables / 274 constants / 0 problems. Carlo: review and merge `integration/wave-G
 into `main`, push; then the stale `agent/*`, `integration/wave-B..G` branches, the
 `/private/tmp/integ_wave*` and `.claude/worktrees/agent-*` worktrees can go.**
 
-## Wave H — launched 2026-09-24: the bench-adjacent leftovers of wave G (small, and then the bench)
+## Wave H — done on `integration/wave-H` (2026-09-24): the bench-adjacent leftovers of wave G (small, and then the bench)
 
 Wave G merged into `main` (c25bc35, 2026-09-24; 820 tests). It was meant to be the
 last desk wave, and for the original plan it was — but its own reports opened four
@@ -562,6 +562,47 @@ issue — closing policy as in wave G: only when the exit checklist is fully tic
 3. Milestone descriptions: one 2026-09-24 line — wave G merged, wave H planned,
    #46-#49 added (counts: Phase 3 +1, Phase 4 +1, Phase 5 +1, Phase 6 +1).
 
+**Wave H — run 2026-09-24 on `integration/wave-H` (integrator: Claude; two Opus
+agents at a time; gate per branch = dump SHA, `checksum.py verify`, data/XDF/draft
+untouched vs merge-base, LF-only CSVs, full suite). Baseline main b131d02 = 820
+tests. Order run: H3 + H1 → H2 (+ H1) → H5 (+ H2) → H4 (+ H5) → H6 (+ H4). One
+API rate limit (12:50 Helsinki) cut H5 mid-pass and H2 at its last step; both had
+committed everything, H5 was resumed from its branch.**
+
+| Brief | Result | Gate | Merge |
+|---|---|---|---|
+| H3 | **A 0x7DF request reaches the OBD handler and runs in internal session 6**: `kwp_conn_open` writes 0x33 to 0x7F804B at 0x13F1E4 (the two old candidates were not the writer); physical 0x7E0 is **never answered** (gate `li r3,0`); path MB15 → range objects 0x2C054 (`obd_func_rx_ind` 0x0B5534 / `isotp_rx_indication` 0x1420A0) → dispatcher; answer `isotp_transmit` 0x1429BC → MB13/0x7E8, `0N` + 0x00 padding; silence = "no"; 5 s connection timeout. `ecu_sim.py --obd-can` runs the **firmware's own** ISR/ISO-TP/connection code; `logging/obd_client.py`; rehearsal `pid52_obd` **84/84**; obd.md §11, §8 items 1/4 SETTLED; 28 symbols | 844 OK | 77a2e34 |
+| H1 | **The stock ECU requests λ < 1** once the start has ended (0x7FEA33 = "start ended"; `eta_coordinator` = %LAMKO): full load 0.891 (`cand_LAMFA`), component protection 0.820 (`KFLBTS`, armed by %ATM at 875/900/1050 °C), after-start 0.801 at −30 °C (`KFLANS`), clear-out/diagnoses to 0.750; clamp 0.700/1.200; outside homogeneous mode `lamsbg_w` = 0.700. F4's §10.2 corrected; docs/05 §3.3: `F(E)` composes downstream, never skipped. 39 sidecar rows, 44 symbols, checklist draft 4, 12 more logged variables | 820 OK | 3e7dee2; draft renames + XDF 8509861 (501 names) |
+| H2 | **Only routine 0xC5** (immobiliser/component-protection adaptation, handler 0x087494) sets block 11 +11 bit 0; 0x7FEB59 is set at boot by 0x134030 on the programming magic 0x7F8020 == 0xAABFFB11 or an identity mismatch; `fault_clear_then_adaptation_reset` runs in the 100 ms task, `adaptation_reset_all_commit` has one caller behind both gates → **a bare OBD download does not reset the fuel trims, a `31 C5`/`33 C5` session does on the next boot, a DTC clear never does, the E% at +19 survives** (emulated end to end, 16 tests); `adaptation_channels.json`; eeprom.md §11; docs/08 steps 5-6 | 860 OK | 6e684d5 |
+| H5 | **501 → 645** named objects (144 new, 30 renames; `static` 272 → 425); %ATM/%ATMHEX finished (Grenzkat outputs write-only); protection thresholds by exhaust location; **`TAVVKBTSP` = 65535 → H1's 0.730 case is dead**; tmot model = %GGTFM; `vfzg_w` 1/128 km/h; `KFDZWKG` → 0x5C76D5; checklist draft 5 | 844 OK (base 8509861) | 6f61e6b; draft renames + XDF 867a547 (645 names, 409 constants) |
+| H4 | All nine items: process-cursor labels (`ram_survey.py`, `ram_map.csv`), snapshot = **1,034** blocks, Flash 0 naming, `med9log --sim-t-bg-ms/--sim-seed-dtc` (9 tests), one name per address, init entry 38 = `dfp_nvm_field_map_init`, both rulings written into docs/06/07/08 and both procedures, docs/08 step 7.4 OBD lines; **0x477B48 = deferred ChainTask(self)**, **task 20 is never activated** (80 ActivateTask sites resolved) | 869 OK | 16af894; cleanup 6074ef9 |
+| H6 | **`make bench-kit`** (`tools/bench_kit.py`, top-level `Makefile`): the four bench-day images in ~5 s into `work/bench_kit/` with `MANIFEST.json` (SHA-256, size, changed ranges, expected flash CRC computed at build time, docs/08 step and S-rows) and a kit README; refuses a non-canonical dump, anything under `data/`, any path outside `work/`, and a `make apply` that rewrote a descriptor; 13 tests pin the hashes to the patch READMEs and the CRCs to docs/08. Found: no document recorded the post-G7 `ff_fuel` flash CRC **0x65BD7A90** or the `HOOKS=external` CRC **0x84278F4C** — recorded at integration | 873 OK | 7f3be39; CRC record 9ea030b |
+
+**Rulings (Carlo, 2026-09-24):** `ff_persist_enable` stays 1; the `ram_status` stop
+is the strict rule (Flash 0 included); bench baselines engine-off — all written in.
+
+**GitHub after wave H:** launch notes on 15 issues + 6 milestones; integration
+notes on #20 #22 #23 #26 #27 #33 #34 #37 #38 #39 #42 #43 #44 #46 #47 #48 #49; no
+issue closed (#46-#49 each keep a bench/car row; the closing policy is unchanged).
+
+**Open after wave H (desk, small):** pass 6 of the naming (%TEB adaptation
+`FUN_000ECE7C`, %GK `mix_*`; a detector pass for index-read tables like FATMV\*
+and `DLBTS`); `ram_survey.py` label for 0x7FE5A4 (running priority); whether the
+adaptation reset repeats when power is cut before block 11's key-off write-back;
+0x13AE18 (a 0x7DF frame during a TP2.0 connection); the 0x7D0 range object;
+`rlsol_req` > 100 % and non-homogeneous fuelling (H1's two open questions).
+Everything else needs the bench (docs/08) or the car.
+
+**Merged head `integration/wave-H` 9ea030b (2026-09-24): 882 tests OK (820 on
+main before the wave), `bench_rehearsal.py --fresh-eeprom` 84/84, `ecu_sim.py
+--self-test` PASS, `make bench-kit` builds the four images (stock 0x5562139F,
+ff_counter both 0x06C08AD4 / external 0x84278F4C, ff_fuel 0x65BD7A90),
+`checksum.py verify` ALL OK (65 blocks), dump SHA-256 unchanged, XDF 1079 tables /
+409 constants / 0 problems, 645 named objects. Carlo: review and merge
+`integration/wave-H` into `main` (main b131d02 is itself unpushed), push; then the
+`agent/*`, `integration/wave-*` branches and the `/private/tmp/integ_wave*` and
+`.claude/worktrees/agent-*` worktrees can go. After this wave every open item
+needs the bench (`docs/08`) or the car.**
 ## How to launch one
 
 From Claude Code (Agent tool), one agent per brief, each in its own worktree

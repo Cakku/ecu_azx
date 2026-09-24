@@ -352,6 +352,12 @@ no-op. Read back after writing and compare; if the read-back differs from
 what we wrote outside the descriptors, stop and investigate (that would mean
 a check we do not know about). Roll back by writing the original read.
 
+> **Gate, by ruling (Carlo, 2026-09-24; dated note H4):** no write of any
+> kind — **Flash 0 included** — before issue #23's runtime RAM snapshots are
+> in (`docs/07` §6.4, `docs/08` step 4 before step 5). The `ram_status`
+> warning of §5 is the tool's per-patch check, not the whole gate: the rule is
+> "snapshots first", not "patches only".
+
 > **2026-09-17 (E6, blocker of #26 #27 #28 #32) — what the ECU's own route
 > can write, and what to check on the first flash. VERIFIED-STATIC from
 > `data/passat_azx_ori.bin`; see `re/findings/flash_programming.md`.**
@@ -393,6 +399,13 @@ a check we do not know about). Roll back by writing the original read.
 >
 > 1. **Read back 0x404000-0x47FFFF** and `bindiff` it. This is the single
 >    measurement that settles #32. Stock bytes there = KESS skipped the array.
+>
+>    *Corrected 2026-09-24 (H4): "Flash 0" in this checklist is the old name
+>    for the first `patches/ff_fuel` write. Flash 0 is now the unmodified dump
+>    (#26), whose on-chip read-back cannot tell "written" from "stock"; the
+>    on-chip question is settled by Flash 1's read-back of 0x432940 (#27) and
+>    then the `ff_fuel` flash (#32) — `docs/08` open question 1, `docs/07`
+>    §3.4. Items 2-3 apply to every write, Flash 0 included.*
 > 2. **Check the halfword at file 0x1E2500 is `5A 5A`.** It is the one
 >    integrity marker the firmware acts on: without it the ECU reboots into
 >    its flash loader instead of starting the application (recoverable, but it

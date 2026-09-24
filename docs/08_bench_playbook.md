@@ -27,6 +27,8 @@ definition in `docs/01` §4 Phase 3, `docs/07` §3.4 item 2 and issue #26.
 first `patches/ff_fuel` write: the intro of `docs/07` §3, and item 6 of
 `logging/sessions/flash_crc.json`'s comment. Read those as "ff_fuel's first
 flash".
+*Both corrected in place, dated, 2026-09-24 (H4); `docs/06` §6's read-back
+checklist carried the same old naming and has the same note.*
 
 ## 0. Which ECU, and the stop list
 
@@ -292,6 +294,10 @@ will be flashed:
 
 The scenario has an idle and a load step. On a bench spare that cannot run an
 engine, see open question 4 before you rely on these baselines.
+*2026-09-24, by ruling (dated note H4): on the bench spare both baselines are
+taken **engine-off** — KL15 on, no crank, the same duration; the raster
+counters still run. The idle-plus-load-step comparison is #28 on the car
+(open question 4, settled).*
 
 ### 3e. EEPROM block 10, before (#26)
 
@@ -392,6 +398,8 @@ Flash 0 that goes wrong cannot cost you the stock reads.
 
 ## Step 5 — Flash 0: the unmodified file (#26)
 
+> **2026-09-24 (H6, #26/#27):** build the kit first: `make bench-kit` — all four images of steps 5-7 in `work/bench_kit/`, with `MANIFEST.json` (SHA-256, changed ranges, expected flash CRC per file) and a kit `README.md` (`tools/bench_kit.py`).
+
 **Drives:** `docs/07` §3.1 (pre-flight, all eight rows), §3.2 (write), §3.3
 (read back, then the three E6 checks), §3.4 items 1-2, and
 `re/findings/flash_programming.md` §7.2 (the read-back checklist; also
@@ -448,6 +456,12 @@ be a no-op** (S7). Read the whole ECU back into `work/readback.bin`, then:
 Clear DTCs (`docs/07` §3.4 item 1). Run `probe --bus gs_usb:0` again (step
 2b). Read the DTCs with VCDS. Log the step-3d scenario once more and compare it
 with the baselines (`docs/07` §7, chapter 5).
+
+> **2026-09-24 (H2, #47/#26):** run `logging/sessions/adaptation_channels.json`
+> before *and* after this flash and after the DTC clear — the block-8 channels
+> (incl. fuel trims 4/8/10 and the E% at +19), 0x7FA02B and 0x7FEB59 — so a
+> reset from the routine-0xC5 path (`re/findings/eeprom.md` §11) is visible;
+> Flash 0 is a bare download and should not trip it.
 
 **Pass = the #26 exit criterion:** the ECU runs the re-saved file, the
 read-back equals the written file (items 1 and 5), TesterPresent works, and
@@ -591,6 +605,12 @@ counter increments at the task rate, and the log comparison shows no other
 change. If anything is off, roll back (procedure §7). Row D's roll-back needs
 no on-chip write (§7, note).
 
+> **2026-09-24 (H2, #47/#27):** run `logging/sessions/adaptation_channels.json`
+> around this flash too. Flash 1 is still a bare download of ff_counter (no
+> `31 C5`), so the adaptation channels should be unchanged; a reset here would
+> mean the tool ran component-protection adaptation (`re/findings/eeprom.md`
+> §11) — record it against #28.
+
 **Why here:** Flash 1 is the first code of ours in the ECU. It needs S3
 (`ram_status` from step 4), Flash 0's proof of the route (step 5), and step
 3c's stock counters. Without the counters, a frozen `ff_ticks` has two
@@ -629,6 +649,14 @@ Each item is its own procedure. Only the order and the gates are given here.
    is needed because the support bitmap is rebuilt once per new diagnostic
    connection (`obd.md` §10.3, G3). The 0x7DF/0x7E8 transport itself has never
    been exercised, so it is a bench item (README, same section).
+   *2026-09-24 (H3 result, recorded by H4): send to the **functional** id 0x7DF;
+   a **physical 0x7E0** request is received and never answered on this ECU (its
+   connection gate is `li r3,0` at 0x2C29C) — `re/findings/obd.md` §11.*
+   *2026-09-24 (H3, `obd.md` §11.3/§11.6): silence is the normal "no" (`01 52`
+   with the switch off draws no frame). After enabling `ff_pid52_enable`, wait
+   **more than 5 s** without a request — the OBD connection times out 5.00 s
+   after the last answer and the next request opens a new one, which rebuilds
+   the support bitmap — before reading `01 40`.*
 5. **One feature at a time (S11):** the ignition blend `procedure_e1.md`
    (#34), then start enrichment `procedure_e2.md` (#35), then the rail adder
    `procedure_e5.md` (#36). Each one is an `ff_*_enable` byte flipped in
@@ -717,7 +745,14 @@ from the log.
    §2 check 4 says the counter runs with KL15 only) with the engine-running
    comparison deferred to #28. Decide before the baselines of step 3d are
    recorded.
+   *Settled 2026-09-24 by ruling (Carlo): the bench baselines are engine-off
+   (KL15, no crank; the raster counters still run) and the running comparison
+   is #28 on the car — dated notes in `ff_counter/test/procedure.md` §3-§5 and
+   `ff_fuel/test/procedure.md` §4 (H4).*
 5. `logging/README.md` §8 says a snapshot is 1,032 TransferData blocks, and
    `ram.md` §9 says 1,031. The tool prints `5 ranges, 63932 bytes, 1032
    TransferData blocks`, because each of the five ranges rounds up. It does not
    matter for the procedure.
+   *Settled 2026-09-24 (H4): both were wrong — per-range rounding gives
+   1,034; the tool printed ceil(total / 62) = 1,032 and now prints 1,034
+   (`ram.md` §9).*

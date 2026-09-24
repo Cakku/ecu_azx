@@ -293,6 +293,7 @@ $ make apply
 ff_counter: 5 patch range(s) (229 B), 6 descriptor range(s) (16 B), 0 unexpected
 checksums: ALL OK (65 blocks); identification block unchanged
 sha256: 3cd20443c068ed009b7d48b32210790eb320cb159489fc36cc1ef1ea67696498
+flash CRC (firmware three-range CRC-32, `ecu_sim.py --print-flash-crc`): 0x06C08AD4 (G6/H6, 2026-09-24)
 WARNING: ff_counter: "ram_status": "static" - the RAM block at 0x007FFB00 is VERIFIED-STATIC only (re/findings/ram.md): no instruction references it, but the runtime snapshots of issue #23 are still pending. Do not flash this image.
 WARNING: change at 0x432940+0x4 writes the MPC561 on-chip flash (0x404000-0x47FFFF). The block checksums are handled and the firmware's own OBD programming route whitelists the range (re/findings/flash_programming.md), but a KESSv2 write of it has not been demonstrated: read the image back and compare before trusting it.
 ```
@@ -302,6 +303,7 @@ $ make HOOKS=external apply
 ff_counter: 3 patch range(s) (99 B), 4 descriptor range(s) (10 B), 0 unexpected
 checksums: ALL OK (65 blocks); identification block unchanged
 sha256: 9ecde359ef91eabfa332ad80c3ad5667f5d5535ea72d0a0306da78a59ab375e2
+flash CRC (firmware three-range CRC-32, `ecu_sim.py --print-flash-crc`): 0x84278F4C (H6 bench kit, 2026-09-24)
 WARNING: ff_counter: "ram_status": "static" - ... Do not flash this image.
 ```
 

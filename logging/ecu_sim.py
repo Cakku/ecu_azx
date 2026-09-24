@@ -66,7 +66,7 @@ cell                                 reason
                                      two trampolines (`eeprom.md` 7 Q1)
 0x803DDC = 0x2BA50 (G5)              the KWP config-struct pointer the h2
                                      walk reads.  Written by the real
-                                     `kwp_register_table` 0x13E974, whose
+                                     `kwp_register_table` 0x13E974 (`kwp_service_config_set` in re/symbols.csv), whose
                                      only caller is inside init entry 281
                                      (the whole diagnostic-stack start-up,
                                      not run); power_on calls just 0x13E974
@@ -86,6 +86,21 @@ run.  On every new TP2.0 channel the firmware's `kwp_service_h2_walk`
 (0x13ECB0) runs once, as `kwp_conn_cyclic` does per new connection
 (`obd.md` 10.1): it rebuilds the OBD support bitmaps and puts the session back
 to 0.
+
+**The generic-OBD CAN route (2026-09-24, brief H3, `re/findings/obd.md` 11).**
+With `--obd-can` (``Med9Handlers(obd_can=True)``) a single frame on 0x7DF (or
+0x7E0) is answered on 0x7E8 by the **firmware's own** TouCAN ISR, ISO 15765-2
+parser, connection layer and dispatcher, run by :class:`emu.obd_can.ObdCanRoute`
+after the firmware's init entries 44 and 281.  The route does not go through
+`handle()` or `Tp20Server`: frames in the module-C MB15 window 0x7C0-0x7FF are
+tapped off the bus and written into the emulated message buffer, and whatever
+the ECU loads into MB13 is sent.  Three pieces are the harness's, not the
+firmware's (labelled in `emu/obd_can.py`): the TouCAN buffers and IFLAG bits,
+the 44 `mftb` reads of the diagnostic module redirected to the virtual time
+base, and the 2 ms / 10 ms raster calls with idle stretches compressed.  The
+connection is the firmware's too: it opens on the first frame (the h2 walk,
+session 6) and closes 5 s after the last answer, so a "reconnect" is simply a
+request after more than 5 simulated seconds of silence.
 
 One ordering difference from the part, deliberate: the simulator attaches the
 EEPROM and runs `cold_start()` *before* the init entries, so `kwp_sec_init`
@@ -109,6 +124,8 @@ Usage::
     python3 logging/ecu_sim.py --self-test          # handlers only, no bus
     python3 logging/ecu_sim.py --bus slcan:/dev/tty.usbmodem1411 -v
     python3 logging/ecu_sim.py --bus virtual:med9 --drop-ack 1 --delay-ms 5
+    python3 logging/ecu_sim.py --bus slcan:/dev/tty.usbmodem1411 --obd-can
+    python3 logging/obd_client.py --sim 01 00       # the 0x7DF route, in-process
 
 **python-can's `virtual` bus does not cross process boundaries**, so a
 simulator started from a second terminal on `virtual:` is invisible to the
@@ -184,12 +201,12 @@ INIT_ENTRIES = (
     (34, 0x12F10C, "dtc_code_table_select"), # G5: 0x7FBA58 = 0x5D9F06 if cal
                                              #   0x5CF642 == 1, else 0x5DA6DE
                                              #   (= 2 here); what 0x14 matches
-    (38, 0x12F138, "kwp_tp_buf_init"),       # RAM buffer pointers 0x8037E4,
+    (38, 0x12F138, "dfp_nvm_field_map_init"),       # RAM buffer pointers 0x8037E4,
                                              #   0x8037E8, 0x8037EC, 0x8038D4
                                              #   (G5: they point INTO fault-
                                              #   memory entry 0 at 0x7F8890,
                                              #   +2/+3/+0xA/+0x1C, so the name
-                                             #   is doubtful; kwp.md 12.7)
+                                             #   was doubtful; settled by H4 2026-09-24 as dfp_nvm_field_map_init)
     (39, 0x12EC00, "dfp_init"),              # G5: the fault-memory manager's
                                              #   start-up; among others the
                                              #   lock pair 0x7FBA5C = 0 /
@@ -1252,7 +1269,7 @@ class Med9Handlers:
                  time_scale: float = 1.0, run_patch: bool = True,
                  stock_tasks: bool = False, wip_polls: int = 0,
                  time_base: bool = True, flash_crc: "bool | float" = False,
-                 flash_crc_warm: bool = False, dtcs=()):
+                 flash_crc_warm: bool = False, dtcs=(), obd_can: bool = False):
         from emu import Med9Emu
         from emu.time_base import VirtualTimeBase
         if patch_dir:
@@ -1315,6 +1332,14 @@ class Med9Handlers:
             self.dtc.seed(d)
         #: new TP2.0 connections seen (:meth:`on_connect`)
         self.connections = 0
+        #: the 0x7DF/0x7E0 -> 0x7E8 route (brief H3), run by the firmware;
+        #: built before the CRC task so its harness edits are hidden from it
+        self.obd = None
+        if obd_can:
+            from emu.obd_can import ObdCanRoute
+            self.obd = ObdCanRoute(self.emu, self.time_base)
+            for line in self.obd.errors:
+                self.log.append(f"OBD route: {line}")
         #: built after `power_on`, so `flash_crc_init` (init entry 75) has put
         #: the state byte back to 0 and the shadow scan sees the final flash.
         #: `flash_crc` is True (T_bg = BG_LOOP_MS_DEFAULT) or T_bg in ms.
@@ -1392,6 +1417,8 @@ class Med9Handlers:
         self.ram.power_on(self.emu)
         if self.time_base is not None:
             self.time_base.advance(0.0)
+        if getattr(self, "obd", None) is not None:
+            self.obd.start()                 # init entries 44 and 281 again
         self.t0 = self.clock()
 
     # -- state -------------------------------------------------------------
@@ -1446,6 +1473,44 @@ class Med9Handlers:
         if not res.ok:                                       # pragma: no cover
             self.log.append(f"kwp_service_h2_walk did not return: "
                             f"{res.stop_reason} at {res.pc:#08x}")
+
+    # -- the generic-OBD CAN route (brief H3) --------------------------------
+    def _obd_catch_up(self) -> None:
+        self.step()
+        if self.animate:
+            self.ram.apply(self.emu, self.sim_time())
+        self.obd.advance_to(self.sim_time())
+
+    def obd_request(self, payload: bytes, *, can_id: int = 0x7DF,
+                    wait_s: float = 0.1, **kw) -> list[tuple[int, bytes]]:
+        """One ISO 15765-4 request as a single frame; the ECU's frames back.
+
+        An empty list is the ECU's silence (obd.md 11.2: unsupported PIDs,
+        services outside session 6 and NRC 0x10-0x12 are not answered on
+        the functional channel, and 0x7E0 is never answered).
+        """
+        if self.obd is None:
+            raise RuntimeError("needs Med9Handlers(obd_can=True) / --obd-can")
+        self._obd_catch_up()
+        return self.obd.request(payload, can_id=can_id, wait_s=wait_s, **kw)
+
+    def obd_idle(self, seconds: float) -> None:
+        """Let `seconds` of bus silence pass on the route's clock."""
+        self.obd.idle(seconds)
+
+    def obd_frame(self, can_id: int, data: bytes) -> list[tuple[int, bytes]]:
+        """A frame off the bus for module C MB15; the frames the ECU sent."""
+        self._obd_catch_up()
+        before = len(self.obd.sent)
+        if self.obd.receive(can_id, data):
+            self.obd.run(0.03)
+        return [(cid, d) for _t, cid, d in self.obd.sent[before:]]
+
+    def obd_poll(self) -> list[tuple[int, bytes]]:
+        """Advance the route to the simulator's clock; the frames it sent."""
+        before = len(self.obd.sent)
+        self._obd_catch_up()
+        return [(cid, d) for _t, cid, d in self.obd.sent[before:]]
 
     def _pump_nvm(self, n: int = 8) -> None:
         """What the two 10 ms tasks do for the EEP_CONF queue (eeprom.md 8.4)."""
@@ -1604,7 +1669,7 @@ class EcuSimulator:
                  dump: str = DUMP, patch_dir: str | None = None,
                  eeprom: str | None = None, ram: AnimatedRam | None = None,
                  trace: list[str] | None = None, verbose: bool = False,
-                 dtcs=()):
+                 dtcs=(), obd_can: bool = False):
         #: `dump` is how a PATCHED image is driven end to end: the handlers are
         #: the firmware's own, so `21 <group>` on patches/ff_fuel's image runs
         #: the patch's measuring handlers (brief D2, issue #39).  `patch_dir`
@@ -1612,9 +1677,21 @@ class EcuSimulator:
         self.handlers = handlers or Med9Handlers(
             dump, seed=seed, animate=animate, patch_dir=patch_dir,
             eeprom=eeprom, ram=ram, session_timeout_s=session_timeout_s,
-            dtcs=dtcs)
+            dtcs=dtcs, obd_can=obd_can)
         runner = self.handlers.runner
-        self.link = FrameTap(link, runner.on_frame) if runner else link
+        #: frames for module C MB15 (0x7C0-0x7FF), waiting for the poll loop
+        self._obd_in: "collections.deque[tuple[int, bytes]]" = collections.deque()
+        taps = []
+        if runner:
+            taps.append(runner.on_frame)
+        if self.handlers.obd is not None:
+            taps.append(self._obd_tap)
+        if len(taps) == 1:
+            self.link = FrameTap(link, taps[0])
+        elif taps:
+            self.link = FrameTap(link, lambda cid, d: [f(cid, d) for f in taps])
+        else:
+            self.link = link
         link = self.link
         self.server = Tp20Server(link, address=address,
                                  params=Tp20Params(),
@@ -1638,6 +1715,22 @@ class EcuSimulator:
     def runner(self) -> "PatchRunner | None":
         return self.handlers.runner
 
+    def _obd_tap(self, can_id: int, data: bytes) -> None:
+        if (can_id & 0x7C0) == 0x7C0:
+            self._obd_in.append((can_id, bytes(data)))
+
+    def _service_obd(self) -> None:
+        """The ISO 15765-4 route: MB15 in, MB13 out (Med9Handlers.obd_frame)."""
+        out = []
+        while self._obd_in:
+            can_id, data = self._obd_in.popleft()
+            out += self.handlers.obd_frame(can_id, data)
+        out += self.handlers.obd_poll()
+        for can_id, data in out:
+            self.link.send(can_id, data)
+            if self.verbose:
+                print(f"  OBD <- {can_id:03X} {data.hex(' ')}", flush=True)
+
     # -- loop --------------------------------------------------------------
     def poll(self, timeout: float = 0.05) -> bool:
         """Service the bus once.  True if a request was answered."""
@@ -1648,6 +1741,8 @@ class EcuSimulator:
             self.handlers.on_connect()
         # the patch keeps ticking whether or not a tester is talking to us
         self.handlers.step()
+        if self.handlers.obd is not None:
+            self._service_obd()
         if request is None:
             return False
         self.requests += 1
@@ -1750,6 +1845,27 @@ def self_test(dump_path: str = DUMP) -> bool:
     step("17 06 01 status of P0601", b"\x17\x06\x01", b"\x57\x01\x06\x01")
     step("18 02 FF 00 -> NRC 0x12", b"\x18\x02\xff\x00", b"\x7f\x18\x12")
 
+    # the generic-OBD CAN route (brief H3): the firmware's own ISO 15765-2
+    # parser and dispatcher, single frames on 0x7DF / 0x7E0, answers on 0x7E8
+    o = Med9Handlers(dump_path, animate=False, obd_can=True)
+
+    def obd(label, can_id, request, expect):
+        nonlocal ok
+        frames = o.obd_request(request, can_id=can_id)
+        got = " ".join(f"{c:03X}:{d.hex()}" for c, d in frames) or "(silence)"
+        good = (frames == expect if isinstance(expect, list)
+                else bool(frames) and expect(frames))
+        ok = ok and good
+        results.append((label, got, good))
+
+    obd("7DF 01 00 -> 7E8 single frame", 0x7DF, b"\x01\x00",
+        lambda f: f[0][0] == 0x7E8 and f[0][1][:2] == b"\x06\x41")
+    results.append(("  ... in internal session 6", f"session {o.obd.session}",
+                    o.obd.session == 6))
+    ok = ok and o.obd.session == 6
+    obd("7DF 3E -> silence (not in session 6)", 0x7DF, b"\x3e", [])
+    obd("7E0 01 00 -> silence (gate 0x2C29C)", 0x7E0, b"\x01\x00", [])
+
     width = max(len(r[0]) for r in results)
     for label, hexed, good in results:
         print(f"  {label:<{width}}  {hexed:<28} {'ok' if good else 'MISMATCH'}")
@@ -1821,6 +1937,12 @@ def main(argv=None) -> int:
                          "18/17/14 handlers are the firmware's. Repeatable. "
                          "14 (clear) needs --eeprom: it commits EEP_CONF "
                          "block 24 before it answers")
+    ap.add_argument("--obd-can", action="store_true",
+                    help="also answer ISO 15765-4 single frames on 0x7DF/0x7E0 "
+                         "with 0x7E8, through the firmware's own TouCAN ISR, "
+                         "ISO-TP parser and dispatcher (re/findings/obd.md 11; "
+                         "the harness pieces are listed in emu/obd_can.py). "
+                         "Client: logging/obd_client.py")
     ap.add_argument("--time-scale", type=float, default=1.0, metavar="X",
                     help="simulated seconds per wall-clock second (default 1)")
     ap.add_argument("--task-set", choices=("A", "B"), default="A",
@@ -1854,6 +1976,7 @@ def main(argv=None) -> int:
         flash_crc=args.flash_crc if args.flash_crc is not None else False,
         flash_crc_warm=args.flash_crc_warm, dtcs=args.seed_dtc,
         time_scale=args.time_scale, wip_polls=args.wip_polls,
+        obd_can=args.obd_can,
         ram=AnimatedRam(live_task_set=args.task_set,
                         statics=dict(DEFAULT_STATICS)))
     link = open_link(parse_bus_spec(args.bus))
@@ -1871,6 +1994,9 @@ def main(argv=None) -> int:
               f"wall s")
     if handlers.eeprom is not None:
         print(f"EEPROM: {args.eeprom} (2 KB M95160, written back on exit)")
+    if handlers.obd is not None:
+        print("generic OBD: 0x7DF/0x7E0 -> 0x7E8 through the firmware's "
+              "ISO 15765-2 route (emu/obd_can.py)")
     if handlers.flash_crc is not None:
         c = handlers.flash_crc
         print(f"flash CRC task: {len(c.ranges)} ranges, "

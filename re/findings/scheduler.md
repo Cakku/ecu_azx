@@ -1103,3 +1103,79 @@ of §11. VERIFIED-STATIC unless tagged.
   **no static activator**: its thunk 0x0B09A0 is uncalled and its handle
   0x4787C0 is loaded nowhere else. An indirect activation (e.g. from an ISR via
   a table) is not excluded.
+
+### 13.1 Added 2026-09-24 (brief H4, issue #42) — the two §13 leftovers, settled
+
+Both VERIFIED-STATIC from `data/passat_azx_ori.bin` unless tagged; each took
+well under its one-hour box.
+
+**(b) 0x477B48 is a deferred self re-activation — the task restarts at its own
+terminator.** Disassembly (`tools/blobdis.py data/passat_azx_ori.bin --file-off
+0x273B48 --addr 0x477B48 --len 0x6C`) with the kernel structures it shares with
+`os_ActivateTask` 0x475E8C:
+
+* `os_ActivateTask(h)`: `r31 = [h+4]` = the task's **priority**, `r29 =
+  [K+0x68] + prio*0xC` = that priority's **ready record** (0x475EF8-0x475F08);
+  an empty record takes `h` as its head (0x475F18); `[h+0xC]` is the task's
+  activation cell (`os_task_activation_flags`), byte 0 = activations, compared
+  with the limit `[h+8]` (0x475F20-0x475F2C).
+* 0x477B48 indexes the same table with **`[0x7FE5A4]`** (r13-0x1A4C) — so that
+  cell holds the *running priority level*, not a kernel object pointer — takes
+  the head handle (the running task), and sets **byte 1 of its activation
+  cell** to 1 (0x477B8C-0x477B94). It returns 0.
+* The end-of-task routine **0x4763FC** (called from `os_TerminateTask`
+  0x4764FC at 0x476568, the terminator word of every process list, and from
+  0x4770F0) reads that byte (0x476420): if it is 1 it clears it and leaves the
+  task at the head of its ready record **without** decrementing the activation
+  count (0x476428-0x476448), so the dispatcher runs the same list again;
+  otherwise it decrements byte 0 and dequeues the next activation
+  (0x47644C-0x4764F8).
+* Error arm: if bit 0x40000000 of [0x7FE5B8] is set (0x477B58-0x477B78) it
+  calls **0x4775D8(5)** and returns 5. 0x4775D8 calls the application
+  descriptor's hook `[[0x7FE590]+0x14]` if non-zero and not already inside it
+  — an OSEK ErrorHook dispatcher (HYPOTHESIS for the name; the meaning of the
+  0x40000000 bit — plausibly "called from interrupt level" — is not traced).
+
+So the OSEK reading is **ChainTask(self)** with the chain carried out by the
+normal terminator: the rest of the list still runs, then the task starts over
+without a new ActivateTask and without touching the activation limit. The real
+ChainTask is **0x4770F0** (same error arm, then 0x4763FC and
+`os_ActivateTask(r3)` at 0x477190), used once, at 0x11DB28 in `bg_task_tail`
+with the handle word 0x478B48 (the switch to set B). `re/symbols.csv`:
+`os_reactivate_self` keeps its name, the note is extended; new rows
+0x4770F0 `os_ChainTask`, 0x4763FC `os_task_end`, 0x4775D8 `os_error_hook_call`
+(HYPOTHESIS for the three names).
+
+**(a) Task 20 has no activator at all — exclusion set, closed.** A task
+becomes ready only by being written into its priority's ready record, and the
+only code that does that is `os_ActivateTask` (every `lwz rX,0x68(rK)` of the
+kernel, 0x475000-0x479000: 0x475F04 ActivateTask, 0x476204 schedule 0x4761E8,
+0x476404 end-of-task, 0x476C30 dispatcher 0x476BF0, 0x4777B4/0x4777EC the
+start-up clear, 0x477B68 above — only ActivateTask stores a handle; the
+restart of (b) keeps the *running* task only). Every entry into
+`os_ActivateTask` was resolved (`tools/find_branch_refs.py
+data/passat_azx_ori.bin 0x475E8C`: 80 sites = 37 thunks + 42 direct calls + 1 computed;
+the r3 of each resolved by a small capstone pass over the 10 instructions before the call):
+
+| path | r3 | task 20? |
+|---|---|---|
+| the 37 thunks 0x0B091C-0x0B0AD4, `lis r3,0x48; lwz r3,LO(r3); b 0x475E8C` | one fixed handle word each | only thunk **0x0B09A0** (`lwz [0x4787D8]` = 0x4787C0) — and 0x0B09A0 has **no** branch, call or pointer reference (`find_branch_refs.py … 0x0B09A0`: none; no aligned word 0x0B09A0 or 0x0B09A4 anywhere in the image) |
+| 42 direct calls (0x0BDA38/44/B0/BC, 0x11B068-0x11B0F4 in `os_init`, 0x134554/60, 0x40A9F0-0x40ACDC, 0x40BB30/48, 0x40BF1C-0x40BFAC, 0x40C090-0x40C120, 0x417C40-0x417D18, 0x443F94/AC) | each a `lis r3,HI; lwz r3,LO(r3)` pair; the handles resolve to 0x478660, 0x4786A8, 0x478854, 0x478838, 0x47881C, 0x478800, 0x4787E4, 0x478870, 0x47863C, the seven 0x4788B0-0x478970 (words 0x0B0B30-0x0B0B48), 0x478B14, 0x478AF8, 0x478ADC, 0x478AC0, 0x478AA4, 0x4786CC, 0x4789F0, 0x4786F0, 0x478714, 0x4787A4, 0x478A80 | none is 0x4787C0 |
+| 0x477190 in ChainTask 0x4770F0 | its caller's r3: only 0x11DB28, `[0x478B48]` | no |
+| time tables A/B and the three alarm callbacks | thunk addresses (`tools/ercosek_tasks.py --timetable`; 0x478DF8 = 0x0B0934, 0x443F74, 0x40C1D8 → b 0x046080) | 0x0B09A0 is not among them |
+| the kernel init hooks 0x478E04 | six kernel routines, none calls ActivateTask (the call-site list above has no site in them) | no |
+
+The data side agrees: the handle 0x4787C0 occurs once as a word, at 0x4787D8
+(the thunk's source); 0x4787D8 itself is loaded only by the thunk
+(`tools/find_abs_refs.py … --target 0x4787D8`); the list 0x0B1ED4 occurs once,
+at 0x4787C0 (task 20's own descriptor); its activation cell 0x7FE61A has no
+code reference (`tools/sda_xref.py … --var 0x7FE61A`: 0), and its only other
+word occurrence, 0x09B0E4, is in the external-flash kernel-configuration copy
+where it belongs to a descriptor with id 0x16, not the live one (K =
+0x478E28). **Task 20 is configured and never activated; its one real process,
+`kwp_conn_cyclic` 0x13E650, runs every 10 ms from task 19 instead (above).**
+Not excluded, and outside a static proof: code that computes a branch into the
+thunk table from an index (no reference to 0x0B091C or any thunk address was
+found), and code executed from RAM (only the flash loader and the DECRAM
+routines are copied there, `ram_loader.md`). §13's "an indirect activation …
+is not excluded" is **SETTLED (2026-09-24, H4, §13.1)** within that set.

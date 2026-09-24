@@ -390,7 +390,8 @@ rates fall proportionally. The CSV is long-form (section 1), so a slow variable
 simply has fewer rows.
 
 **A RAM snapshot takes about a minute** (63,932 bytes, 1,032 TransferData
-blocks). Do the six of `re/findings/ram.md` section 9 in one sitting, one
+blocks; *corrected 2026-09-24 (H4): 1,034, one short last block per range,
+`re/findings/ram.md` §9*). Do the six of `re/findings/ram.md` section 9 in one sitting, one
 command each, `--session-name` naming which of the six it is:
 
 ```bash
@@ -465,7 +466,7 @@ session file and the tolerances, not the ECU.
 ./.venv/bin/python3 logging/med9log.py groups --sim \
     --sim-patch patches/ff_fuel --eeprom work/eeprom.bin 111 108
 
-# 3. all thirteen procedure steps, graded (eleven before G5 added dtc and pid52)
+# 3. all fourteen procedure steps, graded (eleven before G5 added dtc and pid52, H3 pid52_obd)
 ./.venv/bin/python3 logging/bench_rehearsal.py --fresh-eeprom
 ```
 
@@ -553,6 +554,7 @@ tolerances themselves; `bench_rehearsal.py` calls the tool's `align_on` and
 | a running PowerPC time base for `read_time_base` | `emu/time_base.py` (F3) — without it the real `27 01` never returns |
 | the firmware's flash CRC-32 task, five activations per background loop T_bg (G5; was one per 10 ms, F3) | `ecu_sim.FlashCrcTask`, `--flash-crc [T_BG_MS]` / `med9log --sim-flash-crc` |
 | the fault services 18 / 17 / 14 over the firmware's RAM fault memory; the seeding and the post-clear erase are labelled models | `ecu_sim.DtcStore`, `--seed-dtc` (G5) |
+| the generic-OBD CAN route: 0x7DF/0x7E0 single frames into TouCAN C MB15, the firmware's own ISR, ISO 15765-2 parser, connection layer and dispatcher, answers out of MB13 on 0x7E8; the TouCAN buffers, the `mftb` redirect and the raster calls are the harness (H3) | `emu/obd_can.py`, `--obd-can`, `logging/obd_client.py` |
 | **not** every other init-table entry | 1,028 of them, most touching peripherals the emulator does not model; the residue is a table in `ecu_sim.py`'s docstring |
 
 > **2026-09-22 (F3, #20/#38).** `power_on` no longer hand-seeds the KWP
@@ -572,3 +574,31 @@ tolerances themselves; `bench_rehearsal.py` calls the tool's `align_on` and
 > DIR` recomputes a patched image's value. `bench_rehearsal.py` now has
 > thirteen steps: `dtc` (read, clear, read back, reconnect) after the FAULT
 > rows and `pid52` (enable, reconnect, `01 40` advertises 0x52).
+
+> **2026-09-24 (H3, #48/#39).** **The scan-tool route.** `ecu_sim.py
+> --obd-can` (or `Med9Handlers(obd_can=True)`) answers ISO 15765-4 requests on
+> **0x7DF** with single frames on **0x7E8** — `02 01 00 00 00 00 00 00` →
+> `06 41 00 b0 b1 b2 b3 00` — and it is **not a model of the protocol**: the
+> frame goes into the emulated module-C buffer 15 and the firmware's own TouCAN
+> ISR, ISO 15765-2 parser (`isotp_rx_indication` 0x1420A0), connection layer,
+> `kwp_service_dispatch` and `isotp_transmit` produce the answer in buffer 13
+> (`re/findings/obd.md` §11), after the firmware's init entries 44 and 281. What
+> *is* the harness, and labelled as such in `emu/obd_can.py`: the TouCAN buffers
+> and IFLAG bits (a transmit is "acknowledged" at once), the 44 `mftb` reads of
+> the diagnostic module redirected to the virtual time base, and the 2 ms / 10
+> ms raster calls, with idle stretches compressed. What that means for a test:
+> the request runs in **session 6** (tester address 0x33, set by the firmware's
+> h2 walk), only single frames with DLC 8 are accepted on 0x7DF, **0x7E0 is never
+> answered** (its connection gate is `li r3,0`), anything unsupported is
+> **silence** rather than a negative response, and the connection closes 5
+> simulated seconds after the last answer — a "reconnect" (the moment the
+> support bitmaps are rebuilt) is a request after more than 5 s of silence.
+> The client is `logging/obd_client.py` (`--sim [--sim-patch DIR] 01 00`,
+> `--pids`, `--bus slcan:...` for the car), the rehearsal step is `pid52_obd`
+> (`bench_rehearsal.py --only pid52_obd`, 5 checks: switch off = stock frames,
+> session 6, bitmap per connection, reconnect, `03 41 52 A` for E0/E85). One
+> simulator limit: the two routes share `kwp_session_current`, and a TP2.0
+> channel opened while an OBD connection is alive inherits session 6, because
+> the modelled TP2.0 side does not run the firmware's connection-open that
+> would rewrite 0x803D6A / 0x7F804B (on the ECU a 0x7DF frame during a TP2.0
+> connection ends that connection instead, `obd_func_rx_ind` 0x0B5534).

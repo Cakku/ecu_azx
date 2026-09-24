@@ -811,8 +811,8 @@ start,end,r13_read,r13_write,r13_addr,abs_read,abs_write,abs_addr,ptr_words,ptr_
 0x7FE520,0x7FE53F,0,0,0,0,0,0,0,0,0,,1
 0x7FE540,0x7FE55F,0,0,0,0,0,0,0,0,0,,1
 0x7FE560,0x7FE57F,0,0,0,0,0,0,0,0,0,,1
-0x7FE580,0x7FE59F,975,394,0,8,0,1,0,1,24,os_kernel_ram+os_stack_ptr_chain_onchip,0
-0x7FE5A0,0x7FE5BF,728,421,0,8,0,0,0,0,32,os_kernel_object_ptr+os_kernel_ram+os_stack_ptr_chain_ext,0
+0x7FE580,0x7FE59F,975,394,0,8,0,1,0,1,24,os_kernel_ram+os_proc_next_slot+os_stack_ptr_chain_onchip,0
+0x7FE5A0,0x7FE5BF,728,421,0,8,0,0,0,0,32,os_kernel_object_ptr+os_kernel_ram+os_proc_cur_slot,0
 0x7FE5C0,0x7FE5DF,165,151,0,0,0,0,0,0,32,os_kernel_ram,0
 0x7FE5E0,0x7FE5FF,79,82,0,0,0,0,8,0,32,os_kernel_ram+os_task_activation_flags,0
 0x7FE600,0x7FE61F,0,0,0,0,0,0,32,0,32,os_kernel_ram+os_task_activation_flags,0

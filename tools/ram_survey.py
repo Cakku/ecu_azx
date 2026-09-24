@@ -135,8 +135,13 @@ KNOWN = (
           "eeprom_read_immo_block 0x085F44 reads EEPROM 0x280, 32 B; eeprom.md"),
     Known(0x7FE588, 0x7FE58C, "os_stack_ptr_chain_onchip", "VERIFIED-STATIC",
           "scheduler.md 7: r13-0x1A68"),
-    Known(0x7FE5A0, 0x7FE5A4, "os_stack_ptr_chain_ext", "VERIFIED-STATIC",
-          "scheduler.md 7: r13-0x1A50"),
+    # CORRECTED 2026-09-24 (H4): 0x7FE59C/0x7FE5A0 are the ERCOSEK process
+    # cursor, not a stack-pointer chain (scheduler.md 13, boot.md 6.8(b));
+    # the old label here was os_stack_ptr_chain_ext.
+    Known(0x7FE59C, 0x7FE5A0, "os_proc_next_slot", "VERIFIED-STATIC",
+          "os_dispatch_loop lwz/stw r13-0x1A54 at 0x475E3C/0x475E48; scheduler.md 13"),
+    Known(0x7FE5A0, 0x7FE5A4, "os_proc_cur_slot", "VERIFIED-STATIC",
+          "os_dispatch_loop stw r13-0x1A50 at 0x475E40; scheduler.md 13"),
     Known(0x7FE5A4, 0x7FE5A8, "os_kernel_object_ptr", "VERIFIED-STATIC",
           "scheduler.md 7: r13-0x1A4C"),
     Known(0x7FE5FC, 0x7FE645, "os_task_activation_flags", "VERIFIED-STATIC",

@@ -444,7 +444,7 @@ Exact commands, the sensor pull-up/level-shift network and the host test
 > boot-time integrity gate on flash content** — the 65 block sums are never
 > recomputed at boot and the published CRC-32 is compared with nothing. Whether
 > KESSv2 protocol 179 *drives* that route for that range is a property of the
-> tool, not the firmware, and it is still open: the read-back after Flash 0 is
+> tool, not the firmware, and it is still open: the read-back after Flash 0 is (*2026-09-24: the read-back after **Flash 1** is — Flash 0 writes the stock image and cannot distinguish written from skipped, `docs/08` step 6*)
 > the proof (`07_workflow.md` §3.3, docs/06 §6).
 
 ## 8. Reference documents to obtain

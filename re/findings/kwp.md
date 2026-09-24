@@ -614,7 +614,9 @@ is corrected accordingly below.
 ### 12.3 `21 <group>` returns TWO groups: G and G+0x7F — addition to §6
 
 `kwp21_group_read` (0x3583C) is the group path. It stores the requested group
-in `mw_group_requested` (0x7FD05E), calls the four-field reader `0x35748`, then
+in `mw_group_requested` (0x7FD05E),
+*[names in `re/symbols.csv`: `kwp21_group_request` 0x03583C and
+`measuring_group_req` 0x7FD05E — use those; H4, 2026-09-24]* calls the four-field reader `0x35748`, then
 does
 
 ```
@@ -777,6 +779,7 @@ EEPROM blocks (`eeprom.md` §7 item 4) — not reversed here.
 0x7F8892, 0x7F8893, 0x7F889A, 0x7F88AC — entry 0's +2, +3, +0x0A and +0x1C —
 so its name is doubtful (HYPOTHESIS that it is a fault-memory pointer init;
 `boot.md` is not this brief's to edit).
+**RESOLVED 2026-09-24 (H4):** it is `dfp_nvm_field_map_init` — a 61-pointer map into entry 0 that packs a fault-memory entry into its 61-byte EEP_CONF block 24 record, read back by `dfp_nvm_restore` 0x12F1BC from `dfp_init` (`boot.md` §6.4 note, `re/symbols.csv`).
 
 **`kwp_sid_14_h1` 0x35410 (clearDiagnosticInformation).** NRC **0x22** if
 byte 0x7FEB65 is set (0x35420; plausibly "engine running" — HYPOTHESIS).
@@ -814,6 +817,20 @@ positive `14`). It also runs init entries 34 and 39 at power-on, calls
 config pointer 0x803DDC is set, and runs `kwp_service_h2_walk` 0x13ECB0 once
 per new TP2.0 channel (obd.md §10.1): that walk also resets the session to 0
 and `14`'s state byte.
+
+> **2026-09-24 (H2, #47) — 0x7FEB59 is a different byte from 0x7FEB65, and it
+> is now settled.** G5 left 0x7FEB65 as the `14`/`10 85` "engine running /
+> programming-mode active" gate (HYPOTHESIS, unchanged). **0x7FEB59** is the
+> **abnormal / just-programmed boot latch**: sole writer 0x134030 inside
+> `boot_mode_classifier` 0x133F40, set to 1 when this boot follows a
+> programming request (magic 0x7F8020 = 0xAABFFB11) or the flashed HW/SW
+> identity mismatches (VERIFIED-STATIC, `re/findings/eeprom.md` §11.3). It is
+> gate 1 of `fault_clear_then_adaptation_reset` 0x0D1068, which runs *this*
+> §12.7 fault-clear machine 0x035300 (committing block 24) and then, unlike a
+> plain `14 FF 00`, resets all 17 adaptation channels through 0x038D64. So the
+> fault-clear machine documented here has a **second, tester-free caller** that
+> chains an adaptation reset after it; a workshop DTC clear does not
+> (0x038D64's only caller is 0x0D10D0). See `re/findings/eeprom.md` §11.
 
 Reproduce:
 
