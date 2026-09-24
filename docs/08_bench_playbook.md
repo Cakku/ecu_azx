@@ -637,8 +637,17 @@ Each item is its own procedure. Only the order and the gates are given here.
 
 Before each of 1-5, the simulator rehearsal of `docs/07` §4.5
 (`logging/bench_rehearsal.py --fresh-eeprom`) runs all eleven numbered steps
-of `ff_fuel.json` against the patch [Mac]. See the note at the end for today's
-result.
+of `ff_fuel.json` against the patch [Mac]:
+
+```
+69/69 checks passed
+```
+
+(2026-09-24, integration head, about 3.5 min on the M2.) It rewrites
+`logging/samples/ff_fuel_sim_*.csv`. Run it on a scratch checkout, or
+`git checkout -- logging/samples/` afterwards, unless you mean to update them.
+Brief G5 is changing this tool and `ecu_sim.py` in parallel, so re-run it on
+the day.
 
 ---
 
