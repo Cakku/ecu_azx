@@ -451,8 +451,8 @@ Q15 at those instructions, **COMMUNITY** for the names. That closes the
 > controller statement stays true, and now reads more precisely:
 > `lam_ist_from_rk` 0x43E164 forms 0x802CDE as the ratio of 0x80303E (the
 > mass *before* the division) to its own `div32_sat_u16(0x80303E, lamsbg_w)`
-> once `B_stend_raw` is set (0x5C63A4 = 1, so the second branch at 0x43E1xx is
-> the live one), i.e. the loop's setpoint **is** the requested λ, and it is
+> once `B_stend_raw` is set (0x5C63A4 = 1 has bit 1 clear, which selects this ratio
+> branch; with bit 1 set the setpoint would be `lamsbg_w` itself), i.e. the loop's setpoint **is** the requested λ, and it is
 > formed upstream of `fr` and of the flex-fuel hook.
 
 ## 10. Verification: the Python model
