@@ -1300,15 +1300,16 @@ mixture_running >> 16` **and** both bank masses are divided by the bank
 setpoints (`(x << 12) / 0x80304A` for the 0x802E00 bank, `/ 0x803048` for the
 0x802DF8 bank; 0 or overflow → 0xFFFF). So the division and the switch from
 start fuelling to running fuelling are the same event. 0x7FEA33 has exactly
-four stores in the image (`tools/sda_xref.py --var 0x7FEA33`, and
-`work`-style D-form scan over every base register, §12.6):
+three stores in the image (`tools/sda_xref.py --var 0x7FEA33`; no `lis` pair
+in `tools/find_abs_refs.py --target`, no pointer word in
+`tools/find_branch_refs.py`, and a throwaway scan of every D-form instruction
+with that displacement over *any* base register finds the same three, §12.6):
 
 | store | function | value | condition |
 |---|---|---|---|
 | 0x41AE3C | `gk_seg_a` `FUN_0041ADE4` (bl at 0x422478 in `task_segment_a`, one call per injection segment) | **1** | `B_stend_raw` 0x7FE920 ≠ 0 — the start has ended (`start_end_build` 0x419CD8: `B_st && (0x7FD058 & 1)`) |
 | 0x41AED4 | `gk_seg_b` `FUN_0041AE70` (bl at 0x422538 in `task_segment_b`) | 0 | `0x803090` bit 3 set and 0x7FEA4B clear. `FUN_0041BEA4` sets 0x803090 = 8 only while `B_stend_seg` 0x7FECCA is clear **and** 0x7FCE0C bit 1 is set, i.e. inside the start; 0x7FEA4B = `tmst < 0x5D3D22` and 0x5D3D22 = **0**, so it is always 0 |
 | 0x41AA40 | `FUN_0041AA34` (called by `FUN_0011CAD4`, the process of the event task id 9) | 0 | initialisation |
-| — | (no other D-form store, no `lis` pair, no pointer word 0x7FEA30…0x7FEA36 in the image) | | |
 
 `B_stend_raw` itself is cleared only by `afterstart_timer` 0x0D0DFC while
 `B_not_running` 0x7FEAD0 is set (engine off, cranking, stall). Therefore:
