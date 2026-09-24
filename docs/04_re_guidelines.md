@@ -122,6 +122,10 @@ make something work; find the actual cause.
 - One fact per table row; dates and dump hashes on anything that could change.
 - Commands are shown exactly as run; outputs are quoted when they are the
   evidence.
-- Corrections go into the document with the old statement struck or listed
-  under "Corrections", not silently replaced, when the old statement was
-  ever used for a decision.
+- Corrections are folded into the statement they correct, in place, with the
+  date and the evidence (brief, issue, findings file) in a short tag, so a
+  reader never has to reconcile an entry with later notes. The old wording
+  lives in git history. When the old statement was used for a decision, say
+  what changed in the commit message and in the issue or brief report that
+  recorded the decision. (Until 2026-09-24 the rule was to append dated
+  "Update"/"Correction" notes; docs 01-08 were consolidated that day.)

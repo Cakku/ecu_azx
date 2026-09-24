@@ -5,12 +5,13 @@ not build any of this: how to go from a clean checkout to a changed ECU and
 back, with the commands that were actually run on this Mac and their real
 output.
 
-Everything here except chapter 3 was executed in this worktree on 2026-09-17
-against `data/passat_azx_ori.bin`
-(SHA-256 `b15590d3f1874ace3125c5d047c09a686db9b8bb498187663539ebab205609b3`).
-**Chapter 3 is the one chapter nobody has run** — no ECU has ever been written
-by this project — so every step in it is marked with what it is predicted to
-do and what would prove it.
+Everything here except chapter 3 was executed on this Mac against
+`data/passat_azx_ori.bin`
+(SHA-256 `b15590d3f1874ace3125c5d047c09a686db9b8bb498187663539ebab205609b3`),
+most recently on 2026-09-24 on `main` 4fcff77 (wave H merged); the outputs
+quoted are from that run. **Chapter 3 is the one chapter nobody has run** —
+no ECU has ever been written by this project — so every step in it is marked
+with what it is predicted to do and what would prove it.
 
 This document cross-links rather than repeats. The reference for each area:
 
@@ -83,12 +84,12 @@ that loads it:
 ```
 
 ```
-Ran 591 tests in 118.721s
+Ran 882 tests in 220.271s
 
 OK
 ```
 
-(2026-09-17, integration/wave-E. About two minutes; the patch-framework and
+(2026-09-24, `main` 4fcff77. About four minutes; the patch-framework and
 simulator tests dominate.)
 
 ---
@@ -101,7 +102,7 @@ the engine runs.
 
 ### 1.1 The definition file
 
-`re/med9_draft.xdf` is the TunerPro definition: 1,079 tables and 179 constants
+`re/med9_draft.xdf` is the TunerPro definition: 1,079 tables and 409 constants
 built from `re/calibration_draft.csv` (the machine-detected inventory) plus
 `re/calibration_names.csv` (the hand-maintained names, units and scalings) plus
 `patches/ff_fuel/ffcal001_rows.csv` (our own calibration block). It is checked
@@ -113,7 +114,7 @@ this workflow. To confirm the checked-in one is structurally sound:
 ```
 
 ```
-re/med9_draft.xdf: 1079 tables, 179 constants, 0 problems
+re/med9_draft.xdf: 1079 tables, 409 constants, 0 problems
 ```
 
 Seven things about it that will otherwise cost an afternoon — the full list is
@@ -264,7 +265,7 @@ patches/ff_fuel/
 ```
 
 The unit tests live in `tests/` with everything else
-(`tests/test_ff_fuel_patch.py` and its four siblings). `patches/common/` holds
+(`tests/test_ff_fuel_patch.py` and its six siblings). `patches/common/` holds
 the shared framework: `patch.ld`, `patch.mk`, `hooks.S`, `types.h` and the
 **generated** `med9_stock.h`. A new patch starts as
 `cp -r patches/examples/hello_patch patches/<name>`; the six steps are in
@@ -290,11 +291,11 @@ cd patches/ff_fuel && make check
 == stock header is current ==
 OK: …/patches/common/med9_stock.h is up to date with …/re/symbols.csv
 == sections ==
-  [ 1] .text             PROGBITS        00152000 002000 001e0c 00  AX  0   0  4
-  [ 2] .rodata           PROGBITS        00153e0c 003e0c 000000 00   A  0   0  1
-  [ 3] .bss              NOBITS          007ffb00 00fb00 00005c 00  WA  0   0  4
+  [ 1] .text             PROGBITS        00152000 002000 001e94 00  AX  0   0  4
+  [ 2] .rodata           PROGBITS        00153e94 003e94 000000 00   A  0   0  1
+  [ 3] .bss              NOBITS          007ffb00 00fb00 000060 00  WA  0   0  4
 == blob size vs linked flash size ==
-OK: ff_fuel: blob 7692 B == linked flash size, .bss 92 B <= 256 B
+OK: ff_fuel: blob 7828 B == linked flash size, .bss 96 B <= 256 B
 == r2 / r13 usage in the emitted code (must be empty) ==
 OK: r2 and r13 are never referenced
 == small data sections (must be empty) ==
@@ -321,7 +322,7 @@ cd patches/ff_fuel && make dump
 0015201C  48 41 C3 A2  ba       0x41c3a0
 ```
 
-That is the first trampoline of 1,926 lines. `make dump` is
+That is the first trampoline of 1,960 lines. `make dump` is
 `tools/blobdis.py --addr 0x00152000 --check-sda` on the **raw blob**, not on
 the ELF: `llvm-objdump` has no `-b binary`, and reading the ELF instead of the
 bytes the CPU will fetch is exactly the mistake the pre-flash checklist exists
@@ -336,21 +337,33 @@ cd patches/ff_fuel && make gen
 ```
 
 ```
-wrote patch.json: 31 change(s)
-  blob 7692 B at 0x152000, .bss 92 B of 256 B at 0x7ffb00
+wrote patch.json: 43 change(s)
+  blob 7828 B at 0x152000, .bss 96 B of 256 B at 0x7ffb00
   hook 0x42247c: bl 0x41c3a0 -> bl 0x152000 (ff_fuel_rk_hook), word 4bff9f25 -> 4bd2fb85
+  hook 0x432940: bl 0x0bd9e4 -> bl 0x152020 (ff_fuel_hook_a), word 4bc8b0a5 -> 4bd1f6e1
   hook 0x12067c: bl 0x11f02c -> bl 0x152040 (ff_fuel_hook_b), word 4bffe9b1 -> 480319c5
   hook 0x41d40c: the instruction 7c635214 -> bl 0x152060 (ff_zw_hook), word 7c635214 -> 4bd34c55
-  data 0x5e2510: 332 B from build/ffcal001.bin
+  hook 0x41a680: the instruction b3ed303c -> bl 0x152088 (ff_st_hook_a), word b3ed303c -> 4bd37a09
+  hook 0x41a808: the instruction b06d303c -> bl 0x152090 (ff_st_hook_b), word b06d303c -> 4bd37889
+  hook 0x431384: the instruction 9bed20a6 -> bl 0x1520f0 (ff_zwst_hook), word 9bed20a6 -> 4bd20d6d
+  hook 0x45845c: the instruction b3cd3200 -> bl 0x152134 (ff_prail_hook), word b3cd3200 -> 4bcf9cd9
+  data 0x02bd8c: 4 B
+  data 0x5e2510: 334 B from build/ffcal001.bin
   data 0x0a78a8: 16 B = ff_diag_e_pct 0x152174, ff_diag_f_pct 0x1521f8, ff_diag_t_degc 0x15227c, ff_diag_mode 0x152310
+  …
+  data 0x160000: 12 B
+  data 0x16000c: 4 B = ff_obd_pid52_rec 0x7ffb4c
+  …
   ram symbol ff_state at 0x7ffb00
+  ram symbol ff_persist_buf at 0x7ffb50
+  ram symbol ff_nvm_req at 0x7ffb54
+  ram symbol ff_obd_pid52_rec at 0x7ffb4c
 ```
 
-(Extract; the real run lists all 8 hooks and all 23 data entries.)
-*(Note 2026-09-23, G2: this transcript and the `make apply` one below predate
-G1. Since FFCAL001 v5 the data line reads 334 B, and G1's PID 0x52 edits add
-data entries. The blob size, range counts and SHA-256 differ from the ones
-printed here. Your own run is the reference; the hook count is still 8.)*
+(Extract; the real run lists all 8 hooks and all 34 data entries — the CAN
+receive id, FFCAL001, the four measuring-block pointer groups with their
+group-table entries, and the seven stock-instruction edits plus the relocated
+list of the OBD PID 0x52 route.)
 `tools/patch_gen.py` resolves every hook target from the linker's `.sym`,
 encodes the branch word with its reach and alignment checked, reads each
 change's `old` bytes out of the stock image, and asserts that a new block's
@@ -362,11 +375,11 @@ cd patches/ff_fuel && make apply
 ```
 
 ```
-ff_fuel: 159 patch range(s) (7977 B), 18 descriptor range(s) (54 B), 0 unexpected
+ff_fuel: 176 patch range(s) (8157 B), 22 descriptor range(s) (66 B), 0 unexpected
 checksums: ALL OK (65 blocks); identification block unchanged
-sha256: 193223e2ea47c8274f97d961683466b168cf75f484adcaf0b92d4d856e94a817
+sha256: c08a78a6074302639a2038cf8b3d0dc4f4a0bc0e816b88576a35a45a3644c317
 WARNING: ff_fuel: "ram_status": "static" - the RAM block at 0x007FFB00 is VERIFIED-STATIC only (re/findings/ram.md): no instruction references it, but the runtime snapshots of issue #23 are still pending. Do not flash this image.
-WARNING: change at 0x42247c+0x4 writes the MPC561 on-chip flash (0x404000-0x47FFFF). The block checksums are handled, but a KESSv2 write of this region has not been demonstrated: read the image back and compare before trusting it.
+WARNING: change at 0x42247c+0x4 writes the MPC561 on-chip flash (0x404000-0x47FFFF). The block checksums are handled and the firmware's own OBD programming route whitelists the range (re/findings/flash_programming.md), but a KESSv2 write of it has not been demonstrated: read the image back and compare before trusting it.
 […six more on-chip warnings…]
 wrote ../common/../../work/ff_fuel.bin
 wrote ../common/../../work/ff_fuel.diff.json
@@ -403,17 +416,14 @@ have not been taken. **That warning is a blocker, not a formality.**
 
 ### 2.4 FFCAL001, and the rule for changing it
 
-The patch's own calibration block: **v4, 332 bytes at CPU 0x5E2510**, inside
-checksum block 0x5E0000-0x5EFFFF, built by `patches/ff_fuel/ffcal001.py` before
-`make gen` reads it. It grew v1 → v4 across briefs D1, E1, E2 and E5.
+The patch's own calibration block: **v5, 334 bytes (`LENGTH = 0x014E`) at
+CPU 0x5E2510**, inside checksum block 0x5E0000-0x5EFFFF, built by
+`patches/ff_fuel/ffcal001.py` from `ffcal001.json` before `make gen` reads
+it. It grew v1 → v5 across briefs D1, E1, E2, E5 and G1 by appending only;
+the layout and the version history are docs/05 §4.
 
-> **Updated 2026-09-23 (G2):** it is now **v5, 334 bytes** (`LENGTH = 0x014E`
-> in `patches/ff_fuel/ffcal001.py`). Brief G1 appended the one-byte
-> `ff_pid52_enable` gate at +0x14A for OBD PID 0x52 (docs/05 §3.7, note of
-> 2026-09-23). The rule below is how it was done.
-
-The rule (docs/agent_briefs/00_common_rules.md, 2026-09-17) is that **FFCAL001
-changes append and nothing moves**. Adding a value means, in one commit:
+The rule (docs/agent_briefs/00_common_rules.md) is that **FFCAL001 changes
+append and nothing moves**. Adding a value means, in one commit:
 
 1. append the field in `ffcal001.py` past the current end;
 2. bump `VERSION` and `LENGTH` there and mirror both in `src/ff_state.h`;
@@ -426,9 +436,13 @@ changes append and nothing moves**. Adding a value means, in one commit:
 `struct ff_state` grows only past its current end for the same reason, and the
 core/annex checksum split documented in `ff_state.h` must stay true.
 
-Every feature ships **disabled**: an `ff_<feature>_enable` byte defaulting to 0
-*and* a neutral table underneath it. Of the four features only the fuel scaling
-is on in the shipped file.
+Every feature added after the fuel MVP ships **disabled**: an
+`ff_<feature>_enable` byte defaulting to 0 *and* a neutral table underneath
+it. In the shipped file the fuel scaling and the E% persistence are on; the
+ignition blend, the start enrichment, the rail adder and OBD PID 0x52 are off.
+Changing a default value (`ff_persist_offset` 2 → 19 in brief G7, for
+example) is a calibration change, not a layout change, and does not bump the
+version.
 
 ### 2.5 Prove it in the emulator, before anything else
 
@@ -457,7 +471,7 @@ restored it can only be decided with `mfxer` inside emulated code.
 ```
 
 ```
-177 changed range(s): 159 patch (7977 B), 18 descriptor (54 B), 0 unexpected (0 B)
+198 changed range(s): 176 patch (8157 B), 22 descriptor (66 B), 0 unexpected (0 B)
 block checksums of work/ff_fuel.bin: ALL OK
 RESULT: OK
 ```
@@ -478,23 +492,20 @@ Then the suite, and the disassembly of every hook site one last time
 **Nothing below has been done.** No ECU has been written by this project; there
 is no spare ECU, no BDM tool and no `data/backup_bdm/MANIFEST` yet (issues
 #1-#4, #26-#28). Every step is marked **[unverified]** where its behaviour is a
-prediction rather than an observation. The first write is called **Flash 0**
-(`patches/ff_fuel`) or **Flash 1** (`patches/ff_counter`, the no-op counter,
-issue #27) — Flash 1 first, because it changes **two flash words** (one of them
-on-chip since brief F1, 2026-09-22 — see the note in §3.4) and nothing else.
+prediction rather than an observation.
 
-> **Corrected 2026-09-24 (H4):** the naming in the sentence above predates
-> #26 and is superseded. Now **Flash 0** = the *unmodified* dump re-saved
-> through our tools (#26; item 2 of the list below, §6.4), **Flash 1** =
-> `patches/ff_counter` (#27), and `patches/ff_fuel` is the E0-equivalence
-> flash after both (#32; `docs/08` step 7). The first write of all is Flash 0,
-> then Flash 1 — no patch is "Flash 0".
+The names: **Flash 0** is the *unmodified* dump re-saved through our tools
+(issue #26; §3.4 item 2). **Flash 1** is `patches/ff_counter`, the no-op
+counter (#27), which changes **two flash words** — one of them on-chip — and
+nothing else. The first `patches/ff_fuel` write is the E0-equivalence flash
+after both (#32). The order is Flash 0, then Flash 1, then `ff_fuel`. The
+day-one order across this chapter, `logging/README.md` §8, the #44 reads, the
+#23 RAM snapshots and the Flash 1 decision table, with the stop list, is
+[`08_bench_playbook.md`](08_bench_playbook.md) — follow it on the bench day;
+this chapter is the procedure it points at.
 
-> **2026-09-24 (G6):** the day-one order across this chapter, `logging/README.md` §8, the #44 reads, the #23 RAM snapshots and the Flash 1 decision table, with the stop list, is [`08_bench_playbook.md`](08_bench_playbook.md) — follow it on the bench day; this chapter stays the procedure it points at.
-
-What the dump *does* now tell us comes from brief **E6**,
-`re/findings/flash_programming.md` (2026-09-17, VERIFIED-STATIC), and it is
-better news than this chapter assumed when it was drafted. Quoting that file:
+What the dump *does* tell us comes from brief **E6**,
+`re/findings/flash_programming.md` (VERIFIED-STATIC):
 
 * The ECU's own OBD programming service — session `10 85`, which **reboots the
   ECU** into a second, 13-entry KWP stack at 0x088174 with SID 0x34
@@ -511,7 +522,8 @@ better news than this chapter assumed when it was drafted. Quoting that file:
 
 What that does **not** settle: whether KESSv2 protocol 179 *drives* that route
 for that range. That is a property of the tool, not the firmware, and the
-read-back in §3.3 is still the only proof.
+read-back of a flash that changes an on-chip word — Flash 1, §3.4 — is the
+only proof.
 
 ### 3.1 Pre-flight — docs/04 §6, verbatim in intent
 
@@ -533,10 +545,10 @@ pairing or component protection to make something work.
 
 ### 3.2 Write
 
-> **Gate, 2026-09-24 (ruling; dated note H4):** nothing is written — Flash 0
-> included — before the #23 RAM snapshots are in (§6.4's ruling, `docs/08`
-> step 4). §3.1's table does not list it because it is not a property of the
-> file; it is a precondition of every write.
+**The gate first** (ruling, Carlo, 2026-09-24): nothing is written — Flash 0
+included — before the #23 RAM snapshots are in (§6.4, `docs/08` step 4).
+§3.1's table does not list it because it is not a property of the file; it is
+a precondition of every write.
 
 Per docs/06 §6: write with **KESSv2 (protocol 179)** from the Windows machine.
 KESS applies its own checksum correction; **because our file already verifies,
@@ -558,13 +570,15 @@ docs/06 §6: *if the read-back differs from what we wrote outside the
 descriptors, stop and investigate — that would mean a check we do not know
 about.*
 
-Then the three checks E6's `flash_programming.md` §7.2 adds, in order:
+Then the checks of docs/06 §6.2, in order:
 
 1. **Read back 0x404000-0x47FFFF and bindiff it against the written file.**
-   This is the one measurement that decides issue #32. If KESS writes the
+   This is the one measurement that decides the on-chip half of issue #32 —
+   on Flash 1 first (§3.4), then on the `ff_fuel` flash. If KESS writes the
    on-chip array the bytes match; if it silently skips it they are the stock
-   bytes. Per-word, for the two D1 hooks
-   (`patches/ff_fuel/test/procedure.md` §1 has the full table):
+   bytes. Per word — the fuel hook, for example;
+   `patches/ff_fuel/test/procedure.md` §1 has the table of all seven on-chip
+   words:
 
    ```bash
    ./.venv/bin/python3 tools/blobdis.py work/readback.bin --file-off 0x21E47C --addr 0x42247C --len 4
@@ -595,98 +609,93 @@ Then the three checks E6's `flash_programming.md` §7.2 adds, in order:
 
 1. Clear DTCs.
 2. **Flash 0 is the first write of all** (issue **#26**): the *unmodified* dump
-   re-saved through our tools. It changes nothing and proves everything the
-   later flashes assume — that the write route works, that KESS's own checksum
-   correction is a no-op on a file that already verifies, that the read-back
-   equals what was written, and that no unknown signature exists. Its exit
-   criterion is in #26; #28 repeats Flash 0 and Flash 1 on the *car's* ECU
-   afterwards, with the BDM backup in hand.
-3. **Flash 1 next**:
-   `patches/ff_counter/test/procedure.md`. **Two** flash words, 224 bytes of
-   blob, a counter at `PATCH_RAM+0x00` that must rise by **100/s** — not 10/s;
-   C4 corrected every raster in the earlier documents by a factor of ten. Read
-   the **five stock raster counters first**. A frozen counter because the other
-   task set is live looks exactly like a failed flash and is not one. See the
-   note below before flashing it.
+   re-saved through our tools — `checksum.py fix` on a copy, which changes
+   nothing; `make bench-kit` builds it with the other three images. It proves
+   everything the later flashes assume — that the write route works, that
+   KESS's own checksum correction is a no-op on a file that already verifies,
+   that the read-back equals what was written, and that no unknown signature
+   exists. What it cannot prove is whether KESS writes the on-chip array: the
+   file *is* the stock image, so written and skipped read the same. #28
+   repeats Flash 0 and Flash 1 on the *car's* ECU afterwards, with the BDM
+   backup in hand.
+3. **Flash 1 next** (issue **#27**, `patches/ff_counter/test/procedure.md`):
+   **two** flash words, a 229-byte change set, a counter at `PATCH_RAM+0x00`
+   that must rise by **100/s** — the raster is 10 ms (docs/05 §8) — and a
+   source byte that says which task set ran. The patch hooks the 10 ms raster
+   of **both** ERCOSEK task sets (F1), because task set A is the live set
+   (`re/findings/scheduler.md` §11.8) and a set-B-only hook would never tick:
 
-> **Corrected 2026-09-22 (brief F1, checked by F2).** This chapter described
-> Flash 1 as the single external word 0x12067C → `48 02 F9 85` with a 96-byte
-> blob. Since F1 the patch **hooks the 10 ms raster of both task sets**, one
-> word each, and records which one ran (`patches/ff_counter/README.md`):
->
-> | Site | Where | Old → new | Task |
-> |---|---|---|---|
-> | **0x432940** | **on-chip flash** 0x404000-0x47FFFF | `4B C8 B0 A5` → `4B D1 D6 C1` (`bl 0x150000`) | `task_100ms_int` 0x4328E4, id 19, 10 ms, **task set A** |
-> | 0x12067C | external flash | `4B FF E9 B1` → `48 02 F9 A5` (`bl 0x150020`) | `task_100ms` 0x1205A0, TCB 23, 10 ms, task set B |
->
-> Three consequences for this chapter:
->
-> 1. **Flash 1 now writes the on-chip array**, so it inherits §3.1's on-chip
->    caveat and §3.3's warning. `patch_apply.py` says so itself:
->
->    ```bash
->    ./.venv/bin/python3 tools/patch_apply.py data/passat_azx_ori.bin patches/ff_counter -o work/ff_counter.bin
->    ```
->
->    ```
->    ff_counter: 5 patch range(s) (229 B), 6 descriptor range(s) (16 B), 0 unexpected
->    checksums: ALL OK (65 blocks); identification block unchanged
->    sha256: 3cd20443c068ed009b7d48b32210790eb320cb159489fc36cc1ef1ea67696498
->    WARNING: ff_counter: "ram_status": "static" - the RAM block at 0x007FFB00 is VERIFIED-STATIC only (re/findings/ram.md): no instruction references it, but the runtime snapshots of issue #23 are still pending. Do not flash this image.
->    WARNING: change at 0x432940+0x4 writes the MPC561 on-chip flash (0x404000-0x47FFFF). The block checksums are handled and the firmware's own OBD programming route whitelists the range (re/findings/flash_programming.md), but a KESSv2 write of it has not been demonstrated: read the image back and compare before trusting it.
->    ```
->
->    So **§3.3's check 1 — read back 0x404000-0x47FFFF and `bindiff` it — is
->    part of Flash 1, not only of Flash 0 and `ff_fuel`.** Per word:
->
->    ```bash
->    ./.venv/bin/python3 tools/blobdis.py work/ff_counter.bin --file-off 0x22E940 --addr 0x432940 --len 4
->    ./.venv/bin/python3 tools/blobdis.py work/ff_counter.bin --file-off 0x12067C --addr 0x12067C --len 4
->    ```
->
->    ```
->    00432940  4B D1 D6 C1  bl       0x150000
->    0012067C  48 02 F9 A5  bl       0x150020
->    ```
->
->    against the stock word at the same place, `4B C8 B0 A5  bl 0xbd9e4`
->    (`tools/blobdis.py data/passat_azx_ori.bin --file-off 0x22E940 --addr
->    0x432940 --len 4`). If the on-chip word reads the stock bytes back, KESS
->    skipped the array — and because set A is the live set
->    (`re/findings/scheduler.md` §11.8), **no build of this patch can then
->    produce a moving counter**: there is no external-flash alternative to move
->    the hook to (`flash_programming.md` §7.3).
-> 2. **The read-out step gains a byte.** The RAM block is now `ff_ticks` (u32,
->    `PATCH_RAM+0x00`), `ff_alive` (u16, +0x04) and **`ff_src_seen` (u8,
->    +0x06): 1 = set A ran, 2 = set B, 3 = both** — with the counter then
->    rising at 200/s. It is re-derived from scratch at every cold start, so it
->    cannot survive a power cycle stale. `logging/sessions/flash1_counter.json`
->    logs all three.
-> 3. **The bench-day decision table is `patches/ff_counter/test/procedure.md`
->    §4**, rows A-I: the stock raster counters (§3a), the on-chip read-back
->    (§3b) and the slope plus `ff_src_seen` (§3c) together pick one row, and
->    the row says what has been proved and which issue to write it into. Row D
->    is "KESS skipped the on-chip array"; row A upgrades §11.8 to
->    VERIFIED-DYNAMIC and settles the on-chip half of #32. §4.5 says when the
->    `make HOOKS=external` build (the pre-F1 patch, byte for byte) is worth
->    building: **only** if set B turns out to be live and the on-chip array
->    cannot be written.
-3. Then `patches/ff_fuel`: `patches/ff_fuel/test/procedure.md` §§2-6, then
-   `procedure_d2.md`, then `procedure_e1.md` / `_e2.md` / `_e5.md` for whichever
-   feature you enable. **One feature at a time** (docs/01 §3 principle 5): every
-   feature ships with its `ff_*_enable` byte at 0, and turning one on is a
-   calibration change (chapter 1) to FFCAL001, not a rebuild.
-4. Log the same scenario as the baseline (chapter 4) and compare (chapter 5).
+   | Site | Where | Old → new | Task |
+   |---|---|---|---|
+   | **0x432940** | **on-chip flash** 0x404000-0x47FFFF | `4B C8 B0 A5` → `4B D1 D6 C1` (`bl 0x150000`) | `task_100ms_int` 0x4328E4, id 19, 10 ms, **task set A** |
+   | 0x12067C | external flash | `4B FF E9 B1` → `48 02 F9 A5` (`bl 0x150020`) | `task_100ms` 0x1205A0, TCB 23, 10 ms, task set B |
 
-> **Drift note, 2026-09-17 (E7):** `patches/ff_fuel/test/procedure.md` §1 still
-> says "two of the three hook words are in the on-chip flash" and lists only
-> 0x42247C and 0x432940. Since E1/E2/E5 the patch has **eight hooks, seven of
-> them on-chip**; the current list is in `patches/ff_fuel/README.md`. Read the
-> README's hook table, not procedure.md §1, when doing the read-back.
->
-> **RESOLVED (2026-09-23, G2, checked against G1):** procedure.md §1 was fixed
-> on 2026-09-17 (6113843). It now lists all seven on-chip words and matches the
-> README's eight-hook table, so either one can be used for the read-back.
+   Three consequences:
+
+   1. **Flash 1 writes the on-chip array**, so it inherits §3.1's on-chip
+      caveat and §3.3's warning, and **§3.3's check 1 — read back
+      0x404000-0x47FFFF and `bindiff` it — is part of Flash 1**. It is the
+      flash that answers the on-chip question. `patch_apply.py` says so itself:
+
+      ```bash
+      ./.venv/bin/python3 tools/patch_apply.py data/passat_azx_ori.bin patches/ff_counter -o work/ff_counter.bin
+      ```
+
+      ```
+      ff_counter: 5 patch range(s) (229 B), 6 descriptor range(s) (16 B), 0 unexpected
+      checksums: ALL OK (65 blocks); identification block unchanged
+      sha256: 3cd20443c068ed009b7d48b32210790eb320cb159489fc36cc1ef1ea67696498
+      WARNING: ff_counter: "ram_status": "static" - the RAM block at 0x007FFB00 is VERIFIED-STATIC only (re/findings/ram.md): no instruction references it, but the runtime snapshots of issue #23 are still pending. Do not flash this image.
+      WARNING: change at 0x432940+0x4 writes the MPC561 on-chip flash (0x404000-0x47FFFF). The block checksums are handled and the firmware's own OBD programming route whitelists the range (re/findings/flash_programming.md), but a KESSv2 write of it has not been demonstrated: read the image back and compare before trusting it.
+      ```
+
+      Per word, out of the read-back:
+
+      ```bash
+      ./.venv/bin/python3 tools/blobdis.py work/readback.bin --file-off 0x22E940 --addr 0x432940 --len 4
+      ./.venv/bin/python3 tools/blobdis.py work/readback.bin --file-off 0x12067C --addr 0x12067C --len 4
+      ```
+
+      What the built image shows, and what the read-back must show:
+
+      ```
+      00432940  4B D1 D6 C1  bl       0x150000
+      0012067C  48 02 F9 A5  bl       0x150020
+      ```
+
+      against the stock word at the same place, `4B C8 B0 A5  bl 0xbd9e4`
+      (`tools/blobdis.py data/passat_azx_ori.bin --file-off 0x22E940 --addr
+      0x432940 --len 4`). If the on-chip word reads the stock bytes back, KESS
+      skipped the array — and because set A is the live set, **no build of
+      this patch can then produce a moving counter**: there is no
+      external-flash alternative for the hook (`flash_programming.md` §7.3).
+   2. **The read-out has three fields.** `ff_ticks` (u32, `PATCH_RAM+0x00`),
+      `ff_alive` (u16, +0x04, `0xFC01` once our code has run) and
+      **`ff_src_seen` (u8, +0x06): 1 = set A ran, 2 = set B, 3 = both** — with
+      the counter then rising at 200/s. All three are re-derived from scratch
+      at every cold start, so none can survive a power cycle stale.
+      `logging/sessions/flash1_counter.json` logs them.
+   3. **The bench-day decision table is `procedure.md` §4**, rows A-I: the
+      stock raster counters (§3a), the on-chip read-back (§3b) and the slope
+      plus `ff_src_seen` (§3c) together pick one row, and the row says what
+      has been proved and which issue to write it into. Row D is "KESS skipped
+      the on-chip array"; row A upgrades §11.8 to VERIFIED-DYNAMIC and settles
+      the on-chip half of #32. `make HOOKS=external` (the single-word set-B
+      patch, byte for byte the pre-F1 build) is worth building **only** if set
+      B turns out to be live and the on-chip array cannot be written (§4.5).
+
+   Read the **five stock raster counters first**
+   (`logging/sessions/wave_b_confirm.json`, `docs/08` step 3c): frozen set-B
+   counters are the prediction, and a frozen counter because the other task
+   set is live looks exactly like a failed flash and is not one.
+4. Then `patches/ff_fuel`: `patches/ff_fuel/test/procedure.md` §1 (the
+   read-back of all seven on-chip words; its list matches the README's
+   eight-hook table row for row) and §§2-6, then `procedure_d2.md`, then
+   `procedure_e1.md` / `_e2.md` / `_e5.md` for whichever feature you enable.
+   **One feature at a time** (docs/01 §3 principle 5): every feature ships
+   with its `ff_*_enable` byte at 0, and turning one on is a calibration
+   change (chapter 1) to FFCAL001, not a rebuild.
+5. Log the same scenario as the baseline (chapter 4) and compare (chapter 5).
 
 ---
 
@@ -758,15 +767,15 @@ session wave_b_confirm: 26 variables, 17 chunks on 0xf0, 56 bytes per sample
 962 rows -> work/sim.csv
 ```
 
-The four session files and the question each answers are tabulated in
-`logging/README.md` §4. The logger merges adjacent variables into one DDLI
+The session files and the question each answers are tabulated in
+`logging/README.md` §4 ("Session files"). The logger merges adjacent variables into one DDLI
 chunk and bridges holes of up to 8 bytes, because the firmware allows only 20
 chunks on dynamic id 0xF0 and 3 on each of 0xF1-0xF9.
 
 ### 4.3 The CSV format
 
 ```
-# session: wave_b_confirm, 2026-09-17T16:31:35+03:00
+# session: wave_b_confirm, 2026-09-24T14:20:33+03:00
 # ecu: 03H906032 / 1037382557
 # dump_sha256: b15590d3f1874ace3125c5d047c09a686db9b8bb498187663539ebab205609b3
 # transport: KWP2000 0x2C/0x21 over TP2.0
@@ -839,30 +848,31 @@ simulated SPI EEPROM behind the block manager (`emu/qspi_eeprom.py`).
 ```
 
 ```
-session ff_fuel: 96 variables, 37 chunks on 0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 157 bytes per sample
-58 samples in 12.20 s (4.8 Hz total, 0.0 Hz per variable)
-5568 rows -> work/rehearsal.csv
+session ff_fuel: 96 variables, 38 chunks on 0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 158 bytes per sample
+92 samples in 20.81 s (4.4 Hz total, 0.0 Hz per variable)
+8832 rows -> work/rehearsal.csv
 ```
 
-All eleven numbered procedure steps, graded:
+Every numbered procedure step, the fault matrix, the persistence restart and
+the PID 0x52 route over 0x7DF, graded:
 
 ```bash
 ./.venv/bin/python3 logging/bench_rehearsal.py --fresh-eeprom
 ```
 
 ```
-  e85          5c the slew limit holds (<= 2 %/s of ECU time)               ok    1.816 %/s
-  fault3       5.3 HOLD is not a FAULT and F is frozen                      ok    faults=0.0 F=1.3291
-  d2_restart   B3 a distinctive E60-E80 value came back (NOT the block id)  ok    e_key=85.0 e_persist=85.0
+  e85          5c the slew limit holds (<= 2 %/s of ECU time)                          ok    1.390 %/s
+  fault3       5.3 HOLD is not a FAULT and F is frozen                                 ok    faults=0.0 F=1.51172
+  d2_restart   B3 a distinctive E60-E80 value came back (NOT the block id)             ok    e_key=85.0 e_persist=85.0
 
-65/69 checks passed
+84/84 checks passed
 every log carries `# simulated: true` and lives in logging/samples/
 ```
 
-**65/69, not 69/69, as of integration/wave-E** — the four failures are a real
-defect in the merged session file, not in the patch. See the drift note in
-§5.4. Re-running this regenerates `logging/samples/ff_fuel_sim_*.csv`; those
-files are checked in only so a reader can see what a passing run looks like.
+(2026-09-24, `main` 4fcff77; about four minutes.) Re-running this regenerates
+`logging/samples/ff_fuel_sim_*.csv`; those files are checked in only so a
+reader can see what a passing run looks like — `git checkout --
+logging/samples/` afterwards unless you mean to update them.
 
 **Wall-clock vs ECU time.** `--seconds` is wall-clock (what the CSV's `time_s`
 holds); `--sim-seconds` is ECU seconds and divides by `--time-scale`. The
@@ -977,30 +987,29 @@ On an rpm ramp that offset alone is worth a third of the `nmot_w` budget in
 `patches/ff_fuel/test/tolerance.json` and says nothing about the software.
 
 Both logs carry the live raster activation counter, which is the ECU's own
-clock at 100/s, so the offset is **measurable rather than guessable**:
+clock at 100/s, so the offset is **measurable rather than guessable**, and
+`logcmp` removes it (brief F2):
+
+```bash
+./.venv/bin/python3 tools/logcmp.py base.csv cand.csv -t tolerance.json \
+        --align-on raster_setA_10ms_count:100
+```
+
+`VAR:RATE` is the counter and its counts per second (100 if left out); the
+shift is
 
 ```
-shift = (raster_cand[0] - raster_base[0]) / 100 - (t_cand[0] - t_base[0])
+shift = (raster_cand[0] - raster_base[0]) / RATE - (t_cand[0] - t_base[0])
 ```
 
-> **Closed 2026-09-22 (brief F2).** This section used to say "`tools/logcmp.py`
-> cannot express this step" and told you to shift the candidate CSV by hand.
-> The tool does it now:
->
-> ```bash
-> ./.venv/bin/python3 tools/logcmp.py base.csv cand.csv -t tolerance.json \
->         --align-on raster_setA_10ms_count:100
-> ```
->
-> `VAR:RATE` is the counter and its counts per second (100 if left out). The
-> shift is printed in the report header (`ALIGN …  candidate shifted by
-> +250.0 ms at 100/s`) and is in the JSON report as `summary.shift_s`;
-> `--align-shift SECONDS` sets it by hand. **A counter missing from either log
-> is an error, exit 2** — silently comparing two unaligned power-ups is the
-> failure the option exists to stop. Use `raster_setA_10ms_count` or
-> `raster_setB_10ms_count` according to what `ff_src_seen` says is live
-> (`patches/ff_counter/test/procedure.md` §4). `logging/bench_rehearsal.py`
-> calls the same function, so the bench and the rehearsal cannot drift apart.
+printed in the report header (`ALIGN …  candidate shifted by +250.0 ms at
+100/s`) and kept in the JSON report as `summary.shift_s`; `--align-shift
+SECONDS` sets it by hand. **A counter missing from either log is an error,
+exit 2** — silently comparing two unaligned power-ups is the failure the
+option exists to stop. Use `raster_setA_10ms_count` or
+`raster_setB_10ms_count` according to what `ff_src_seen` says is live
+(`patches/ff_counter/test/procedure.md` §4). `logging/bench_rehearsal.py`
+calls the same function, so the bench and the rehearsal cannot drift apart.
 
 What it is worth, on the two synthetic runs of `logging/samples/` that differ
 only by a 0.25 s power-up offset (§5.5's recipe, command 3): **five of seven
@@ -1010,23 +1019,10 @@ sensor noise the pair was built with.
 
 And on the E4 rehearsal: running `logcmp` **without** the alignment on two runs
 that differ only by the power-up offset fails three variables (`dwkrz_1`,
-`rk_fuel_mass`, `ti_sum`); **with** the alignment, only `ti_sum` failed — and
-that one was a defect in the session file, not a real deviation:
-
-> **Drift, found by E7 on 2026-09-17, integration/wave-E.**
-> `logging/sessions/ff_fuel.json` declares three variable **names twice**:
-> `dwi_inj_angle` and `prist_w` harmlessly (both copies identical), but
-> **`ti_sum` with two different definitions** — once as 4 bytes × 0.001 ms and
-> once as 2 bytes × 1 us, both at 0x8030C4. The log therefore carries two
-> contradictory series under one name (`n=70` where its neighbours have `n=35`,
-> `max|d| = 1.546e+05` ≈ 157286 − 2400), so `logcmp` can never pass on it. The
-> duplicates entered with E5's commit `e257b39`; the file had 77 variables and
-> no duplicates before it, 96 and three after. That accounts for three of the
-> four `bench_rehearsal.py` failures. The file belongs to the patch briefs, so
-> E7 did not edit it.
-
-**Settled since (checked 2026-09-22, F2):** `logging/sessions/ff_fuel.json`
-holds **93 variables and no duplicate name**, and the rehearsal is 69/69.
+`rk_fuel_mass`, `ti_sum`); **with** the alignment, none. (Until 2026-09-22
+`ti_sum` failed even aligned, because `logging/sessions/ff_fuel.json` declared
+it twice with two different scalings — a session-file defect E7 found and F2
+removed. A session file must declare every name once.)
 
 ### 5.5 Two stock runs → measured tolerances, and the E0 recipe
 
@@ -1034,8 +1030,8 @@ Every `tolerance.json` in this repo says the same thing about itself: its
 limits are a **starting point from the signals' idle behaviour, not from two
 recorded runs**. C1 made that a rule for Flash 1 (#27) and docs/05's "E0
 equivalence" repeats it — record the scenario **twice on the stock image**, and
-tighten every line to what the ECU actually repeats. Until 2026-09-22 no
-command did that step. `derive` does:
+tighten every line to what the ECU actually repeats. `logcmp.py derive` (brief
+F2) does that step:
 
 ```bash
 # 1. two stock runs of the same scenario -> limits that are measured
@@ -1241,14 +1237,9 @@ yet seen on hardware):
 | A file whose `bindiff -p` shows any **unexpected** byte | docs/06 §5 item 2 |
 | A file not derived from **this ECU's own read** | docs/04 §6 item 3; `patch_apply.py` checks `base_sha256` and cannot be overridden |
 | Anything with a changed identification block 0x1CEE20-0x1CEE6F | docs/04 §6 item 3; no flag unlocks it |
-| A patch whose `"ram_status"` is not `"verified"` | both current patches — issue #23's runtime snapshots are outstanding |
+| **Anything at all — Flash 0 included — before issue #23's runtime RAM snapshots are in** (`docs/08` step 4 before step 5) | ruling, Carlo, 2026-09-24: the rule is "snapshots first", not "patches only". Both current patches show it as `"ram_status": "static"`; Flash 0 carries no patch RAM and is gated all the same |
 | Any image, to the **car**, that has not run on the bench spare | docs/01 §3 principle 2 |
 | Anything that disables the ROM check, immobiliser pairing or component protection | docs/04 §6, closing line. Find the actual cause instead |
-
-> **Ruling 2026-09-24 (Carlo, at wave-H planning).** The `ram_status` row is the
-> **strict rule**: no write of any kind — **Flash 0 included** — before issue #23's
-> runtime RAM snapshots are in (`docs/08` step 4 comes before step 5). Flash 0
-> carries no patch RAM, but the rule is "snapshots first", not "patches only".
 
 ---
 
