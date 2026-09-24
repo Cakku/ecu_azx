@@ -594,3 +594,115 @@ no on-chip write (§7, note).
 (`ram_status` from step 4), Flash 0's proof of the route (step 5), and step
 3c's stock counters. Without the counters, a frozen `ff_ticks` has two
 explanations instead of one (procedure §0).
+
+---
+
+## Step 7 — Where it goes next (pointers only)
+
+Each item is its own procedure. Only the order and the gates are given here.
+
+1. **`ff_fuel`, its first flash and E0 equivalence (#32).** Build it with
+   **`ff_persist_enable=0`** until G7 is merged (S12; `procedure_d2.md` §B4 has
+   the command). Before that, settle `procedure.md` §0's last HYPOTHESIS with
+   `logging/sessions/can_bc_check.json`: TouCAN C must share the wire with B, or
+   the Pico is on the wrong pair. Then `patches/ff_fuel/test/procedure.md` §1
+   (read back **all seven** on-chip words; the list is in §1 and the
+   README's hook table), §2-§3, and §4 (E0 equivalence against step 3d's
+   baseline). If Flash 1 came out row D, this item cannot run at all
+   (`flash_programming.md` §7.3).
+2. **The fault matrix (#37):** `procedure.md` §5. Settle before you trip
+   (`docs/07` §5.6).
+3. **Measuring block 111 (#39):** `procedure_d2.md` Part A. **Part B, the E%
+   store (#38), waits for G7** (S12).
+4. **OBD PID 0x52 (#39, optional half; brief G1, merged).** The seven
+   stock-instruction edits are in every `ff_fuel` image and are run-time gated:
+   with `ff_pid52_enable` = 0 mode 01 is observably stock
+   (`patches/ff_fuel/README.md` "Stock-instruction edits (PID 0x52)" and "What a
+   tester sees"; `re/findings/obd.md` §9). Bench check: set `ff_pid52_enable` =
+   1, which is a calibration change (`docs/07` chapter 1, §2.4), **disconnect and
+   reconnect the generic scan tool**, and then `01 40` shows bit 0x40 of its
+   third byte and `01 52` answers `41 52 A`, E% = A × 100 / 255. The reconnect
+   is needed because the support bitmap is rebuilt once per new diagnostic
+   connection (`obd.md` §10.3, G3). The 0x7DF/0x7E8 transport itself has never
+   been exercised, so it is a bench item (README, same section).
+5. **One feature at a time (S11):** the ignition blend `procedure_e1.md`
+   (#34), then start enrichment `procedure_e2.md` (#35), then the rail adder
+   `procedure_e5.md` (#36). Each one is an `ff_*_enable` byte flipped in
+   FFCAL001, not a rebuild (`docs/07` §3.4 item 3). Log, then compare
+   (chapters 4-5).
+6. **#28, the car's ECU:** Flash 0 and Flash 1 again, with the BDM backup of the
+   *car's* unit in `data/backup_bdm/MANIFEST` (S4) and only files that ran on
+   the spare (S10). #28's exit criterion: no DTCs, adaptation values unchanged,
+   counter visible over OBD.
+
+Before each of 1-5, the simulator rehearsal of `docs/07` §4.5
+(`logging/bench_rehearsal.py --fresh-eeprom`) runs all eleven numbered steps
+of `ff_fuel.json` against the patch [Mac]. See the note at the end for today's
+result.
+
+---
+
+## Which issue closes when
+
+| Step | Issue | Exit criterion (from the issue) | Closed by |
+|---|---|---|---|
+| 1 + 2b + 2c | **#3** bench harness | ECU answers TesterPresent over TP2.0 on the bench; Pico frames visible in SavvyCAN | `probe --bus` answers (2b) and 0x0EC at 10 Hz (2c) |
+| 2d, 3b | **#20** logger (VCDS row) | logs nmot/rl/ti/lambda on the bench ECU and in the car via OBD at ~40 samples/s; a RequestUpload snapshot works | 3b in the car (`groups` vs VCDS) plus 4b (`dump`). T_bg (2d, 3c) is #20's G3 bench number |
+| 3c | **#44** wave-B confirmations | every row has a logged value that matches, or a recorded correction | the table in 3c, row by row; the live-set row also closes by Flash 1 row A |
+| 4 | **#23** RAM survey | block unreferenced statically **and** unchanged across dumps at idle, driving and key-off/on | the six snapshots pass `ram.md` §9 → `ram_status: verified` |
+| 5 | **#26** Flash 0 | runs the re-saved file; read-back = written; TesterPresent works; no DTC beyond bench faults | 5b items 1-5 and 5c |
+| 6 | **#27** Flash 1 | the counter increments at the task rate; the log comparison shows no other change | row A plus procedure §5 exit 0 |
+| 6 (row A) | **#32** on-chip half | KESS writes 0x404000-0x47FFFF | Flash 1 row A; row D sends it to §7.3's ladder |
+| 7.1 | **#32** acceptance | E0 equivalence of `ff_fuel` | `procedure.md` §4 |
+| 7.2 | #37 | fault matrix | `procedure.md` §5 |
+| 7.3-7.4 | #39 (#38 after G7) | block 111 / PID 0x52 / E% across power loss | `procedure_d2.md`; README "What a tester sees" |
+| 7.5 | #34 / #35 / #36 | per feature | `procedure_e1/e2/e5.md` |
+| 7.6 | **#28** | car runs normally; no DTCs; adaptation unchanged; counter visible via OBD | Flash 0 + Flash 1 on the car, BDM backup in hand |
+
+Nothing on this list is ticked by desk work. The issue is closed by the human,
+from the log.
+
+## The day in one picture
+
+```
+[Mac]  docs/07 §0.3 check; every [Mac] rehearsal above
+  |
+1  bring-up (mule is fine)  ->  2  probe --bus, Pico frames      => #3
+  |
+2d flash CRC = 0x5562139F?  --no-->  S2: a mule; get the spare
+  | yes (SW 1037382557)
+3  #44 reads (mostly car, read-only) + two stock baselines + EEPROM blocks 10, 8
+4  six RAM snapshots -> ram_snapshot_diff --free 64 -> ram_status: verified   => #23
+  |                                                    (S3 lifted)
+   BDM backup of this unit in MANIFEST?  --no-->  S4: stop
+  | yes
+5  Flash 0 -> read back -> bindiff 0 ranges, 5A5A, block 10, CRC 0x5562139F   => #26
+6  Flash 1 -> read back 0x432940 -> 3a/3b/3c -> row A..I -> CRC 0x06C08AD4    => #27 (+#44, #32 on row A)
+  |
+7  ff_fuel (persist off until G7) -> E0 (#32) -> faults (#37) -> 111/0x52 (#39) -> E1, E2, E5 -> #28 on the car
+```
+
+## Open questions this ordering could not settle
+
+1. **The Flash 0 on-chip read-back cannot distinguish "written" from "stock".**
+   The file is the stock image. `patches/ff_counter/test/procedure.md` §3b and
+   row D/E speak of "the Flash 0 on-chip read-back". This playbook takes that
+   input from Flash 1's read-back of 0x432940 instead (5b item 2, 6b), which
+   `docs/07` §3.4's note already requires. The owner of `procedure.md` may want
+   §3b reworded.
+2. **No session file logs the background-loop counter 0x7FD70C** (`boot.md`
+   §6.8(e) item 2, `re/symbols.csv`). `flash_crc.json` logs the cursor, which
+   stops at the publish, so an idle T_bg read works only while the CRC is still
+   running. G5 owns `flash_crc.json`.
+3. **Measuring id 43 (`lamsbg_w` 0x80304A)** is in no stock group and no session
+   file, so G4's "should read 1.000" has no ready command.
+4. **The engine-running scenarios on a bench spare.** `ff_counter` procedure §3
+   (idle plus load step) and `ff_fuel` procedure §4 assume a warm, running
+   engine. A bench ECU without crank or cam stays "engine not running"
+   (`hardware_prep.md` §3.5). Neither procedure says whether the Flash 1 slope
+   and the regression of §5 are to be taken engine-off on the bench (procedure
+   §2 check 4 says the counter runs with KL15 only) with the engine-running
+   comparison deferred to #28. Decide before the baselines of step 3d are
+   recorded.
+5. `logging/README.md` §3b says a snapshot is 1,032 TransferData blocks, and
+   `ram.md` §9 says 1,031. It does not matter for the procedure.
