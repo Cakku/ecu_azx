@@ -573,7 +573,7 @@ Named in `re/symbols.csv` from this window: index 17 `psg_ident_init`
 (0x12DDFC), 18 `nvm_set_sync_mode`, 24 `nvm_set_normal_mode`, 26
 `imo_state_init` (0x0B4BA0), 30 `dtc_freeze_init` (0x134124), 31
 `dtc_mem_init` (0x132384), 32 `dtc_readiness_init` (0x134250), 38
-`kwp_tp_buf_init` (0x12F138), 39 `kwp_chan_init` (0x12EC00), 71
+`kwp_tp_buf_init` (0x12F138), 39 `kwp_chan_init` (0x12EC00) *[`dfp_init` in `re/symbols.csv` since G5 — the fault-memory manager's start-up, not a KWP channel init; H4, 2026-09-24]*, 71
 `kwp_sec_init` (0x036AB8), 72 `ddli_init` (already named by E4), 75
 `flash_crc_init` (0x12E2D8), 76/77 `prog_state_init` (0x12E4C0 / 0x12E3F4).
 The remaining entries are anonymous per-module `init` functions of the
@@ -605,7 +605,8 @@ right in spirit and wrong in three details, all **VERIFIED-STATIC**:
    a post-`27 01` state, not a post-power-on one. `kwp.md` §12.6 assumed "the
    application sets them"; it is the *seed handler* that does.
 2. **SETTLED (2026-09-22, F3).** The simulator calls indices 18 and 24 and
-   `nvm_mode` reads 1. **`nvm_mode` (0x7FCD68) is 1 after start-up, not 0.** Index 18
+   `nvm_mode` reads 1. **`nvm_mode` (0x7FCD68) is 1 after start-up, not 0.**
+   *[`nvm_mode` = `nvm_sync_mode` in `re/symbols.csv`; H4, 2026-09-24]* Index 18
    (`nvm_set_sync_mode`, writes 2) and index 24 (`nvm_set_normal_mode`,
    writes 1) are *both* called, in that order, so the manager comes up in
    **normal (asynchronous) mode**. `eeprom.md` §9 item 3 left the trigger of
@@ -689,7 +690,7 @@ index order. Running them, rather than reading them, settled three things
 
 | idx | entry | after the call |
 |---|---|---|
-| 18, 24 | `nvm_set_sync_mode`, `nvm_set_normal_mode` | `nvm_mode` 0x7FCD68 = **1** |
+| 18, 24 | `nvm_set_sync_mode`, `nvm_set_normal_mode` | `nvm_mode` 0x7FCD68 = **1** *(`nvm_sync_mode` in `re/symbols.csv`; H4, 2026-09-24)* |
 | 38 | `kwp_tp_buf_init` | 0x8037E4 = 0x7F8892, 0x8037E8 = 0x7F8893, 0x8037EC = 0x7F889A, 0x8038D4 = 0x7F88AC |
 | 71 | `kwp_sec_init` | 0x7FB781 = 0, 0x7FB780 = 0, 0x7FB770 = **0**, 0x7FB748 = 0 |
 | 72 | `ddli_init` | 0x80403C = 0x80366C, then 0x80370C + 0x18·n |
@@ -736,7 +737,8 @@ the EEPROM", because index 71 loads 0x7FB748 from the mirror halfword
   `os_start`, which walks the init table (§6.2). So index 71 runs on a
   just-cleared cell.
 * the EEPROM start-up block read is **not** in the init table:
-  `nvm_read_all_blocks` (0x06227C) has one reference, the `addi` at 0x06259C
+  `nvm_read_all_blocks` (0x06227C) *[0x06227C is `nvm_read_all_blocks_entry` in
+  `re/symbols.csv`; `nvm_read_all_blocks` is its `stwu` at 0x062280; H4, 2026-09-24]* has one reference, the `addi` at 0x06259C
   inside 0x061BF4, and `tools/sda_xref.py --code 0x061BF4` gives two callers,
   **0x120FB8** (set B) and **0x45CD48** (set A) — task bodies, i.e. *after*
   `os_start`.

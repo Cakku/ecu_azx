@@ -504,6 +504,7 @@ diagnostic layer, run from the 10 ms task.
 ### 10.1 `kwp_service_h2_walk` 0x13ECB0 calls every entry's +0xC
 
 The config-struct pointer 0x803DDC (`= 0x2BA50`, stored by `kwp_register_table`
+*[= `kwp_service_config_set` in `re/symbols.csv`, the name to use; H4, 2026-09-24]*
 0x13E974 from 0x13C9FC) has four readers; the one outside the dispatcher is
 
 ```

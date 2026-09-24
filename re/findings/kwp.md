@@ -614,7 +614,9 @@ is corrected accordingly below.
 ### 12.3 `21 <group>` returns TWO groups: G and G+0x7F — addition to §6
 
 `kwp21_group_read` (0x3583C) is the group path. It stores the requested group
-in `mw_group_requested` (0x7FD05E), calls the four-field reader `0x35748`, then
+in `mw_group_requested` (0x7FD05E),
+*[names in `re/symbols.csv`: `kwp21_group_request` 0x03583C and
+`measuring_group_req` 0x7FD05E — use those; H4, 2026-09-24]* calls the four-field reader `0x35748`, then
 does
 
 ```

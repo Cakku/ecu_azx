@@ -278,7 +278,7 @@ loop. VERIFIED-STATIC.
 > `0x7FD32C` that this section consumes is **`FUN_00458E74` (0x458E74),
 > `%ZWMIN`**. It searches its own 16-point speed axis 0x5C7A36 (key 0x7FD5F4)
 > and reads five 16 × 12 s8 maps with that key and the shared `rl` key
-> 0x7FD84C: 0x5D5BCB (default, `cand_KFZWMN`), 0x5D5C8B (`cand_KFZWMNUM`),
+> 0x7FD84C: 0x5D5BCB (default, `cand_KFZWMN`), 0x5D5C8B (`cand_KFZWMNUM` *[`cand_KFZWMNKH` since G4, `re/symbols.csv` / `calibration_names.md` §11.4; H4, 2026-09-24]*),
 > 0x5D5D4B (`cand_KFZWMNST` — the branch that otherwise takes `zwstt`),
 > 0x5D5E0B (`cand_KFZWMS`) and 0x5C7973 (`cand_KFZWMNLB`, all −24.75 degCA,
 > on the same `0x40` bit this table already lists). Full account and the
