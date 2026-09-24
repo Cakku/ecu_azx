@@ -807,7 +807,7 @@ recorded here so the checklist does not become the only place they live.
 
 | id | RAM | fmt / A | what this pass established about it |
 |---|---|---|---|
-| **130** | 0x80223B | 0x36 / 0 | the **operating-mode index**, 0..7. It has its own calibration axis (`axis_opmode_5C887B` 0x5C887B = 0..7) and exactly one writer, 0x45C064; four charge thresholds are maps over it. VCDS groups 051.3 / 068.3. Which value is which combustion mode is still open |
+| **130** | 0x80223B | 0x36 / 0 | **CORRECTED 2026-09-23 (G4, §10): the gear `gangi`.** The **operating-mode index**, 0..7. It has its own calibration axis (`axis_opmode_5C887B` 0x5C887B = 0..7) and exactly one writer, 0x45C064; four charge thresholds are maps over it. VCDS groups 051.3 / 068.3. Which value is which combustion mode is still open |
 | 320 | 0x802CDE | 0x1F / 0xA0 | the **commanded** lambda of bank 1 — `lam_ist_from_rk` 0x43E164 computes it from `rk` itself, so it is what the ECU asked for, not what the sensor saw |
 | 45 | 0x802BEA | 0x1F / 0x14 | the sensor-side lambda the controller subtracts (0x802E0C is the conditioned copy, id 651) |
 | 29 / 28 | 0x802DF8 / 0x802E00 | 0x14 / 0x32 | `fr_w` per bank, the PI controller output `lam_controller` 0x440A3C writes. Logging 320 and 29 together separates "the request moved" from "the loop is correcting" |
@@ -820,3 +820,21 @@ formula 0x05 **saturates at 143 °C**, so a component-temperature check must
 use DDLI on the RAM cell instead; and formula 0x21's `A` is a tester-side
 normalisation, so a VCDS charge reading is about 3.8 % below the value the
 ECU's own maps use.
+
+## 10. Measuring variables the pass-4 naming settled (G4, 2026-09-23, #41)
+
+Brief G4 took **no** measuring id and changed nothing in
+`re/measuring_vars.csv`; as F4 did, it used the handlers as a scaling oracle.
+Details in `calibration_names.md` §11.
+
+| id | RAM | fmt / A | what this pass established about it |
+|---|---|---|---|
+| **85** | 0x8021CC | 0x05 / 0x0A | the linearised **intake-air temperature** `tans` (unfiltered). Handler 0x039C20 is instruction for instruction the `tmot` handler 0x039BA4 of §7.1, so 0.75 °C/LSB − 48 is VERIFIED-STATIC; groups **004.4 / 006.3 / 011.3** are the public VAG intake-air slots (COMMUNITY). The filtered copy 0x7FD3E5 is not a measuring variable |
+| **130** | 0x80223B | 0x36 / 0 | **CORRECTED: the engaged gear `gangi`** (FR `%BBGANG`: 0 none, 1 … 6 from the n/v windows, 7 reverse), not an operating-mode index as §9 above says. Writer `FUN_0045BD00` at 0x45C064 |
+| 171 | 0x80315C | 0x14 / 0x18 | **`rkte_w`, the purge (canister) fuel** that `gk_rk` subtracts from `rk` — not a diagnostic term. Log it during purge on E85 |
+| 43 / 1001 | 0x80304A | 0x1F / 0x14, 0x28 | HYPOTHESIS: **the lambda setpoint `lamsbg_w`** that `gk_rk` divides the fuel mass by (4096 = 1.0). Formula 0x1F is the lambda formula id 45 and id 320 above use too |
+
+> **§9, row 130 — CORRECTED (2026-09-23, G4, calibration_names.md §11.7).**
+> 0x80223B is the gear, not "the operating-mode index"; the "which value is
+> which combustion mode" question does not exist. Everything else in the row
+> (one writer, the 0..7 axis, groups 051.3 / 068.3) stands.

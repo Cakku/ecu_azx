@@ -80,7 +80,7 @@ done
 
 | Read-back | Meaning |
 |---|---|
-| all seven are `bl` into 0x152000-0x1538FF (the blob) | KESS writes the on-chip flash; every feature's hook is live |
+| all seven are `bl` into the blob (0x152000 + `build.blob_size` of `patch.json`; every hook target is in its first 0x140 bytes) | KESS writes the on-chip flash; every feature's hook is live |
 | all seven unchanged | KESS wrote only the external flash. The patch is then **inert on every fuel, ignition, start and rail path** — the set-B raster hook at 0x12067C still runs and still fills the state block, so §2 and §3 still work as a receive test, but nothing is scaled. Record it and reopen #32 with the fallback table of `flash_programming.md` §7.3 |
 | some changed, some not | stop; that is a partial write and the image is not what either tool thinks it is |
 
@@ -89,6 +89,28 @@ file 0x1E2500 holds `5A 5A 5A 5A` in the file you flash (`flash_programming.md`
 §7.2). The stock word of 0x45845C above is quoted from E5's disassembly; the
 others from D1/E1/E2 — `tools/blobdis.py data/passat_azx_ori.bin --file-off …`
 re-reads any of them.
+
+> **Checked against the README hook table, 2026-09-23 (brief G1).** The
+> integrator routed the drift note of `docs/07_workflow.md` §3 ("§1 still says
+> *two of the three hook words are in the on-chip flash* and lists only
+> 0x42247C and 0x432940") to G1. That wording is **no longer in this file**: it
+> was replaced on 2026-09-17 (the header note above, commit 6113843), and the
+> list above now matches `patches/ff_fuel/README.md` "The eight hook sites"
+> row for row — **eight** hook words, **seven** on-chip (0x42247C, 0x432940,
+> 0x41D40C, 0x41A680, 0x41A808, 0x431384, 0x45845C), the one external hook
+> 0x12067C; every stock word and every file offset (CPU − 0x204000) above was
+> re-read from `data/passat_azx_ori.bin` and agrees. Two things were stale and
+> are corrected here: the blob range in the outcome table (it quoted
+> 0x1538FF; the blob has grown since, so the row now points at `patch.json`),
+> and the read-back has **more than hook words** to confirm since G1. G1 adds
+> **no** hook word; it adds seven stock-instruction edits in the *external*
+> flash (0x05CCF4, 0x05CD0C, 0x05CD40, 0x05CD5C, 0x05CFD4, 0x05CFE4,
+> 0x05D010), the class byte 0x0A3A06 and the 24-byte OBD list at
+> 0x160000 / 0x169FF0 / 0x16FFF0 (README "Stock-instruction edits (PID
+> 0x52)"). None is on-chip, so none of them answers the on-chip question;
+> `bindiff` above already checks every one of them against `patch.json`, and
+> exit 0 is the pass. The `docs/07` drift note itself is outside
+> `patches/ff_fuel` and is left for its owner.
 
 Roll back by writing `data/passat_azx_ori.bin`
 (`b15590d3f1874ace3125c5d047c09a686db9b8bb498187663539ebab205609b3`).

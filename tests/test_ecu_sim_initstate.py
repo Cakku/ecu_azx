@@ -291,6 +291,30 @@ class TestFlashCrcTask(DumpUnchanged):
     def test_the_activation_count_is_the_documented_one(self):
         self.assertEqual(self.h.flash_crc.activations, 24627)
 
+    def test_it_publishes_in_background_loop_4926(self):
+        """G3's period (boot.md 6.8): five activations per loop of task 0."""
+        c = self.h.flash_crc
+        self.assertEqual(c.published_loop, 4926)
+        self.assertEqual(c.loops, 4926)
+        self.assertEqual(c.loop_counter, 4926,
+                         "0x7FD70C counts background loops")
+        self.assertAlmostEqual(c.bg_loop_s, 0.050)
+        self.assertAlmostEqual(c.publish_s, 4926 * 0.050, places=6)
+        self.assertAlmostEqual(c.sim_t, c.publish_s, places=6)
+
+    def test_a_warm_start_is_exactly_what_the_cold_run_left(self):
+        """flash_crc.json item 1: state 7 and nothing moves."""
+        cells = {0x7FB6F4: 1, 0x7FB6F5: 1, 0x7FB6F6: 2, 0x7FB6F8: 4,
+                 0x7FB6FC: 4, 0x7FB700: 4, 0x7F9176: 1, 0x7F9178: 4,
+                 0x801200: 1}
+        warm = handlers(flash_crc_warm=True)
+        for addr, size in cells.items():
+            with self.subTest(addr=hex(addr)):
+                self.assertEqual(warm.emu.read(addr, size),
+                                 self.h.emu.read(addr, size))
+        self.assertTrue(warm.flash_crc.done)
+        self.assertEqual(warm.flash_crc.crc, STOCK_CRC)
+
     def test_the_harness_edit_inside_the_hashed_range_is_hidden(self):
         """emu/time_base.py rewrites 0x47846C, inside range 1."""
         shadow = self.h.flash_crc.shadow

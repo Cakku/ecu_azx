@@ -34,9 +34,9 @@
 
 struct ff_state ff_state __attribute__((section(".bss.patch_state")));
 
-_Static_assert(sizeof(struct ff_state) == 0x4C,
-               "the state block layout in ff_state.h and README.md is 76 bytes"
-               " since brief E5 (#36) grew E2's second core");
+_Static_assert(sizeof(struct ff_state) == 0x50,
+               "the state block layout in ff_state.h and README.md is 80 bytes"
+               " since brief G1 (#39) appended the OBD PID 0x52 record");
 _Static_assert(FF_LENGTH % 4u == 0u,
                "ff_state_init() clears the block a WORD at a time, so the"
                " length has to be a multiple of four");
@@ -166,6 +166,12 @@ static void ff_state_init(void)
  * file ships.  It writes only the five core-2 fields, so the checksum below
  * covers them.
  *
+ * G1 (#39): `ff_obd_update()` is here because the PID 0x52 record it writes
+ * has to follow `e_filt` and `ff_pid52_enable` on EVERY path, the mode-0 and
+ * foreign-hook returns included -- otherwise a disabled feature could leave a
+ * `valid` byte of 1 behind.  It writes only +0x4C..+0x4F, the end of core 2,
+ * so the checksum below covers it.
+ *
  * E2 (#35): `ff_start_update()` is here for the same reason and carries BOTH
  * #37 rules at once - its fuel half follows `e_filt` (so it inherits the hold
  * and the decay) and its ignition half drops to 0 on the activation the mode
@@ -177,6 +183,7 @@ static void ff_finish(void)
     ff_zw_update();
     ff_start_update();
     ff_rail_update();
+    ff_obd_update();
     ff_diag_publish();
     ff_state.csum = ff_core_csum();
 }

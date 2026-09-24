@@ -4,7 +4,7 @@ Self-contained task briefs for autonomous (Opus-class) sub-agents. Each brief
 maps to one or more GitHub issues, states prerequisites, deliverables and
 acceptance criteria, and assumes the rules in `00_common_rules.md`.
 
-## Status (2026-09-16, updated 2026-09-17)
+## Status (2026-09-16, updated 2026-09-17; wave G done 2026-09-24 — see its section)
 
 Waves A and B are merged into `main` (647efe6). Phase 1 (static RE) is
 closed: 13/13 issues. Phase 0 is blocked on hardware (#1-#4); Phase 2 has
@@ -358,7 +358,7 @@ commands, review before running):
    (Phase 1 13/13 closed; 4/2, 4/2, 4/1, 5/0, 7/0, 3/0 for the others), and
    no issue is wrongly open or closed.
 
-## Wave G — planned 2026-09-23: finish the OBD diagnostic, close the last desk facts, and hand the human a bench-day playbook
+## Wave G — done on `integration/wave-G` (2026-09-24): finish the OBD diagnostic, close the last desk facts, and hand the human a bench-day playbook
 
 Wave F merged into `main` (a264682, 2026-09-23). Wave G is the desk work still
 worth doing before an ECU exists — it is deliberately the *last* desk wave: once
@@ -384,6 +384,7 @@ blocks)`, dump SHA-256 unchanged.
 | 2 | [G2 Documentation consistency](G2_docs_consistency.md) | doc debt of #34/#38/#41 | — | `re/findings/ignition.md`, `docs/05` §3.4/§3.7, `docs/06`, non-flashing `docs/07`. **Does not touch `calibration_names.*`, `rail.md`, `patches/ff_fuel/**`, `boot.md`, `logging/`** |
 | 3 | [G5 Simulator fidelity round 3](G5_simulator_fidelity_pass3.md) | #20, #22 prep, #37 rehearsal | **G3 merged** (for the CRC period) | `logging/ecu_sim.py`, `logging/bench_rehearsal.py`, `emu/` (additive), `logging/sessions/flash_crc.json`, `tests/test_ecu_sim_*` |
 | 3 (filler) | [G6 Bench-day playbook](G6_bench_day_playbook.md) | #20 #23 #26 #27 #44 desk half | — | new `docs/08_bench_playbook.md`, `docs/README.md` row, one dated note in `docs/07` §3 |
+| follow-up (found during the wave) | [G7 Move the E% store off the adaptation-channel bytes](G7_persist_offset_off_channels.md) | #38 | **G2 and G5 merged** | `patches/ff_fuel/**`, `emu/models/flexfuel.py`, `tests/test_ff_*`, `logging/sessions/ff_fuel.json`, `re/findings/eeprom.md` §4/§5/§9/§10.5, docs/05 §3.8 SETTLED mark. **The only brief after G1 in `patches/ff_fuel`** |
 
 Why this order and split. **G1 first in pair 1** because it is the only feature
 work and it owns `patches/ff_fuel` alone (the "one patch grows" rule); it takes
@@ -435,6 +436,65 @@ list; do not close any issue — every remaining item keeps a bench half):
 5. Milestone descriptions: add a 2026-09-23 line noting wave F merged and wave G
    planned. Counts unchanged; no issue wrongly open or closed.
 
+**Wave-G integration note, integrator (2026-09-24).** G2's block-8 finding was
+confirmed from the dump and graded (docs/05 §3.8, note of 2026-09-24: channel 1
+is clamped to 0/0, so the collision is benign for the engine; the exposure is a
+workshop channel-0 reset zeroing the stored E %). Brief **G7** (row above) moves
+the store to +19 after G5 makes the rehearsal read the offset from FFCAL001.
+
+**Wave-G integration notes, G2 (2026-09-23).**
+* *procedure.md §1 hook-count drift* (G2 item 3): **already closed**. Fixed
+  2026-09-17 (6113843); G1 confirmed it matches the README's eight-hook table
+  and left a dated note. `docs/07` §3.4's E7 drift note is marked resolved.
+* *For the integrator's follow-up brief (layout VERIFIED-STATIC, consequences
+  HYPOTHESIS):* `adaptation_restore_all` 0x12E3F8 restores channel *k* from
+  block 8 payload +(k+1), with descriptor bytes 0x0A3AD8/9 = 08 02. So
+  `ff_persist_offset` = 2 is **adaptation channel 1's slot**
+  (0x7FD06B), and E4's "free +2..+13" is wrong (+2..+18 are channel slots).
+  Details: `docs/05` §3.8, note of 2026-09-23.
+
+**Wave G — run 2026-09-23/24 on `integration/wave-G` (integrator: Claude; two Opus
+agents at a time; gate per branch = dump SHA, `checksum.py verify`, data/XDF/draft
+untouched vs merge-base, LF-only CSVs, full suite).** Baseline main c96ca65 = 731
+tests. Order actually run: G1 + G4 → G3 (+ G4 still running) → G2 → G5 + G6 → G7
+(follow-up found during the wave) + G5.
+
+| Brief | Result | Gate | Merge |
+|---|---|---|---|
+| G1 | PID 0x52 answered on a B2 list grown 3 → 4 by seven stock-word edits (0x5CCF4/0x5CD0C/0x5CD40/0x5CD5C/0x5CFD4/0x5CFE4/0x5D010) + class byte **0x02** at file 0x0A3A06 (F6's 0x82 was wrong: bit 7 selects the A lists); the 4-entry list lives in blank flash 0x160000 / 0x169FF0 / 0x16FFF0 because **no 0xFF run in the r2 window is free** (obd.md §9.1); run-time gated by FFCAL001 **v5** `ff_pid52_enable` (default 0) through RAM bit 0x80121F/0x40; state block 0x4C → 0x50 (record +0x4C/+0x4D); both emulator proofs + `01 52` over ecu_sim's KWP; rehearsal 69/69 | 763 OK | 7da957a; XDF 8816f68; symbols fix 2759e97 |
+| G4 | 359 → **462** named objects (103 new, 29 corrected); **0x7FD3E5 = `tans`** (intake-air temperature, not a battery voltage), 0x8021D4 `tans` in K; **`KFMIRLINV` = relative charge** 100/4096 %, 0x8015AF = ignition efficiency (200 = 1.0); **0x7FB69A = `bdemod_w`** → four of six `KFPRSOL*` labels re-assigned; **0x80223B = `gangi`** (gear, 7 = reverse), not an operating mode; `FUN_00455C60` = %TEB purge (`rkte_w` 0x80315C); `FUN_001043C8` = %ATM (53 objects); checklist draft 3. **Open (HYPOTHESIS §11.8):** `gk_rk` divides by 0x80304A (`lamsbg_w`?) when 0x7FEA33 is set — a stock enrichment path may exist after all | 737 OK (base c96ca65) | ccc3bca; draft renames + XDF a30af33/5cb36cb (1079 tables, 274 constants); fixes b216a90 |
+| G3 | The "second walker" is **task 0's process list** (set-A background task, re-activates itself); `flash_crc_task` is not a raster: 500 B per background loop, publish after **4,926 loops**, **N = T_bg/5** with **0.51 ms ≤ T_bg ≤ 300.75 ms** (2.5 s … 24.7 min; the old 246 s default ↔ T_bg = 50 ms). 0x0B4E24/0x0B5878 are a runtime-measurement module, not a walker; 0x7FE5A0 is the process cursor (ram.md corrected 7dfbbe0). `obd_pid_support_build` runs from `kwp_service_h2_walk` 0x13ECB0 **once per new diagnostic connection** (10 ms `kwp_conn_cyclic`). Bench read that closes T_bg: DDLI 0x7FB700 / 0x7FD70C | 763 OK | 5dd9f78 |
+| G2 | `zwdelta_load` 0x7FD338 in ignition.md §14 + docs/05 §3.4 shared-advance caveat; adaptation-channel hazard (ch 4/8/10) in docs/05 §3.3; docs/06 §6 on-chip list corrected (seven of eight); docs/07 §3.4 drift note RESOLVED (procedure.md §1 was already fixed 6113843), §2.2/§2.4 v5 notes; three `zwdelta_7FD338_*` symbol rows. **Found: EEP_CONF block 8 payload +2..+18 are the 17 adaptation channels → `ff_persist_offset` = 2 is channel 1's slot** (docs/05 §3.8). Agent stalled twice on infrastructure timeouts after its commits; merged from the branch | OK | fc0cb06 |
+| G6 | `docs/08_bench_playbook.md` (721 lines): bring-up → first contact → #44 → RAM snapshots → Flash 0 → Flash 1 → onward, stop list S1-S14, issue map; every `--sim` command run. Found: **Flash 0 cannot show whether KESS wrote the on-chip array** (file = stock) → column 3b of the Flash 1 decision table comes from Flash 1's own read-back (procedure.md §3b corrected 1504a46); **`ff_persist_enable` ships as 1** (D2 default) → stop line S12 until G7 | 769 OK | c018fcc |
+| G5 | `--flash-crc [T_BG_MS]` runs the CRC as 500 B + one tick of loop counter 0x7FD70C per background loop, publishes in loop 4,926, refuses T_bg outside 0.51-300.75 ms, default 50 ms (HYPOTHESIS); warm-ECU no-op; patched images differ (ff_fuel 0x32AA60C4 / ff_counter 0x06C08AD4 before G7); **KWP `18`/`17`/`14` answered by the firmware's own handlers** over the RAM fault memory (20 × 0x5C at 0x7F8890, kwp.md §12.7); `14 FF 00` **commits block 24** → block 24 excluded as an E% fallback; rehearsal `dtc` + `pid52` steps, **79/79**; `bench_rehearsal.py` reads block/offset from `ffcal001.json`; wall-clock flake fixed; `flash_crc.json` logs `bg_loop_count` | 807 OK | 43a7db1 |
+| G7 | **`ff_persist_offset` 2 → 19** (FFCAL001 stays v5; image SHA `c08a78a6…c317`); +19..+28 proven free by a six-part exclusion set (eeprom.md §5); emulator: restore loop over +19 touches no channel byte, E4's end-to-end path passes at +19, a reset-all zeroes +2 and leaves +19 (15 new tests). **Correction:** on this dataset a tester cannot reach channel 1 or reset channels (access words 0x5CF004/08/0C = 0x40, channel 7 only); the block-8 rewrite path is the stock **reset-all 0x038D64** after a fault clear (flag block 11 +11 bit 0 — who sets it is open). `ff_persist_enable` left at D2's default 1 (human ruling). On its own branch 782 tests / 1 known failure + rehearsal 68/69 (both hard-coded +2, fixed by G5's merge) | 820 OK (merged head) | 029efc4; XDF 00ecd58; docs corrections 097eba7 |
+
+**Integrator's grading of the block-8 collision (2026-09-24, VERIFIED-STATIC):**
+channel 1 (0x7FD06B) is read once, at 0x46B0BC, as the value of `clamp(value, lo,
+hi)` 0x410ACC with `lo`/`hi` = 0x5C608F/0x5C608E = 0/0 — inert on this dataset.
+Exposure: a workshop channel-0 reset + commit (0x83) zeroes the stored E%. Ruling:
+G7 moves the store to +19.
+
+**GitHub after wave G:** pre-wave notes on 15 issues + milestone lines (2026-09-23);
+integration notes on #20 #23 #26 #27 #34 #38 #39 #41 #43 #44; **#41 closed**
+(all exit rows ticked); every other issue keeps a bench row and stays open; no
+milestone closes.
+
+**Open after wave G (desk):** the `lamsbg_w` / 0x7FEA33 enrichment path (G4
+§11.8 — trace the inputs of `eta_coordinator` 0x442C18); `tools/ram_survey.py` /
+`re/ram_map.csv` still label 0x7FE5A0 as a stack-chain word; `flash_crc.json`
+items 6 and docs/07 §3 intro use the old "Flash 0 = ff_fuel" naming; engine-off vs
+engine-running baselines for Flash 1 / ff_fuel §4 (G6 open question 4); whether
+`ff_persist_enable` should default to 0 like every other feature (human ruling).
+Everything else needs the bench (docs/08).
+
+**Merged head `integration/wave-G` 097eba7 (2026-09-24): 820 tests OK (731 on main
+before the wave), `bench_rehearsal.py --fresh-eeprom` 79/79, `ecu_sim.py --self-test`
+PASS, `checksum.py verify` ALL OK (65 blocks), dump SHA-256 unchanged, XDF 1079
+tables / 274 constants / 0 problems. Carlo: review and merge `integration/wave-G`
+into `main`, push; then the stale `agent/*`, `integration/wave-B..G` branches, the
+`/private/tmp/integ_wave*` and `.claude/worktrees/agent-*` worktrees can go.**
+
 ## How to launch one
 
 From Claude Code (Agent tool), one agent per brief, each in its own worktree
@@ -447,7 +507,9 @@ isolation: worktree
 name: G1
 prompt: |
   You are working in a git worktree of /Users/carlo/ecu_azx. First run
-  `git branch -m agent/G1` and `ln -s /Users/carlo/ecu_azx/.venv .venv`, and
+  `git branch -m agent/G1`, `git reset --hard integration/wave-G` (the wave's
+  integration branch, so later pairs build on the merged earlier ones) and
+  `ln -s /Users/carlo/ecu_azx/.venv .venv`, and
   use ./.venv/bin/python3 for every Python command (bare python3 is the
   wrong interpreter). Read docs/agent_briefs/00_common_rules.md, then
   docs/agent_briefs/G1_obd_pid52_implement.md, and execute that brief completely.

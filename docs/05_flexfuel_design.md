@@ -298,6 +298,73 @@ unchanged: one word at 0x42247C, `rk = min((rk * F_q10) >> 10, 0xFFFF)` on RAM
 0x803038, and at F = 1024 the stub takes an early return and **does not write
 `rk` at all** — 20 instructions per injection segment.
 
+#### Hazard, added 2026-09-23 (brief G2, doc debt of #38/#41) — three tester adaptation channels trim the fuel under the flex factor, and a workshop reset moves them
+
+VERIFIED-STATIC by F4. The evidence is in `re/findings/calibration_names.md`
+§10.1 (the channel table, the service, the restore) and the `re/symbols.csv`
+rows `kwp_adaptation_service` 0x038708, `adaptation_restore_all` 0x12E3F8 and
+`adap_ch10_fgru` 0x7FD066. G2 moves the design consequence here; nothing is
+newly derived.
+
+The KWP "Anpassung" service `kwp_adaptation_service` (0x038708) exposes
+**twelve tester-writable channels**. Each is clamped between two calibration
+bytes, committed to **EEP_CONF block 8** (sub-function 0x83) and restored
+from it at every power-up by `adaptation_restore_all` (0x12E3F8). Three of
+them multiply the fuel **upstream of the `rk` hook**, so the flex factor
+`F(E)` multiplies whatever they hold:
+
+| channel | RAM | multiplies | limits → factor | default |
+|---|---|---|---|---|
+| **4** | 0x7FD065 | the running mixture, in `mixture_running_build` 0x419DA4 | 64…141 → **0.50 … 1.10** | 128 = 1.0 |
+| **8** | 0x7FD067 | `ksta`, the start quantity (0x41A5EC, 0x41A780) | 64…141 → **0.50 … 1.10** | 128 = 1.0 |
+| **10** | 0x7FD066 | `fgru_trim`, a factor on `rk` in `gk_rk` | 26…179 → **0.797 … 1.094** | 128 = 1.0 |
+
+(Channel 5, 0x7FD069, 64…141, also feeds the 0x7FD264 mixture factor per the
+same table. F4 did not count it as a fuel trim, and neither does this note.)
+
+**The hazard.** Sub-function 0x82 with channel 0 **restores every channel to
+its default**. A workshop "basic setting" or adaptation reset therefore puts
+all three back to 128 without any warning to the driver. If a flex-fuel
+calibration was trimmed on the wideband with any of them away from 128, the
+reset moves the mixture out from under `F(E)` by up to the table's range
+(−50 % … +10 % on the running mixture). The E85 fuel curve then carries an
+error nobody put into FFCAL001. The reverse also happens: a workshop that
+*sets* a channel (to fix a lean code on petrol, say) changes an E85 tune it
+knows nothing about. For the flex strategy this means:
+
+> **Correction 2026-09-24 (brief G7, `re/findings/eeprom.md` §5; integration).**
+> On *this* dataset the tester cannot do that: the adaptation service's access
+> words at 0x5CF004/08/0C are all 0x40, which admits **channel 7 only** —
+> channel 1 is refused with NRC 0x33 and a channel-0 reset changes **no**
+> channel (VERIFIED-STATIC, `xxd -s 0x1CF004`; emulated). The routine that does
+> rewrite every block-8 channel byte is the stock **reset-all 0x038D64**, called
+> from 0x0D10D0 after a fault clear when block 11 payload +11 bit 0 (mirror
+> 0x7FA02B) is set — who sets that flag is open (a candidate is the raw EEPROM
+> write at 0x087844 in the KWP programming module, i.e. possibly the first boot
+> after a reflash). The fuel-trim hazard therefore comes from *that* path, not
+> from a workshop basic setting, on a stock-coded ECU.
+
+* **Calibrate with all three at 128**, and read them (sub-function 0x81)
+  before trimming `ff_F_curve` on the wideband. Record the values with the
+  calibration.
+* **After any workshop visit, read them again** before blaming the sensor or
+  the curve for a mixture shift. A shift that is the same at every blend
+  points here, not at `F(E)`.
+* They are *not* a flex-fuel lever. The ±10 % upward range is far short of
+  E85's +54 %, and `F(E)` stays the only fuel correction that follows the blend.
+
+> **Caveat (2026-09-23, G2) — HYPOTHESIS, from G4.** F4's §10.2 concluded that
+> there is no stock enrichment on the fuel path and that these channels are
+> "the only stock lever". G4 (`calibration_names.md` §11.8) found that
+> `gk_rk` also divides `rk` by 0x80304A, very probably the lambda setpoint
+> `lamsbg_w` built by `eta_coordinator` 0x442C18, whenever 0x7FEA33 is set.
+> So a stock λ < 1 enrichment path may exist. Whether any calibrated input
+> ever asks for it is **not traced**. Until it is, do not read "no stock
+> enrichment to lean out" as settled in this document.
+
+The persistence side of the same block (the ethanol store shares EEP_CONF
+block 8 with these channels) is in §3.8, note of 2026-09-23.
+
 ### 3.4 Ignition
 Blend factor `f_zw(E)` from a 1D curve (0 at E0, 1 at about E40-50 where
 MBT is usually reached, per prj) applied as
@@ -420,6 +487,23 @@ calibration criterion is readable in one group.
 
 **Still open (the road half of #34):** every cell of `ff_dzw_map` is 0 and only
 a car with real fuel can fill them in. `procedure_e1.md` §B3 is the recipe.
+
+> **2026-09-23 — brief G2 (doc debt of #34): the ethanol advance shares its
+> budget with a stock term.** VERIFIED-STATIC by F4 (`re/findings/calibration_names.md`
+> §10.5). Moved into `re/findings/ignition.md` §14, which has the evidence;
+> nothing here is new. `zwdelta_load` (RAM **0x7FD338**, s8, 0.75 °CA/LSB,
+> written by `FUN_00459334`) is added in `zwbas_per_bank` 0x41D10C at
+> 0x41D120. That is after `zwgru` (and so after `dzw_e`) and before the knock
+> retard and the ZWMIN/ZWOUT clamp. It is `zwdelta_7FD338_weight_map` 0x5D5F81
+> (0 below 47 % charge) × `zwdelta_7FD338_map` 0x5D5FFB (−6.0 … +2.25 °CA over
+> nmot and `tans`) + `zwdelta_7FD338_add_map` 0x5D6075 (−3.75 … +7.5 °CA over
+> `tmot_filt` and rl, **largest cold at load**).
+> The `KFZWOP − KFZW` headroom this section and `procedure_e1.md` §B4 read
+> against `ff_dzw_map` **does not include this term**. On a cold engine at
+> load, part of that headroom is already used before the ethanol offset is
+> added. Calibrate `ff_dzw_map` warm, read the headroom minus the live
+> 0x7FD338 (DDLI, `logging/sessions/tuning_checklist.json`), and keep
+> `dwkrz` / 0x7FD31B & 3 as the acceptance signals through the warm-up too.
 
 ### 3.5 Start and warm-up
 Ethanol needs roughly twice the cranking fuel around 10 C and barely ignites
@@ -745,6 +829,35 @@ only switches the mode.
 > * **The #39 exit criterion does not depend on this.** Measuring block 111
 >   already publishes `E_filt`; PID 0x52 stays the optional half.
 
+> **2026-09-23 — brief G1, issue #39: PID 0x52 is implemented, run-time
+> gated.** The diagnostic is now **measuring block 111 _and_ OBD mode 01 PID
+> 0x52**. Evidence: `re/findings/obd.md` §9; patch side:
+> `patches/ff_fuel/README.md` "Stock-instruction edits (PID 0x52)"; proofs:
+> `tests/test_ff_obd_patch.py` (43 tests).
+>
+> * **What changed in stock.** F6's option 3 on the three-entry **B2** list:
+>   seven instruction words in `obd_pid_support_build` / `obd_pid_read`
+>   (external flash, Bosch block 0x058000-0x05FFFF) point the list at a
+>   relocated four-entry copy, and `tbl_obd_pid_class[0x52]` becomes **0x02**
+>   (a group-B byte; F6's 0x82 was the group-A value of its control).
+>   The list is **not** in calibration: every 0xFF run in the r2 window turned
+>   out to be a live map cell or the segment header (`obd.md` §9.1), so it
+>   sits in the blank flash block 0x160000-0x16FFFF, reached by `lis` /
+>   `addis r2` / `addis r13`, one instruction each. No hook word was added;
+>   the patch still has eight.
+> * **The gate.** `ff_pid52_enable` (FFCAL001 **v5**, +0x14A, 334 B) ships
+>   **0**. The patch writes the record `{A, valid}` at `ff_state` +0x4C every
+>   10 ms, with `A = round(E_filt × 255 / 100 %)` and
+>   `valid = ff_pid52_enable && cal_ok`; the stock builder turns `valid` into
+>   the `01 40` support bit and the stock reader into `41 52 A`. With the byte
+>   at 0 the image is **observably identical to stock on mode 01** (bitmaps
+>   and every PID answer, proven in the emulator against all 41 stock PIDs)
+>   but not byte-identical — the seven words and the list are always there.
+> * Still true: **no DTC is raised**, and measuring block 111 is the primary
+>   display. Open, bench-only: whether the car's scan-tool path reaches
+>   internal session 6 (`obd.md` §8 item 4) and which walker runs the bitmap
+>   builder (§8 item 2).
+
 ### 3.8 Persistence (Phase 5)
 Store `E_filt` in EEPROM via the ECU's own EEPROM block handler or in
 battery-backed RAM if the external SRAM is permanently powered (to be
@@ -889,6 +1002,94 @@ Three things follow:
 * the fix needed no code — one calibration byte — which is the argument for
   having put the block, the offset and the rate limit in FFCAL001 in the first
   place.
+
+#### Hazard, added 2026-09-23 (brief G2, issue #38) — block 8 is also the adaptation-channel block, and payload +2 is channel 1
+
+> **SETTLED (2026-09-24, G7, `re/findings/eeprom.md` §5 note of 2026-09-24;
+> `patches/ff_fuel/README.md` "E% across power loss").** The store moved to
+> block 8 payload **+19** (`ff_persist_offset` 2 → 19, FFCAL001 stays v5: a
+> default value, not a layout change). +19 is the lowest byte of +19..+28 that
+> no stock path writes — exclusion set in `eeprom.md` §5. Consequence (a) was
+> already benign on this dataset by the clamp fact of the integrator note
+> below (0x46B0BC passes channel 1 as the *value* of `clamp` 0x410ACC with
+> `lo` = `hi` = 0); consequence (b) is removed. In the emulator
+> (`tests/test_ff_diag_patch.py::TestPersistOffsetOffTheChannels`): the real
+> `adaptation_restore_all` 0x12E3F8 over a block carrying the E % at +19 moves
+> no channel byte and leaves 0x7FD06B at 0; the stock **reset-all routine
+> 0x038D64** — called from 0x0D10D0 after the fault-clear state machine, no
+> tester and no access check involved — rewrites +2..+18 with the defaults
+> and commits, which **zeroed an E % at +2 and leaves +19 as it was**. The
+> *tester* channel-0 reset turned out to be a smaller risk than (b) assumed
+> on this dataset: the service's three access words 0x5CF004/08/0C are all
+> 0x40 (channel 7 only), so it refuses channel 1 with 0x33 and its channel-0
+> reset changes no channel; with the words opened in the emulator it zeroes
+> +2 and spares +19 as well (`re/findings/eeprom.md` §5, note of
+> 2026-09-24). `ff_persist_enable` keeps its D2 default of 1
+> (it predates the ships-disabled rule; `docs/08` S12 builds the bench image
+> with 0 until the human rules on it).
+
+The fuel side of this hazard is in §3.3, note of 2026-09-23. Here is the
+persistence side. **The layout is VERIFIED-STATIC**: it rests on F4's
+`re/symbols.csv` row for 0x12E3F8 and on the descriptor bytes below, and the
+integrator confirmed the reading on 2026-09-23. **The consequences, (a) and
+(b) below, are HYPOTHESIS**: neither has been run in the emulator.
+
+* F4 (`re/symbols.csv` `adaptation_restore_all` 0x12E3F8; `calibration_names.md`
+  §10.1): at every power-up the loop runs
+  `nvm_block_request(*(u8*)0x0A3AD8, n + *(u8*)0x0A3AD9, 1, 1, PTR[0x0A3ADC + 4n], 0)`
+  for n = 0 … 0x10. The two descriptor bytes are **0x08 0x02**
+  (`xxd -s 0x0A3AD8 -l 4 data/passat_azx_ori.bin` → `0802 0100`), and
+  `PTR[0]` = **0x7FD06B**, adaptation **channel 1**. So channel *k* is block 8
+  payload **+(k + 1)**, and the 17 channel slots cover **+2 … +18**.
+* E4 (above): block 8's default record is
+  `08 01 | 00 80 80 80 80 00 00 80 00 80 80 FF`. From +2 on, these are the
+  channel defaults of §10.1's table in order (ch1 0, ch2-5 128, ch6 unimpl.,
+  ch7 0, ch8 128, ch9 0, ch10 128, ch11 unimpl., ch12 255). The "one stock
+  client at +14" of `eeprom.md` §4 is then channel 13's slot.
+* D2/E4: `ff_persist_offset` = **2**, so the patch stages and commits the
+  ethanol percent to block 8 **+2**.
+
+So E4's "free payload offsets +2..+13" is wrong: +2 … +18 are the 17
+channel slots, and the ethanol store **shares its byte with adaptation
+channel 1** (VERIFIED-STATIC, layout). Channel 1 is
+0x7FD06B, limits 0/0, signed, read at 0x46B0BC, with no known meaning. Two
+consequences to check before a bench flash of `ff_persist_enable` = 1:
+(a) at power-up the stock restore copies the stored E % into 0x7FD06B, a
+cell the calibration pins to 0; what 0x46B0BC does with it is not traced.
+(b) a workshop adaptation reset (sub-function 0x82, channel 0) followed by a
+commit may write 0 to the store. The patch accepts 0 as a valid E0, which is
+the lean direction on an E85 tank. The same pattern as E4's 8 % bug.
+
+**Not fixed here.** It needs `patches/ff_fuel/ffcal001.py` and
+`re/findings/eeprom.md`, which G2 does not own. The check is an emulator run of
+`adaptation_restore_all` against the QSPI device model of `eeprom.md` §10.5,
+and then a choice of an offset outside +2 … +18 (block 8 has +19 … +28 left
+before the manager's +29), or channel-free space in block 24 (Fallback A).
+Filed for the integrator in `docs/agent_briefs/README.md` wave-G notes. The
+integrator decides where `ff_persist_offset` moves, in a follow-up brief.
+
+**Integrator note, 2026-09-24 (after G2, G3 merged) — grading and ruling.**
+Consequence (a) is settled **VERIFIED-STATIC, benign on this dataset**: the
+only reader of 0x7FD06B is 0x46B0BC in the function at 0x46B09C, which passes
+the s8 as the *value* of `clamp(value, lo, hi)` at 0x410ACC (`cmpw r4,r5 / ble;
+cmpw r4,r3 / bge`) with `lo` = s8 0x5C608F = 0 and `hi` = s8 0x5C608E = 0
+(`tools/blobdis.py` over 0x46B040-0x46B1F0 and 0x410ACC; file 0x1C608E holds
+`00 00`), so the result is 0 whatever the restored byte is. Consequence (b)
+stands: a channel-0 reset + commit (sub-function 0x83 commits block 8, F4
+§10.1) zeroes the store, and a tester reading channel 1 sees the E %. **Ruling:**
+the store moves to a payload byte outside +2 … +18 — brief
+`docs/agent_briefs/G7_persist_offset_off_channels.md` (FFCAL001 default
+2 → 19, no layout change; emulator proofs for the restore loop and the
+channel-0 reset; `eeprom.md` §4/§5/§9/§10.5 corrected in place). Until G7 is
+merged, `ff_persist_enable` stays 0 on any bench image.
+
+**Correction 2026-09-24 (after brief G7 merged).** The "channel-0 reset" above
+is not reachable by a tester on this dataset (access words 0x5CF004/08/0C = 0x40,
+channel 7 only); the store at +2 was zeroed in the emulator by the stock
+**reset-all 0x038D64** (after a fault clear, gated by block 11 +11 bit 0). With
+G7's move to **+19** neither path touches the E% byte — proven in
+`tests/test_ff_diag_patch.py` (`TestPersistOffsetOffTheChannels`,
+`TestPersistenceThroughTheDeviceAt19`); exclusion set in `eeprom.md` §5.
 
 ## 4. New calibration data
 

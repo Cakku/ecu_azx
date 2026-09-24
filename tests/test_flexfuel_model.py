@@ -457,11 +457,11 @@ class TestFfcal001(unittest.TestCase):
         with self.assertRaises(ffcal001.CalError):
             ffcal001.build(dict(self.params, ff_dzw_max=ff.DZW_HARD_MAX + 1))
 
-    def test_the_block_is_version_4_and_an_older_block_is_refused(self):
-        """`ff_cal_ok()` accepts the current version ONLY, v1-v3 included."""
-        self.assertEqual(struct.unpack_from(">H", self.blk, 0x08)[0], 4)
-        self.assertEqual(ffcal001.LENGTH, 0x014C)
-        for old in (1, 2, 3):
+    def test_the_block_is_version_5_and_an_older_block_is_refused(self):
+        """`ff_cal_ok()` accepts the current version ONLY, v1-v4 included."""
+        self.assertEqual(struct.unpack_from(">H", self.blk, 0x08)[0], 5)
+        self.assertEqual(ffcal001.LENGTH, 0x014E)
+        for old in (1, 2, 3, 4):
             with self.subTest(version=old):
                 stale = bytearray(self.blk)
                 struct.pack_into(">H", stale, 0x08, old)
@@ -481,6 +481,26 @@ class TestFfcal001(unittest.TestCase):
             self.assertIn(off, set(by_name.values()), f"{off:#x} disappeared")
         self.assertGreater(0xE6, 0xDC + 8, "v2 starts after the last v1 table")
         self.assertEqual(struct.unpack_from(">17H", self.blk, 0x20)[0], 1024)
+
+    def test_v5_appended_and_moved_nothing(self):
+        """G1 (#39): the PID 0x52 gate starts where v4's checksum was."""
+        by_name = {n: off for off, n, *_ in ffcal001.SCALARS}
+        by_name.update({n: off for off, n, *_ in ffcal001.TABLES})
+        self.assertEqual(by_name["ff_pid52_enable"], 0x14A,
+                         "v5 must start where v4's checksum used to be")
+        self.assertEqual(by_name["ff_obd_rsv"], 0x14B)
+        self.assertEqual(ffcal001.CRC_OFF, 0x14C)
+        self.assertEqual(by_name["ff_prail_curve"] + 2 * ff.PRAIL_N, 0x14A,
+                         "the last v4 table ends exactly where v5 begins")
+        self.assertEqual(self.blk[0x14A], 0, "ff_pid52_enable must ship 0")
+        self.assertEqual(self.blk[0x14B], 0)
+
+    def test_the_pid52_switch_and_its_reserved_byte_are_checked(self):
+        ffcal001.build(dict(self.params, ff_pid52_enable=1))
+        with self.assertRaises(ffcal001.CalError):
+            ffcal001.build(dict(self.params, ff_pid52_enable=2))
+        with self.assertRaises(ffcal001.CalError):
+            ffcal001.build(dict(self.params, ff_obd_rsv=1))
 
     def test_v3_appended_and_moved_nothing(self):
         """Every v2 offset still holds what v2 put there (brief E2, #35)."""
@@ -573,7 +593,9 @@ class TestFfcal001(unittest.TestCase):
                              ("FF_CAL_O_P_RATE_S", "ff_persist_rate_s")):
             self.assertEqual(macro(cname), by_name[pname], cname)
         for cname, pname in (("FF_CAL_O_ZW_ENABLE", "ff_zw_enable"),
-                             ("FF_CAL_O_DZW_MAX", "ff_dzw_max")):
+                             ("FF_CAL_O_DZW_MAX", "ff_dzw_max"),
+                             ("FF_CAL_O_PID52_ENABLE", "ff_pid52_enable"),   # G1
+                             ("FF_CAL_O_OBD_RSV", "ff_obd_rsv")):
             self.assertEqual(macro(cname), by_name[pname], cname)
         by_table = {n: off for off, n, *_ in ffcal001.TABLES}
         for cname, pname in (("FF_CAL_O_F_CURVE", "ff_F_curve"),

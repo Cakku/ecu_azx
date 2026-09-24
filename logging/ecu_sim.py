@@ -35,8 +35,9 @@ What is **not** real, and why (details in `re/findings/kwp.md` section 12):
   `tools/kwp_seckey_verify.py` does.  `27 01` is not overridden: its seed is
   the virtual time base and the key follows from it.
 
-**Power-on state (2026-09-22, brief F3, `re/findings/boot.md` section 6.5).**
-`power_on` no longer hand-seeds the KWP security cells.  It calls ten of the
+**Power-on state (2026-09-22, brief F3, `re/findings/boot.md` section 6.5;
+two more entries 2026-09-24, brief G5).**
+`power_on` no longer hand-seeds the KWP security cells.  It calls twelve of the
 1,028 entries of the firmware's own one-shot init table (`INIT_ENTRIES`), in
 the table's order, the way `os_start` does -- so `kwp_sec_level_flags`,
 `kwp_sec_lfsr_rounds`, `nvm_mode`, the TP buffer pointers and the DDLI entry
@@ -63,7 +64,28 @@ cell                                 reason
                                      them** (`boot.md` section 6.3), so
                                      `NvmDeviceBinding` still installs the
                                      two trampolines (`eeprom.md` 7 Q1)
+0x803DDC = 0x2BA50 (G5)              the KWP config-struct pointer the h2
+                                     walk reads.  Written by the real
+                                     `kwp_register_table` 0x13E974, whose
+                                     only caller is inside init entry 281
+                                     (the whole diagnostic-stack start-up,
+                                     not run); power_on calls just 0x13E974
 ===================================  ====================================
+
+**The fault services (2026-09-24, brief G5, `re/findings/kwp.md` 12.7).**
+`18 00 FF 00`, `17 hi lo` and `14 FF 00` are the firmware's own handlers
+through the ordinary dispatch path, reading the firmware's RAM fault memory
+(0x7F8890, 20 x 0x5C bytes).  Three pieces around them are the simulator's
+and labelled as such: `DtcStore.seed` (`--seed-dtc`) stands in for the
+fault-path manager that would have stored a fault; a pending (`7F xx 78`)
+service is re-dispatched with the NVM queue pumped in between until it
+answers (`14` commits EEP_CONF block 24 and then holds off ~0.8 s, so it needs
+`--eeprom`); and after a positive `14` `DtcStore.after_clear` empties the
+store, which on the car is done later by DFPM processes the simulator does not
+run.  On every new TP2.0 channel the firmware's `kwp_service_h2_walk`
+(0x13ECB0) runs once, as `kwp_conn_cyclic` does per new connection
+(`obd.md` 10.1): it rebuilds the OBD support bitmaps and puts the session back
+to 0.
 
 One ordering difference from the part, deliberate: the simulator attaches the
 EEPROM and runs `cold_start()` *before* the init entries, so `kwp_sec_init`
@@ -159,8 +181,20 @@ INIT_ENTRIES = (
     # idx   address     name                    what it leaves behind
     (18, 0x0BA0F4, "nvm_set_sync_mode"),     # nvm_mode (0x7FCD68) = 2 ...
     (24, 0x0BA104, "nvm_set_normal_mode"),   # ... then 1: normal, async mode
+    (34, 0x12F10C, "dtc_code_table_select"), # G5: 0x7FBA58 = 0x5D9F06 if cal
+                                             #   0x5CF642 == 1, else 0x5DA6DE
+                                             #   (= 2 here); what 0x14 matches
     (38, 0x12F138, "kwp_tp_buf_init"),       # RAM buffer pointers 0x8037E4,
                                              #   0x8037E8, 0x8037EC, 0x8038D4
+                                             #   (G5: they point INTO fault-
+                                             #   memory entry 0 at 0x7F8890,
+                                             #   +2/+3/+0xA/+0x1C, so the name
+                                             #   is doubtful; kwp.md 12.7)
+    (39, 0x12EC00, "dfp_init"),              # G5: the fault-memory manager's
+                                             #   start-up; among others the
+                                             #   lock pair 0x7FBA5C = 0 /
+                                             #   0x7FBA60 = 0xFFFFFFFF that
+                                             #   `14` needs, else NRC 0x10
     (71, 0x036AB8, "kwp_sec_init"),          # 0x7FB781 = 0x7FB780 = 0x7FB770
                                              #   = 0; lockout 0x7FB748 from
                                              #   the EEPROM mirror 0x7FA02C
@@ -224,6 +258,33 @@ FLASH_CRC_DONE = 0x801200       # bit 0 once the value has been published
 FLASH_CRC_RANGES = 0x0A3A10     # {start, end} pairs, terminated by {0, 0}
 #: 0x64 bytes per activation over the three ranges
 FLASH_CRC_ACTIVATIONS = 24627
+FLASH_CRC_FLAGS = 0x7F9176      # bit 0 set together with the published value
+
+#: --- the period (brief G3, `re/findings/boot.md` 6.8, scheduler.md 13) -----
+#: `flash_crc_task` is not a raster.  Its five thunks 0x11CD24-0x11CD34
+#: (init-array slots 775-779) are processes of **task 0**, the set-A
+#: background task, which runs its 13 processes back to back and re-activates
+#: itself at its tail (`bg_task_tail` 0x11DA64).  So one background loop
+#: hashes 5 x 0x64 = **500 bytes** and the value appears in loop
+#: ceil(24,627 / 5) = **4,926**.  VERIFIED-STATIC.
+FLASH_CRC_PER_LOOP = 5
+FLASH_CRC_LOOPS = 4926
+#: the loop counter `bg_task_tail` increments once per background loop
+#: (`-0x28E4(r13)`), independent of the CRC state and still counting after
+#: state 7 -- boot.md 6.8(c)/(e).  The simulator does not run the other eight
+#: processes of task 0, so it writes this cell itself: a MODEL of 0x11DA64's
+#: one increment, not the firmware.
+BG_LOOP_COUNTER = 0x7FD70C
+#: T_bg, one background loop.  VERIFIED-STATIC bounds (boot.md 6.8(c)):
+#: the floor is 28,560 emulated instructions per loop at one instruction per
+#: 56 MHz clock, the ceiling is deadline timer 1 (0x100FD7 ticks = 300.75 ms;
+#: expiry is fatal code 0x74).  Where inside the bounds a real ECU sits is
+#: set by its idle time and is a BENCH value: the default is a HYPOTHESIS,
+#: chosen because it is what `--flash-crc` always did (one activation per
+#: 10 ms = 246 s to publish).
+BG_LOOP_MS_MIN = 0.51
+BG_LOOP_MS_MAX = 300.75
+BG_LOOP_MS_DEFAULT = 50.0
 
 #: Stack pointer for the hook calls.  `Med9Emu.call()` parks r1 at the boot
 #: stack top 0x7FEFFC, and a C function's frame there runs straight over
@@ -683,16 +744,34 @@ class FlashCrcTask:
     halfwords to 0x7F9178 / 0x7F917A; state 7 sets bit 0 of 0x801200 and of
     0x7F9176 and every later activation returns at once.
 
-    **What it costs.** The three ranges are 0x020000-0x1BFFFF, 0x404000-
-    0x47FFFF and 0x5C2E00-0x5FFFFF, 2,462,208 bytes, so the value appears
-    after **24,627 activations** -- 246 s at one activation per 10 ms raster,
-    and about 37 s of host CPU.  That is why this is opt-in (`--flash-crc`)
-    and why `advance()` carries the same wall-clock budget `PatchRunner` does:
-    a simulator that services TP2.0 from the same thread must not disappear
-    into the CRC.  `0x7F9178` therefore moves exactly **once**, at the end;
-    what a logging session can watch move every activation is the cursor
-    0x7FB700 and the running register 0x7FB6F8 (`logging/sessions/
-    flash_crc.json` logs all four).
+    **The period (brief G5, from G3's `re/findings/boot.md` 6.8).**  The task
+    is not a raster: it is five consecutive processes of the set-A
+    background task 0, so the simulator runs it in **background loops** of
+    :data:`FLASH_CRC_PER_LOOP` activations, one loop per `bg_loop_ms` (T_bg)
+    of simulated time, and bumps the loop counter 0x7FD70C once per loop.
+    The cursor 0x7FB700 therefore moves by **500 bytes per loop**, and the
+    value appears in loop :data:`FLASH_CRC_LOOPS` = 4,926, i.e.
+    ``4,926 x T_bg`` after power-on.  T_bg is bounded **0.51 ms <= T_bg <=
+    300.75 ms** (VERIFIED-STATIC), so the publish time on a real ECU lies
+    between 2.5 s and 1,481 s; the default 50 ms (246 s) is a HYPOTHESIS
+    inside the bound until the bench reads the slope of 0x7FB700 or 0x7FD70C
+    (`logging/sessions/flash_crc.json`).
+
+    **A warm ECU** (``warm=True``) is one on which the task already ran this
+    power cycle: state 7, the value published, and every activation a no-op.
+    That state is written directly -- the expected value from
+    :meth:`expected` over the image the emulator was built from, the other
+    cells as a cold run leaves them (a test pins the two against each other)
+    -- because producing it the honest way costs 24,627 activations.
+
+    **What it costs.** 2,462,208 bytes are 24,627 activations and about 37 s
+    of host CPU whatever T_bg is; that is why this is opt-in (`--flash-crc`)
+    and why `advance()` carries the same wall-clock budget `PatchRunner`
+    does: a simulator that services TP2.0 from the same thread must not
+    disappear into the CRC.  With a short T_bg the simulated clock simply
+    falls behind (``lagged``).  `0x7F9178` moves exactly **once**, at the
+    end; what a logging session can watch move every loop is the cursor
+    0x7FB700, the running register 0x7FB6F8 and the loop counter 0x7FD70C.
 
     **The harness must not show up in the answer.**  The second range is the
     on-chip flash, and `emu/time_base.py` rewrites three words at 0x47846C
@@ -701,33 +780,81 @@ class FlashCrcTask:
     compares the live flash against the image the emulator was built from and
     puts the image's own bytes back for the one activation whose window covers
     them.  A *patch* is not hidden: it is part of `emu.dump`, and a patched
-    image really does report a different checksum.
+    image really does report a different checksum (:meth:`expected`).
     """
 
     #: how much wall time one `advance()` may spend, as `PatchRunner`
     MAX_CATCHUP_WALL_S = 0.003
 
-    def __init__(self, emu, *, tick_ms: float = 10.0,
-                 hide_harness_writes: bool = True):
+    def __init__(self, emu, *, bg_loop_ms: float = BG_LOOP_MS_DEFAULT,
+                 hide_harness_writes: bool = True, warm: bool = False):
+        if not BG_LOOP_MS_MIN <= bg_loop_ms <= BG_LOOP_MS_MAX:
+            raise ValueError(
+                f"T_bg = {bg_loop_ms} ms is outside the VERIFIED-STATIC bound "
+                f"{BG_LOOP_MS_MIN}-{BG_LOOP_MS_MAX} ms (boot.md 6.8(c)); a "
+                "real ECU with a longer background loop trips fatal code 0x74")
         self.emu = emu
-        self.tick_s = tick_ms / 1000.0
-        self.sim_t = 0.0
+        self.bg_loop_s = bg_loop_ms / 1000.0
+        #: loops run since construction; the simulated clock is this times
+        #: T_bg, so it never drifts by float accumulation
+        self._ticks = 0
         self.activations = 0
+        self.loops = 0
+        #: the background loop in which the value appeared (None until then)
+        self.published_loop: int | None = None
         self.lagged = 0
         self.errors: list[str] = []
+        self.warm = warm
         self.ranges = self._read_ranges()
         self.shadow = (self._find_harness_writes() if hide_harness_writes
                        else {})
+        self._write_loop_counter(0)
+        if warm:
+            self._make_warm()
 
     # -- setup -------------------------------------------------------------
     def _read_ranges(self) -> list[tuple[int, int]]:
+        return self.read_ranges(lambda a, n: self.emu.read(a, n))
+
+    @staticmethod
+    def read_ranges(read) -> list[tuple[int, int]]:
+        """`tbl_crc32_ranges` through ``read(addr, n)``, up to its {0, 0}."""
         out, addr = [], FLASH_CRC_RANGES
         while True:
-            start, end = struct.unpack(">II", self.emu.read(addr, 8))
+            start, end = struct.unpack(">II", bytes(read(addr, 8)))
             if end == 0:
                 return out
             out.append((start, end))
             addr += 8
+
+    @staticmethod
+    def expected(image) -> int:
+        """The value `flash_crc_task` publishes for a firmware image.
+
+        `image` is a path or the dump's bytes.  One reflected CRC-32 (zlib's)
+        over the concatenation of the ranges the image's own
+        `tbl_crc32_ranges` names -- the recomputation `flash_crc.json` item 6
+        asks for before a bench run of a patched image.  VERIFIED against the
+        emulated task for the stock image (0x5562139F, brief F3) and, over the
+        patched tail, for `patches/ff_fuel` (`tests/test_ecu_sim_flashcrc.py`).
+        """
+        import zlib
+        tools = os.path.join(REPO, "tools")
+        if tools not in sys.path:
+            sys.path.insert(0, tools)
+        import med9lib as ml                                  # noqa: E402
+
+        data = (ml.load_dump(image) if isinstance(image, (str, os.PathLike))
+                else image)
+
+        def read(addr, n):
+            off = ml.cpu_to_file(addr)
+            return data[off:off + n]
+
+        crc = 0
+        for start, end in FlashCrcTask.read_ranges(read):
+            crc = zlib.crc32(bytes(read(start, end - start + 1)), crc)
+        return crc
 
     def _find_harness_writes(self) -> dict[int, bytes]:
         """{address: the image's own bytes} for every run the harness changed.
@@ -759,6 +886,38 @@ class FlashCrcTask:
                     run_start = None
         return out
 
+    #: What a finished cold run leaves in the byte budget 0x7FB6F6: 0x20 of
+    #: the last activation's 0x64 unused.  Read off the emulated stock run
+    #: (brief G5); it depends only on the range table, which no patch moves.
+    WARM_BUDGET_LEFT = 0x20
+
+    def _make_warm(self) -> None:
+        """The post-run state of a task that already published this cycle.
+
+        Every cell as a finished cold run leaves it -- `tests/
+        test_ecu_sim_flashcrc.py` compares a warm start with a cold run cell
+        by cell, so this cannot drift.  The register 0x7FB6F8 holds the final
+        (already inverted) value, the same number as the two halfwords.
+        """
+        crc = self.expected(bytes(self.emu.dump))
+        _last_start, last_end = self.ranges[-1]
+        e = self.emu
+        e.write(FLASH_CRC_STATE, b"\x07")
+        e.write(FLASH_CRC_RANGE, bytes([len(self.ranges)]))
+        e.write(FLASH_CRC_BUDGET, struct.pack(">H", self.WARM_BUDGET_LEFT))
+        e.write(FLASH_CRC_ACC, struct.pack(">I", crc))
+        e.write(FLASH_CRC_END, struct.pack(">I", last_end))
+        e.write(FLASH_CRC_CURSOR, struct.pack(">I", last_end + 1))
+        e.write(FLASH_CRC_PUB_HI, struct.pack(">HH", crc >> 16, crc & 0xFFFF))
+        e.write(FLASH_CRC_FLAGS, bytes([e.read(FLASH_CRC_FLAGS, 1)[0] | 1]))
+        e.write(FLASH_CRC_DONE, bytes([e.read(FLASH_CRC_DONE, 1)[0] | 1]))
+        self.published_loop = FLASH_CRC_LOOPS
+        self.loops = FLASH_CRC_LOOPS
+        self._write_loop_counter(self.loops)
+
+    def _write_loop_counter(self, n: int) -> None:
+        self.emu.write(BG_LOOP_COUNTER, struct.pack(">I", n & 0xFFFFFFFF))
+
     # -- state -------------------------------------------------------------
     @property
     def state(self) -> int:
@@ -777,6 +936,25 @@ class FlashCrcTask:
         """The published 32-bit value; 0 until state 2 has run."""
         hi, lo = struct.unpack(">HH", self.emu.read(FLASH_CRC_PUB_HI, 4))
         return (hi << 16) | lo
+
+    @property
+    def loop_counter(self) -> int:
+        return struct.unpack(">I", self.emu.read(BG_LOOP_COUNTER, 4))[0]
+
+    @property
+    def sim_t(self) -> float:
+        """Simulated seconds this task has been running for."""
+        return self._ticks * self.bg_loop_s
+
+    def _due(self, target_s: float) -> int:
+        """Whole loops between the task's clock and `target_s`."""
+        return max(int(target_s / self.bg_loop_s + 1e-9) - self._ticks, 0)
+
+    @property
+    def publish_s(self) -> float:
+        """Simulated seconds after power-on at which the value appeared."""
+        loops = self.published_loop or FLASH_CRC_LOOPS
+        return loops * self.bg_loop_s
 
     # -- running -----------------------------------------------------------
     def _swap(self, lo: int, hi: int) -> list[tuple[int, bytes]]:
@@ -818,31 +996,225 @@ class FlashCrcTask:
             return False
         return True
 
+    def loop(self) -> bool:
+        """One background loop: five activations, then the loop counter.
+
+        Returns False if an activation failed.  On a task that has already
+        published the five activations are the firmware's no-op and only the
+        counter moves, as on the ECU (boot.md 6.8(e) item 2).
+        """
+        ok = True
+        if not self.done:
+            for _ in range(FLASH_CRC_PER_LOOP):
+                before = len(self.errors)
+                if not self.activate():
+                    ok = len(self.errors) == before
+                    break
+        self.loops += 1
+        self._write_loop_counter(self.loops)
+        if self.published_loop is None and self.done:
+            self.published_loop = self.loops
+        return ok
+
     def advance(self, target_s: float) -> None:
-        """Run one activation per 10 ms of simulated time, within a budget."""
-        if self.done or target_s <= self.sim_t:
+        """Run one background loop per T_bg of simulated time, within a budget."""
+        n = self._due(target_s)
+        if n == 0:
+            return
+        if self.done:
+            # only the counter moves; no need to call the parked task
+            self._ticks += n
+            self.loops += n
+            self._write_loop_counter(self.loops)
             return
         deadline = time.monotonic() + self.MAX_CATCHUP_WALL_S
-        while self.sim_t + self.tick_s <= target_s:
-            self.sim_t += self.tick_s
-            if not self.activate():
+        while self._due(target_s):
+            self._ticks += 1
+            if not self.loop():
                 return
             if time.monotonic() >= deadline:
                 self.lagged += 1
                 return
 
-    def run_to_completion(self, max_activations: int = 30000) -> int | None:
-        """Activate until the value is published; the CRC, or None."""
-        while self.activations < max_activations and not self.done:
-            if not self.activate():
+    def run_to_completion(self, max_loops: int = 6000) -> int | None:
+        """Loop until the value is published; the CRC, or None.
+
+        The simulated clock moves with the loops, so afterwards
+        ``sim_t == publish_s``.
+        """
+        while self.loops < max_loops and not self.done:
+            self._ticks += 1
+            if not self.loop():
                 return None
         return self.crc if self.done else None
 
     def status(self) -> str:
-        return (f"flash CRC: {self.activations} activations, state "
-                f"{self.state}, cursor {self.cursor:#08x}"
-                + (f", published {self.crc:#010x}" if self.done
-                   else f" ({100.0 * self.activations / FLASH_CRC_ACTIVATIONS:.1f} %)"))
+        return (f"flash CRC: {self.loops} background loops "
+                f"(T_bg {self.bg_loop_s * 1000:g} ms), {self.activations} "
+                f"activations, state {self.state}, cursor {self.cursor:#08x}"
+                + (f", published {self.crc:#010x} at loop "
+                   f"{self.published_loop} = {self.publish_s:.1f} simulated s"
+                   if self.done else
+                   f" ({100.0 * self.activations / FLASH_CRC_ACTIVATIONS:.1f} %)"))
+
+
+# ---------------------------------------------------------------------------
+# the fault memory: what 18 / 17 / 14 read and clear (brief G5, kwp.md 12.7)
+# ---------------------------------------------------------------------------
+#: The firmware's RAM fault memory ("Fehlerspeicher"), VERIFIED-STATIC from
+#: `dfp_list_active` 0x43E080 and `dfp_entry_read` 0x43DB20 (both on-chip):
+#: up to 20 entries of 0x5C bytes at 0x7F8890; 0x7F91CA = entries in use,
+#: 0x7F91CB = length of the 1-based order list at 0x7F91AA.  An entry is
+#: reported by `18` when its halfword +0 has bit 0x2000 clear, its fault-path
+#: id +2 is non-zero and bit 0x0800 of +0x1C is set.
+FAULT_MEMORY = 0x7F8890
+FAULT_ENTRY_LEN = 0x5C
+FAULT_SLOTS = 20
+FAULT_USED = 0x7F91CA
+FAULT_ORDER_LEN = 0x7F91CB
+FAULT_ORDER = 0x7F91AA
+#: four SAE-encoded DTCs per fault path, u16 at +(path*4 + k)*2; `18` always
+#: reads this one (0x3519C-0x351B8), `14` the one `dtc_code_table_select`
+#: (init entry 34) put into 0x7FBA58 -- 0x5DA6DE in this dump.
+DTC_TABLE_18 = 0x5D9F06
+DTC_TABLE_PTR = 0x7FBA58
+#: the fault-memory lock `14` takes through 0x43D7AC: {0x7FBA5C, ~0x7FBA5C}
+#: must read {0, 0xFFFFFFFF} (what `dfp_init` leaves) and becomes {0xFA, ~0xFA}
+DFP_LOCK = 0x7FBA5C
+#: `kwp_sid_14_h1`'s state byte (0 idle, 1 committing, 2 done)
+DTC_CLEAR_STATE = 0x7FB718
+#: the per-path "readiness" bytes `18` reads for status bit 0x10
+DFP_PATH_FLAGS = 0x7F9C46
+#: `kwp_register_table` 0x13E974 stores the config-struct pointer 0x803DDC,
+#: which `kwp_service_h2_walk` 0x13ECB0 walks (obd.md 10.1).  Its only caller
+#: is 0x13C9FC inside init entry 281 (0x1344C0, the diagnostic-stack start-up,
+#: far too wide to run here), so power_on calls just this one function.
+KWP_REGISTER_TABLE = 0x13E974
+KWP_SERVICE_H2_WALK = 0x13ECB0
+#: how long the simulator keeps re-dispatching a pending (0x78) service, in
+#: simulated seconds.  `14` waits 0x2AD4E9 time-base ticks (~0.8 s) after its
+#: NVM commit before it answers, so a clear takes about a second.
+PENDING_BUDGET_S = 5.0
+PENDING_STEP_S = 0.1
+
+
+def dtc_text(code: int) -> str:
+    """SAE J2012 text of a two-byte DTC: 0x0601 -> 'P0601'."""
+    return "PCBU"[code >> 14] + f"{(code >> 12) & 3}{code & 0xFFF:03X}"
+
+
+def dtc_code(text: str) -> int:
+    """The inverse of :func:`dtc_text`."""
+    text = text.strip().upper()
+    if len(text) != 5 or text[0] not in "PCBU":
+        raise ValueError(f"not an SAE DTC: {text!r}")
+    return ("PCBU".index(text[0]) << 14) | (int(text[1]) << 12) | int(text[2:], 16)
+
+
+def parse_read_dtc(answer: bytes) -> list[tuple[int, int]]:
+    """`58 n (hi lo status)*n` -> [(code, status)].  Raises on a bad shape."""
+    if len(answer) < 2 or answer[0] != 0x58:
+        raise ValueError(f"not a readDTCByStatus answer: {answer.hex()}")
+    n = answer[1]
+    if len(answer) != 2 + 3 * n:
+        raise ValueError(f"{n} DTCs need {2 + 3 * n} bytes, got {len(answer)}")
+    return [(int.from_bytes(answer[2 + 3 * i:4 + 3 * i], "big"),
+             answer[4 + 3 * i]) for i in range(n)]
+
+
+class DtcStore:
+    """Seed and inspect the firmware's own RAM fault memory.
+
+    `18 00 FF 00` (readDiagnosticTroubleCodesByStatus), `17 hi lo`
+    (readStatusOfDiagnosticTroubleCodes) and `14 FF 00`
+    (clearDiagnosticInformation) are all answered by the **real handlers**
+    through the ordinary dispatch path (`kwp_sid_18_h1` 0x35064,
+    `kwp_sid_17_h1` 0x36024, `kwp_sid_14_h1` 0x35410); this class only puts
+    entries where those handlers look.  Two things here are a MODEL, not the
+    firmware, and say so:
+
+    * :meth:`seed` writes an entry in the layout `dfp_entry_read` reads,
+      standing in for the fault-path manager (DFPM) that debounces a fault
+      into memory on the car.  The simulator runs no DFPM task.
+    * :meth:`after_clear` empties the store and releases the lock once the
+      real `14` has answered positively.  On the ECU `14` only takes the
+      lock (0x43D7AC) and commits EEP_CONF block 24; the erase itself is done
+      later by DFPM processes behind the lock state machine 0x7FBA5C
+      (0xFA..0xFD, e.g. 0x0D4D74, 0x125C18 in task 8) that the simulator does
+      not run.  The observable result -- an empty `18` after a positive `14`
+      -- is what the bench sequence needs, and it is labelled.
+    """
+
+    def __init__(self, emu):
+        self.emu = emu
+        self.clears = 0
+
+    # -- the tables ----------------------------------------------------------
+    def code_of(self, path: int, kind: int, table: int = DTC_TABLE_18) -> int:
+        return struct.unpack(">H", self.emu.read(table + (path * 4 + kind) * 2,
+                                                 2))[0]
+
+    def find(self, code: int, table: int = DTC_TABLE_18) -> tuple[int, int]:
+        """The first (fault path, kind 0..3) whose code is `code`."""
+        for path in range(1, 0xFA):
+            for kind in range(4):
+                if self.code_of(path, kind, table) == code:
+                    return path, kind
+        raise KeyError(f"{dtc_text(code)} is in no fault path of the table "
+                       f"at {table:#08x}")
+
+    # -- the store -----------------------------------------------------------
+    @property
+    def used(self) -> int:
+        return self.emu.read(FAULT_USED, 1)[0]
+
+    def entries(self) -> list[dict]:
+        out = []
+        order = self.emu.read(FAULT_ORDER, self.emu.read(FAULT_ORDER_LEN, 1)[0])
+        for idx in order:
+            raw = self.emu.read(FAULT_MEMORY + (idx - 1) * FAULT_ENTRY_LEN,
+                                FAULT_ENTRY_LEN)
+            out.append({"slot": idx - 1,
+                        "path": struct.unpack_from(">H", raw, 2)[0],
+                        "kinds": raw[0x0A],
+                        "reported": bool(struct.unpack_from(">H", raw, 0x1C)[0]
+                                         & 0x0800)})
+        return out
+
+    def seed(self, dtc: "str | int | None" = None, *, path: int | None = None,
+             kind: int = 0) -> tuple[int, int]:
+        """MODEL: store one active fault, as the DFPM would have.
+
+        Give a DTC ("P0601" or 0x0601) or a fault path and a kind 0..3.
+        Returns (path, kind).  Kind k sets bit k of entry +0x0A, which is
+        how `18` picks the path's k-th code and sets status bit 1 << k.
+        """
+        if dtc is not None:
+            code = dtc_code(dtc) if isinstance(dtc, str) else int(dtc)
+            path, kind = self.find(code)
+        if path is None or not 1 <= path < 0xFA or not 0 <= kind <= 3:
+            raise ValueError(f"fault path {path} / kind {kind}")
+        slot = self.used
+        if slot >= FAULT_SLOTS:
+            raise ValueError("the fault memory holds 20 entries")
+        entry = bytearray(FAULT_ENTRY_LEN)
+        struct.pack_into(">H", entry, 2, path)
+        entry[0x0A] = 1 << kind
+        struct.pack_into(">H", entry, 0x1C, 0x0800)
+        self.emu.write(FAULT_MEMORY + slot * FAULT_ENTRY_LEN, bytes(entry))
+        n = self.emu.read(FAULT_ORDER_LEN, 1)[0]
+        self.emu.write(FAULT_ORDER + n, bytes([slot + 1]))
+        self.emu.write(FAULT_USED, bytes([slot + 1]))
+        self.emu.write(FAULT_ORDER_LEN, bytes([n + 1]))
+        return path, kind
+
+    def after_clear(self) -> None:
+        """MODEL: what the DFPM does after a positive `14` (class docstring)."""
+        self.emu.write(FAULT_MEMORY, bytes(FAULT_SLOTS * FAULT_ENTRY_LEN))
+        self.emu.write(FAULT_ORDER, bytes(FAULT_SLOTS))
+        self.emu.write(FAULT_USED, b"\x00\x00")
+        self.emu.write(DFP_LOCK, struct.pack(">II", 0, 0xFFFFFFFF))
+        self.clears += 1
 
 
 class FrameTap:
@@ -879,7 +1251,8 @@ class Med9Handlers:
                  patch_dir: str | None = None, eeprom: str | None = None,
                  time_scale: float = 1.0, run_patch: bool = True,
                  stock_tasks: bool = False, wip_polls: int = 0,
-                 time_base: bool = True, flash_crc: bool = False):
+                 time_base: bool = True, flash_crc: "bool | float" = False,
+                 flash_crc_warm: bool = False, dtcs=()):
         from emu import Med9Emu
         from emu.time_base import VirtualTimeBase
         if patch_dir:
@@ -935,9 +1308,22 @@ class Med9Handlers:
                 self.ram.flexfuel = False
                 self.ram.owns_patch_ram = False
         self.power_on()
+        #: the firmware's RAM fault memory, and what seeds it (a MODEL of the
+        #: DFPM; the read and clear services are the firmware's own)
+        self.dtc = DtcStore(self.emu)
+        for d in dtcs:
+            self.dtc.seed(d)
+        #: new TP2.0 connections seen (:meth:`on_connect`)
+        self.connections = 0
         #: built after `power_on`, so `flash_crc_init` (init entry 75) has put
-        #: the state byte back to 0 and the shadow scan sees the final flash
-        self.flash_crc = FlashCrcTask(self.emu) if flash_crc else None
+        #: the state byte back to 0 and the shadow scan sees the final flash.
+        #: `flash_crc` is True (T_bg = BG_LOOP_MS_DEFAULT) or T_bg in ms.
+        self.flash_crc = None
+        if flash_crc or flash_crc_warm:
+            t_bg = (BG_LOOP_MS_DEFAULT if flash_crc is True or not flash_crc
+                    else float(flash_crc))
+            self.flash_crc = FlashCrcTask(self.emu, bg_loop_ms=t_bg,
+                                          warm=flash_crc_warm)
 
     # -- the EEPROM device -------------------------------------------------
     def _install_eeprom(self, path: str, wip_polls: int) -> None:
@@ -997,6 +1383,12 @@ class Med9Handlers:
                 self.log.append(
                     f"init entry {idx} ({name} {addr:#08x}) did not return: "
                     f"{res.stop_reason} at {res.pc:#08x}")
+        # the config-struct pointer the h2 walk reads (see KWP_REGISTER_TABLE)
+        res = self.emu.call(KWP_REGISTER_TABLE, args=[KWP_CONFIG_STRUCT],
+                            regs={"r1": TASK_STACK_TOP}, reset=False)
+        if not res.ok:                                       # pragma: no cover
+            self.log.append(f"kwp_register_table did not return: "
+                            f"{res.stop_reason} at {res.pc:#08x}")
         self.ram.power_on(self.emu)
         if self.time_base is not None:
             self.time_base.advance(0.0)
@@ -1036,6 +1428,61 @@ class Med9Handlers:
 
     def read_ram(self, addr: int, size: int) -> bytes:
         return self.emu.read(addr, size)
+
+    def on_connect(self) -> None:
+        """A new diagnostic connection: run the firmware's `h2` walk once.
+
+        `kwp_conn_cyclic` (0x13E650) calls `kwp_service_h2_walk` (0x13ECB0)
+        once per new connection from the set-A 10 ms task (obd.md 10.1, G3).
+        The walk calls every dispatch-table h2 -- among them the OBD support
+        bitmap builder 0x5CBE8, the DDLI wipe and `14`'s state reset -- and
+        puts the session back to 0.  The simulator has no 10 ms task, so
+        `EcuSimulator` calls this when `Tp20Server` opens a channel: the
+        trigger is modelled, the walk is the firmware's.
+        """
+        res = self.emu.call(KWP_SERVICE_H2_WALK, regs={"r1": TASK_STACK_TOP},
+                            reset=False, max_insns=2_000_000)
+        self.connections += 1
+        if not res.ok:                                       # pragma: no cover
+            self.log.append(f"kwp_service_h2_walk did not return: "
+                            f"{res.stop_reason} at {res.pc:#08x}")
+
+    def _pump_nvm(self, n: int = 8) -> None:
+        """What the two 10 ms tasks do for the EEP_CONF queue (eeprom.md 8.4)."""
+        if self.eeprom is None:
+            return
+        for _ in range(n):
+            self.emu.call(NVM_PUMP_WRAPPER, regs={"r1": TASK_STACK_TOP},
+                          reset=False, max_insns=4_000_000)
+
+    def _finish_pending(self, entry: "KwpEntry", sid: int, data: bytes):
+        """Re-dispatch a service that answered 'response pending' (status 8).
+
+        The ECU sends `7F sid 78` and dispatches the same request again until
+        the handler leaves the pending state (kwp.md 1.3, the 0x803DB8/B9
+        bytes).  The simulator does that here, in one go: between two calls
+        it pumps the NVM queue (so `14`'s EEP_CONF commit can finish; that
+        needs `--eeprom`) and moves the virtual time base on by
+        PENDING_STEP_S, which the `14` handler compares against its own
+        0x2AD4E9-tick hold-off.  The loop is the simulator's; every call is
+        the firmware's handler.  -> (status, body) of the last call.
+        """
+        t = self.sim_time()
+        status, body = STATUS_PENDING[0], b""
+        steps = int(PENDING_BUDGET_S / PENDING_STEP_S)
+        for _ in range(steps):
+            self._pump_nvm()
+            t += PENDING_STEP_S
+            if self.time_base is not None:
+                self.time_base.advance(t)
+            status, body = self._call(entry.h1, sid, data, entry.arg)
+            if status not in STATUS_PENDING:
+                return status, body
+        self.log.append(
+            f"SID {sid:#04x} still pending after {PENDING_BUDGET_S:g} simulated "
+            "s" + ("" if self.eeprom is not None else
+                   " -- no --eeprom, so its NVM commit cannot complete"))
+        return status, body
 
     # -- calling a real handler -------------------------------------------
     def _call(self, handler: int, sid: int, data: bytes, arg: int = 0):
@@ -1119,6 +1566,15 @@ class Med9Handlers:
             return self._start_session(data[0] if data else 0)
 
         status, body = self._call(entry.h1, sid, data, entry.arg)
+        if status in STATUS_PENDING and sid != 0x27:
+            status, body = self._finish_pending(entry, sid, data)
+            if status == STATUS_POSITIVE and sid == 0x14:
+                self.dtc.after_clear()                       # MODEL, see DtcStore
+            final = ([bytes([(sid + 0x40) & 0xFF]) + body]
+                     if status == STATUS_POSITIVE else
+                     [bytes([0x7F, sid, body[0] if body and status ==
+                             STATUS_NEGATIVE else 0x10])])
+            return [bytes([0x7F, sid, 0x78])] + final
         if sid == 0x27 and data[:1] == b"\x03" and self.seed_override is not None \
                 and status == STATUS_POSITIVE:
             # substitute the time-base seed the emulator cannot produce
@@ -1147,14 +1603,16 @@ class EcuSimulator:
                  session_timeout_s: float | None = None, animate: bool = True,
                  dump: str = DUMP, patch_dir: str | None = None,
                  eeprom: str | None = None, ram: AnimatedRam | None = None,
-                 trace: list[str] | None = None, verbose: bool = False):
+                 trace: list[str] | None = None, verbose: bool = False,
+                 dtcs=()):
         #: `dump` is how a PATCHED image is driven end to end: the handlers are
         #: the firmware's own, so `21 <group>` on patches/ff_fuel's image runs
         #: the patch's measuring handlers (brief D2, issue #39).  `patch_dir`
         #: goes one further and runs the patch's own hooks (brief E4).
         self.handlers = handlers or Med9Handlers(
             dump, seed=seed, animate=animate, patch_dir=patch_dir,
-            eeprom=eeprom, ram=ram, session_timeout_s=session_timeout_s)
+            eeprom=eeprom, ram=ram, session_timeout_s=session_timeout_s,
+            dtcs=dtcs)
         runner = self.handlers.runner
         self.link = FrameTap(link, runner.on_frame) if runner else link
         link = self.link
@@ -1165,6 +1623,7 @@ class EcuSimulator:
             self.server.drop_next_acks(drop_ack)
         self.verbose = verbose
         self.requests = 0
+        self._channels_seen = 0
         self._stop = threading.Event()
         self.error: BaseException | None = None
 
@@ -1183,6 +1642,10 @@ class EcuSimulator:
     def poll(self, timeout: float = 0.05) -> bool:
         """Service the bus once.  True if a request was answered."""
         request = self.server.poll(timeout)
+        if self.server.channels_opened != self._channels_seen:
+            # a new diagnostic connection: the firmware re-runs its h2 walk
+            self._channels_seen = self.server.channels_opened
+            self.handlers.on_connect()
         # the patch keeps ticking whether or not a tester is talking to us
         self.handlers.step()
         if request is None:
@@ -1277,6 +1740,15 @@ def self_test(dump_path: str = DUMP) -> bool:
     step("35 protected window", b"\x35\x7f\x9e\x00\x00\x00\x02\x00",
          b"\x7f\x35\x31")
     step("21 F0 after session change", b"\x21\xf0", b"\x7f\x21\x12")
+    # the fault services (brief G5): real handlers, an empty then a seeded
+    # store (the seeding is the MODEL, DtcStore.seed)
+    step("10 89 again", b"\x10\x89", b"\x50\x89")
+    step("18 00 FF 00 no DTCs", b"\x18\x00\xff\x00", b"\x58\x00")
+    h.dtc.seed("P0601")
+    step("18 00 FF 00 seeded P0601", b"\x18\x00\xff\x00",
+         b"\x58\x01\x06\x01")
+    step("17 06 01 status of P0601", b"\x17\x06\x01", b"\x57\x01\x06\x01")
+    step("18 02 FF 00 -> NRC 0x12", b"\x18\x02\xff\x00", b"\x7f\x18\x12")
 
     width = max(len(r[0]) for r in results)
     for label, hexed, good in results:
@@ -1320,13 +1792,35 @@ def main(argv=None) -> int:
                     help="make an EEPROM page write report WIP for N status "
                          "polls (0 = instant, which is what a time base that "
                          "never advances gives us anyway)")
-    ap.add_argument("--flash-crc", action="store_true",
+    ap.add_argument("--flash-crc", nargs="?", type=float, default=None,
+                    const=BG_LOOP_MS_DEFAULT, metavar="T_BG_MS",
                     help="run the firmware's own flash_crc_task (0x11CB10) in "
-                         "the background, one activation per simulated 10 ms "
-                         "raster, and publish to 0x7F9178/0x7F917A. It needs "
-                         "24,627 activations (246 simulated s, ~37 s of host "
-                         "CPU) to get there; logging/sessions/flash_crc.json "
-                         "logs the cursor and the running register too")
+                         "the background as five processes of background "
+                         "task 0: one loop of 5 activations (500 bytes) and "
+                         "one tick of the loop counter 0x7FD70C per T_BG_MS "
+                         "of simulated time (default %(const)g ms, a "
+                         "HYPOTHESIS inside the VERIFIED-STATIC bound "
+                         f"{BG_LOOP_MS_MIN}-{BG_LOOP_MS_MAX} ms, boot.md "
+                         "6.8). The value appears at loop 4,926 = 4,926 x "
+                         "T_BG_MS (246 simulated s at the default; ~37 s of "
+                         "host CPU whatever T_BG is); "
+                         "logging/sessions/flash_crc.json logs it")
+    ap.add_argument("--flash-crc-warm", action="store_true",
+                    help="model a WARM ECU: the CRC task already published "
+                         "this power cycle (state 7), so nothing but the loop "
+                         "counter moves (flash_crc.json item 1)")
+    ap.add_argument("--print-flash-crc", action="store_true",
+                    help="print the value flash_crc_task would publish for "
+                         "--dump (or for --sim-patch applied to it) and exit: "
+                         "the recomputation flash_crc.json item 6 asks for "
+                         "before a bench run of a patched image")
+    ap.add_argument("--seed-dtc", action="append", default=[], metavar="DTC",
+                    help="store this DTC (e.g. P0601) in the firmware's RAM "
+                         "fault memory at power-on, so 18/17 have something "
+                         "to report. A MODEL of the fault-path manager; the "
+                         "18/17/14 handlers are the firmware's. Repeatable. "
+                         "14 (clear) needs --eeprom: it commits EEP_CONF "
+                         "block 24 before it answers")
     ap.add_argument("--time-scale", type=float, default=1.0, metavar="X",
                     help="simulated seconds per wall-clock second (default 1)")
     ap.add_argument("--task-set", choices=("A", "B"), default="A",
@@ -1344,12 +1838,21 @@ def main(argv=None) -> int:
 
     if args.self_test:
         return 0 if self_test(args.dump) else 1
+    if args.print_flash_crc:
+        image = (apply_patch_to_temp(args.sim_patch, args.dump)
+                 if args.sim_patch else args.dump)
+        crc = FlashCrcTask.expected(image)
+        print(f"{crc:#010x}  pub_hi={crc >> 16:#06x} pub_lo={crc & 0xFFFF:#06x}"
+              f"  {args.sim_patch or args.dump}")
+        return 0
 
     handlers = Med9Handlers(
         args.dump, seed=args.seed or None, animate=not args.no_animate,
         session_timeout_s=args.session_timeout or None,
         patch_dir=args.sim_patch, eeprom=args.eeprom,
-        stock_tasks=args.sim_stock_tasks, flash_crc=args.flash_crc,
+        stock_tasks=args.sim_stock_tasks,
+        flash_crc=args.flash_crc if args.flash_crc is not None else False,
+        flash_crc_warm=args.flash_crc_warm, dtcs=args.seed_dtc,
         time_scale=args.time_scale, wip_polls=args.wip_polls,
         ram=AnimatedRam(live_task_set=args.task_set,
                         statics=dict(DEFAULT_STATICS)))
@@ -1371,7 +1874,10 @@ def main(argv=None) -> int:
     if handlers.flash_crc is not None:
         c = handlers.flash_crc
         print(f"flash CRC task: {len(c.ranges)} ranges, "
-              f"{FLASH_CRC_ACTIVATIONS} activations to a published value"
+              f"{FLASH_CRC_ACTIVATIONS} activations in {FLASH_CRC_LOOPS} "
+              f"background loops of {c.bg_loop_s * 1000:g} ms = "
+              f"{c.publish_s:.1f} simulated s to a published value"
+              + (" (WARM: already published)" if c.warm else "")
               + (f", hiding {len(c.shadow)} harness edit(s) from it"
                  if c.shadow else ""))
     print("ctrl-C to stop")

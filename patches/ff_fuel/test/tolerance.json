@@ -161,9 +161,14 @@
       "_unit": "-, 0x7F9F81; the VERSION byte of the same stamp. Same rule"
     },
     "eep_blk8_mirror_b2": {
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "_unit": "-, 0x7F9F82; tester adaptation channel 1 (G7, 2026-09-24). The patch stored the ethanol estimate here from E4 until G7 moved ff_persist_offset to 19; it no longer writes it, so the two runs must agree"
+    },
+    "eep_blk8_mirror_b19": {
       "max_abs": null,
       "mean_abs": null,
-      "_unit": "%, 0x7F9F82; WHERE THE PATCH STORES the ethanol estimate since the E4 correction (ff_persist_offset = 2). It is 0xFF or a stale value on the stock run and the current estimate on the patched one, so it cannot be compared - check it against ff_e_persist instead (procedure_d2.md B2)"
+      "_unit": "%, 0x7F9F93; WHERE THE PATCH STORES the ethanol estimate since the G7 correction (ff_persist_offset = 19, past the adaptation channels +2..+18). It is the default 0x00 or a stale value on the stock run and the current estimate on the patched one, so it cannot be compared - check it against ff_e_persist instead (procedure_d2.md B2)"
     },
     "eep_blk8_mirror_b14": {
       "max_abs": 0.0,
@@ -529,6 +534,16 @@
       "max_abs": null,
       "mean_abs": null,
       "_unit": "count, 0x7FFB4A; a patch state-block field. It reads 0 on a stock image (the address is plain RAM there), so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and the procedures instead"
+    },
+    "ff_obd52_a": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "%, 0x7FFB4C; a patch state-block field (G1, #39). It reads 0 on a stock image (the address is plain RAM there), and with the shipped ff_pid52_enable = 0 it reads 0 on the patched image too, so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and tests/test_ff_obd_patch.py instead"
+    },
+    "ff_obd52_valid": {
+      "max_abs": null,
+      "mean_abs": null,
+      "_unit": "-, 0x7FFB4D; a patch state-block field (G1, #39). It reads 0 on a stock image (the address is plain RAM there), and with the shipped ff_pid52_enable = 0 it reads 0 on the patched image too, so a stock-vs-patched comparison says nothing. Judge it against emu/models/flexfuel.py and tests/test_ff_obd_patch.py instead"
     }
   },
   "_open": [

@@ -347,6 +347,10 @@ wrote patch.json: 31 change(s)
 ```
 
 (Extract; the real run lists all 8 hooks and all 23 data entries.)
+*(Note 2026-09-23, G2: this transcript and the `make apply` one below predate
+G1. Since FFCAL001 v5 the data line reads 334 B, and G1's PID 0x52 edits add
+data entries. The blob size, range counts and SHA-256 differ from the ones
+printed here. Your own run is the reference; the hook count is still 8.)*
 `tools/patch_gen.py` resolves every hook target from the linker's `.sym`,
 encodes the branch word with its reach and alignment checked, reads each
 change's `old` bytes out of the stock image, and asserts that a new block's
@@ -402,6 +406,11 @@ have not been taken. **That warning is a blocker, not a formality.**
 The patch's own calibration block: **v4, 332 bytes at CPU 0x5E2510**, inside
 checksum block 0x5E0000-0x5EFFFF, built by `patches/ff_fuel/ffcal001.py` before
 `make gen` reads it. It grew v1 → v4 across briefs D1, E1, E2 and E5.
+
+> **Updated 2026-09-23 (G2):** it is now **v5, 334 bytes** (`LENGTH = 0x014E`
+> in `patches/ff_fuel/ffcal001.py`). Brief G1 appended the one-byte
+> `ff_pid52_enable` gate at +0x14A for OBD PID 0x52 (docs/05 §3.7, note of
+> 2026-09-23). The rule below is how it was done.
 
 The rule (docs/agent_briefs/00_common_rules.md, 2026-09-17) is that **FFCAL001
 changes append and nothing moves**. Adding a value means, in one commit:
@@ -473,6 +482,8 @@ prediction rather than an observation. The first write is called **Flash 0**
 (`patches/ff_fuel`) or **Flash 1** (`patches/ff_counter`, the no-op counter,
 issue #27) — Flash 1 first, because it changes **two flash words** (one of them
 on-chip since brief F1, 2026-09-22 — see the note in §3.4) and nothing else.
+
+> **2026-09-24 (G6):** the day-one order across this chapter, `logging/README.md` §8, the #44 reads, the #23 RAM snapshots and the Flash 1 decision table, with the stop list, is [`08_bench_playbook.md`](08_bench_playbook.md) — follow it on the bench day; this chapter stays the procedure it points at.
 
 What the dump *does* now tell us comes from brief **E6**,
 `re/findings/flash_programming.md` (2026-09-17, VERIFIED-STATIC), and it is
@@ -660,6 +671,10 @@ Then the three checks E6's `flash_programming.md` §7.2 adds, in order:
 > 0x42247C and 0x432940. Since E1/E2/E5 the patch has **eight hooks, seven of
 > them on-chip**; the current list is in `patches/ff_fuel/README.md`. Read the
 > README's hook table, not procedure.md §1, when doing the read-back.
+>
+> **RESOLVED (2026-09-23, G2, checked against G1):** procedure.md §1 was fixed
+> on 2026-09-17 (6113843). It now lists all seven on-chip words and matches the
+> README's eight-hook table, so either one can be used for the read-back.
 
 ---
 

@@ -587,6 +587,18 @@ and 0x83 commits it to the EEPROM. Channels whose bit is set in the mask
 **0x382C2** (1, 6, 7, 9, 11, 12, 13) are displayed signed, i.e. offset by
 −0x80. Sub-function 0x82 with channel 0 restores every channel to its default.
 
+> **Correction 2026-09-24 (brief G7, `re/findings/eeprom.md` §5; integration).**
+> On *this* dataset the tester cannot do that: the adaptation service's access
+> words at 0x5CF004/08/0C are all 0x40, which admits **channel 7 only** —
+> channel 1 is refused with NRC 0x33 and a channel-0 reset changes **no**
+> channel (VERIFIED-STATIC, `xxd -s 0x1CF004`; emulated). The routine that does
+> rewrite every block-8 channel byte is the stock **reset-all 0x038D64**, called
+> from 0x0D10D0 after a fault clear when block 11 payload +11 bit 0 (mirror
+> 0x7FA02B) is set — who sets that flag is open (a candidate is the raw EEPROM
+> write at 0x087844 in the KWP programming module, i.e. possibly the first boot
+> after a reflash). The fuel-trim hazard therefore comes from *that* path, not
+> from a workshop basic setting, on a stock-coded ECU.
+
 **Three of the twelve are fuel trims, and all three matter for flex fuel:**
 
 * **channel 10 → `fgru_trim`.** `FUN_000E8D9C`:
@@ -647,6 +659,11 @@ them as maps**. The evidence, all VERIFIED-STATIC:
    written by `gk_rk`) divided by the charge, and `FUN_00440A3C` (the PI
    controller, 0x440A3C-0x442037) subtracts the sensor value 0x802E0C from it.
    So the loop tracks whatever `rk` asks for; the request is implicit in `rk`.
+
+> **CORRECTED 2026-09-23 (G4, §11.8):** point 1 above misses a divisor —
+> `gk_rk` also computes `rk = (rk << 12) / 0x80304A`, and 0x80304A is very
+> probably the lambda setpoint `lamsbg_w`. The sentence below is F4's, kept for
+> history; it holds only until the inputs of 0x803046 are traced.
 
 **So there is no full-load or component-protection enrichment on the fuel path
 of this dataset.** `%LAMBTS` may exist as code — nothing here proves it does
@@ -731,7 +748,9 @@ Two fixed points fall out of the grids:
 * **0x8022A2 is a Q15 signed fraction.** `axis_q15_8022A2_5D79CA` 0x5D79CA is
   −32768, −24576, −16384, −3277, 3277, 16384, 24576, 32767 = **−1.0, −0.75,
   −0.5, −0.1, +0.1, +0.5, +0.75, +1.0** at 1/32768 exactly.
-* **0x7FD3E5 is *probably* a battery voltage at 1/16 V per LSB, and this is
+* **SETTLED (2026-09-23, G4, §11.1): 0x7FD3E5 is the intake-air temperature
+  at 0.75 °C − 48, not a voltage; the text below is F4's reasoning, kept for
+  history.** **0x7FD3E5 is *probably* a battery voltage at 1/16 V per LSB, and this is
   NOT settled.** For it: the axis 0x5C7BA5 that `start.md` §5 recorded without
   a unit is 40, 80, 120, 160, 200, 240, i.e. **2.5, 5.0, 7.5, 10.0, 12.5,
   15.0 V** exactly, and `axis_ubatt_5D7947` 0x5D7947 reads 8.19…14.00 V.
@@ -773,7 +792,8 @@ Two fixed points fall out of the grids:
   number of activations it is blended out over afterwards (§9.2). The CAN id
   and the slot are VERIFIED-STATIC; "gearbox" is COMMUNITY and one bench trace
   of 0x440 would confirm it.
-* **0x80223B — SETTLED (VERIFIED-STATIC).** It has its own axis,
+* **CORRECTED 2026-09-23 (G4, §11.7): 0x80223B is the gear `gangi` (FR `%BBGANG`), not an
+  operating mode; 7 = reverse.** **0x80223B — SETTLED (VERIFIED-STATIC).** It has its own axis,
   `axis_opmode_5C887B` 0x5C887B = 0, 1, 2, 3, 4, 5, 6, 7, searched by
   `cal_axis_key_process` into 0x7FD7A0, and exactly one writer, 0x45C064. Four
   of the six charge thresholds of §10.5 are maps over it. It is the
@@ -782,7 +802,8 @@ Two fixed points fall out of the grids:
   BDE engine; which value is which mode is **not** established, and VCDS
   measuring id 130 (groups 051.3 / 068.3, format 0x36) displays it directly,
   so one drive log would settle that too.
-* **`cand_KFMIRLINV` 0x5C9938's value unit — still open.** What was tried:
+* **SETTLED (2026-09-23, G4, §11.2): relative charge at 100/4096 %/LSB; 0x8015AF is an
+  ignition efficiency at 1/200.** **`cand_KFMIRLINV` 0x5C9938's value unit — still open.** What was tried:
   `FUN_000E069C` evaluates it at 0x8034FA and at `0x8034FA × 200 / 0x8015AF`
   and writes 0x8015D0, whose only readers are three sites inside
   `FUN_000E06F8` (0x0E0720, 0x0E07E0, 0x0E0838) where it is a *breakpoint
@@ -831,3 +852,431 @@ export GHIDRA_INSTALL_DIR=/usr/local/Cellar/ghidra/12.1.3/libexec
 either descriptive (`axis_*`, `mix_*`, `rl_*`, `zwdelta_*`, `tol_*`, `krke_*`,
 `esstt_*`, `esnswl_*`, `N_*`, `CW_*`, `adap_*`) or an existing `cand_` label,
 so no new FR-module category was needed and no new Bosch label is claimed.
+
+---
+
+## 11. Pass 4 (brief G4, 2026-09-23, issues #41 and #43)
+
+Brief `docs/agent_briefs/G4_calibration_naming_pass4.md`. Dump unchanged
+(`tools/checksum.py verify -q` -> `ALL OK (65 blocks)` before and after). The
+Ghidra work was done read-only in a private copy at `/tmp/ghidra_G4` (recipe
+in §11.9); the read-outs use `tools/cal_show.py`.
+
+### 11.1 0x7FD3E5 is the intake-air temperature, not a battery voltage (VERIFIED-STATIC; label COMMUNITY)
+
+§10.4 left it at "probably a battery voltage at 1/16 V per LSB" and named the
+three writers. All three sit in two functions, and both say the same thing:
+
+```
+FUN_000F8A44 (cyclic, 0x0F8A44-0x0F90C3)
+  0x8021CC = lookup_1d_u8(struct 0x5D727A -> curve 0x5D728F, 0x7FD427)   ; 0x0F8A64
+  ... plausibility / fault debouncing, substitute 0x5D7276 on a fault ...
+  0x8021D0 = FUN_004116A4(0x5D72B8, v, 0x8021D0)          ; u16 low-pass, 0x0F8FC4
+  0x0F8FCC  lbz   r8,0x21E0(r13)        ; high byte of 0x8021D0
+  0x0F8FD0  rlwinm r9,r8,5,0,26         ; v << 5
+  0x0F8FD4  stb   r8,-0x2C0B(r13)       ; 0x7FD3E5 = v            <- writer 1
+  0x0F8FD8  addi  r4,r9,0x2586          ; v*32 + 9606
+  0x0F8FDC  sth   r4,0x21E4(r13)        ; 0x8021D4
+FUN_0011A898 (init, 0x11A898-0x11AA23)
+  0x7FD3E5 = lookup_1d_u8(0x5D727A, 0x7FD427)             ; writer 2, 0x11A990
+  if (v > 0x5D7278 || 0x7F9DFA & 1) 0x7FD3E5 = 0x5D7276   ; writer 3, 0x11A998
+  0x8021D4 = 0x7FD3E5 * 32 + 0x2586
+```
+
+and `FUN_000BDC4C` fills the input: `0x7FD427 = ADC channel 6 >> 2`
+(`FUN_0046CEE0(6)`, store at 0x0BDD08). The unit follows from four
+independent facts, none of which is a guess about another:
+
+1. **The curve 0x5D728F is an NTC linearisation.** Over the ADC byte
+   8 … 230 (axis 0x5D727B) it falls monotonically from 251 to 0. Under the
+   proved `tmot` unit that is **140.25 °C … −48 °C**; as a voltage at 1/16 V it
+   would be a 15.7 V … 0 V *decreasing* function of the sensor voltage, which
+   no battery input is.
+2. **The measuring handler says so.** 0x8021CC (the unfiltered value) is VCDS
+   measuring id **85**, handler 0x039C20, and that handler is instruction for
+   instruction the `tmot` handler 0x039BA4 (`mulli 3; srwi 2; addi 0x34` →
+   formula 0x05 `A = 0x0A`, measuring_vars.md §7.1), i.e. **0.75 °C/LSB − 48**.
+   The battery voltage of the same groups is id 81 (0x80345E, formula 0x15).
+3. **The absolute-temperature companion is exact.** 0x8021D4 = v × 32 +
+   0x2586: at 3/128 K per LSB, 0x2586 = 9606 × 3/128 = **225.14 K = −48.0 °C**
+   and 32 counts = 0.75 K, i.e. the same temperature in kelvin. It is consumed
+   by the exhaust-temperature block of §11.2, where the cap 0x5D179E = 54321
+   reads **1000.0 °C** under the same unit.
+4. **The calibration around it is an intake-air calibration.** The substitute
+   value 0x5D7276 = 91 = **20.25 °C** (a coolant substitute would be hot), and
+   the axes over the cell read as air temperatures: 0x5D5FF1 = −24.75 … 80.25 °C,
+   0x5C7BA5 = −18 … 132 °C in 30 °C steps, 0x5D3612 = 30 … 80.25 °C.
+
+The label: id 85 sits in groups **004.4, 006.3 and 011.3** (with rpm, the
+battery voltage id 81 and `tmot` id 80), which is where every public VAG
+measuring-block list puts the **intake-air temperature**. That makes 0x7FD3E5
+`tans` (FR name) — the *unit* VERIFIED-STATIC, the *meaning* COMMUNITY, and one
+VCDS group-004 read on the bench confirms it.
+
+Consequences, all applied to `re/calibration_names.csv` in place with a dated
+correction in the evidence column:
+
+| row | was | now |
+|---|---|---|
+| 0x5D7942 | `axis_ubatt_5D7942`, 1/16 V | `axis_tans_5D7942`, −9.75, 0, 19.5, 79.5 °C |
+| 0x5D7947 | `axis_ubatt_5D7947`, 8.19 … 14.00 V | `axis_tans_5D7947`, 50.25 … 120 °C |
+| 0x5C7BAB `cand_KLZWSTT` | axis unscaled | x = `tans` −18 … 132 °C |
+| 0x5D361B `mix_801D01_map` | y = "battery voltage 6.5 … 10.7 V" | y = `tans` 30 … 80.25 °C, x = 0x7FD3F7 60/75/90 °C |
+| 0x5D5FFB `zwdelta_7FD338_map` | x raw counts | x = `tans` −24.75 … 80.25 °C |
+
+So `zwdelta_7FD338_map` is an **intake-air-temperature ignition correction**
+(−6.0 … +2.25 °CA over `tans` and speed) — the classic hot-air knock
+protection — and `cand_KLZWSTT` is the start angle's `tans` term.
+
+**0x7FD3F7, the other half of the `start.md` §8 row, is settled by the same
+read.** `FUN_000F90C8` (0x0F9F24, 0x0F9FC4) and `tmot_init` 0x11AA28
+(0x11ADD0) write it as the high byte of the low-pass state 0x802214 =
+`FUN_004116A4(0x0A0A, 0x8021F3, …)`, where 0x8021F3 is the modelled engine
+temperature of `start.md` §2 (itself `tmot` or the substitute 0x8021EB); at
+init it is `cand_mw_tmot` 0x8021EF directly. So **0x7FD3F7 is a filtered engine
+(coolant) temperature in the `tmot` unit**, VERIFIED-STATIC, which is what
+every row that already used it at 0.75 °C − 48 assumed.
+
+> **§10.4 bullet 2 — SETTLED (2026-09-23, G4, §11.1).** 0x7FD3E5 is the
+> intake-air temperature at 0.75 °C/LSB − 48, not a voltage.
+
+### 11.2 `cand_KFMIRLINV` outputs a relative charge, and 0x8015AF is an ignition efficiency (VERIFIED-STATIC)
+
+§10.6 left the value unit of 0x5C9938 open with one lead, the divisor
+0x8015AF. Decompiling its two writers settled the divisor, and following the
+map's output one step further than F4 did settled the map.
+
+**0x8015AF.** `FUN_000E0A0C` (store 0x0E0D5C) and `FUN_00104110` (store
+0x104224) both compute
+
+```
+0x8015B0 = min(0x802661 + etazw_offset_nmot_curve(nmot_w), 255)     ; 0x0E0C40
+0x8015AF = (0x7FD305 & 0x40) ? min(0x8015B0 * 0x80265C / 200, 255) : 0x8015B0
+```
+
+and `FUN_00436B24` makes every u8 of that family from a u16 as
+`u8 = u16 * 25 >> 12` (0x436B24-0x436B8C), which maps 32768 to exactly 200.
+The u16s are Q15 factors: 0x802632 = `FUN_0043619C(zwopt, zwmin)` (0x436890),
+the same efficiency function B7 found behind `etazwb` (`ignition.md` §9), used
+as a `mul_shr15_sat` operand at the end of `FUN_00436838`; 0x802620 is
+`(0x10000 − curve(nmot) × 0x801D8A) >> 1`, 1.0 when the curve is zero. So
+**0x8015AF is an ignition efficiency at 1/200 per LSB, 200 = 1.0**, and the
+"reference value 200" of §10.6 is simply 1.0 in that unit. The second
+evaluation of the map, at `0x8034FA × 200 / 0x8015AF`, is at **the charge
+divided by the ignition efficiency** — the charge the engine would need to make
+the same work at the efficiency of the latest permitted angle — which is the
+textbook input of an exhaust-temperature model (a retarded angle heats the
+exhaust).
+
+**The map's output.** Nothing in `FUN_000E06F8` fixes it (§10.6 was right
+about that), but `FUN_000E0A0C` does, twice:
+
+```
+0x0E0D90  0x8015D2 = cand_KFMIRLINV(nmot_w, 0x8034FA * 200 / 0x8015AE)
+0x0E0E64  0x8015CC = mul_div_sat(0x8015B4, 0x1BC, 0x8015C0)
+0x0E0E98  compare 0x8015CC < 0x8015D2          ; a compare needs one unit
+0x0E0EC8  0x8015C6 = lookup_2d_u16(cand_KFMIOP 0x5CA218, nmot_w, 0x8015CC)
+```
+
+and `cand_KFMIOP`'s x axis is `rl_w` at **100/4096 %/LSB** (E3, 10.4 … 104.2 %).
+Independently, `FUN_000E06F8` forms `0x8015BA = 0x8015D0 × 0x8015C0 / 0x1BC`
+and the caller undoes exactly that factor (`× 0x1BC / 0x8015C0`) before the
+KFMIOP lookup, so the round trip cannot change the unit. **`cand_KFMIRLINV`'s
+values are a relative charge at 100/4096 %/LSB: 0 … 5103 = 0 … 124.6 %**, about
+1.2 × its input at every speed (e.g. 2000 rpm: 10 % → 12.4 %, 50 % → 57.9 %,
+100 % → 123.4 %). The label stays `cand_` and `hypothesis`; the unit is
+`static`.
+
+**What the block is.** With the unit known, the rest of `FUN_000E06F8` reads
+as temperatures:
+
+| object | before | now (unit VERIFIED-STATIC) |
+|---|---|---|
+| 0x5D1CBA | `cand_KFPSSRM`, manifold pressure, unit unknown | `temp_exh_nmot_rl_map`: `0x8015D6 = map(nmot_w, 0x8015D0 >> 1) − tans_kelvin` — a **subtraction of 0x8021D4 (K at 3/128)**, so the map is 3/128 K: **315 … 886 °C** over 650 … 6000 rpm and 15.6 … 104.2 % charge (x at 100/2048 %) |
+| 0x5D179E | unnamed | `temp_exh_max_5D179E` = 54321 = **1000.0 °C**, the cap of the block |
+| 0x5D17A2 | `cand_PSREF`, unit unknown | `dtemp_ref_5D17A2`, subtracted *from* by `ΔT >> 1`, so 3/64 K: **1100.0 K** |
+| 0x5D179A / 0x5D1790 | unnamed | `etazw_offset_nmot_curve` (+0.02 … 0 over 1500 … 2700 rpm) and its count |
+| 0x5D178D | unnamed | `etazw_offset_8015AE` = +0.05 |
+| 0x5D178C / 0x5D17A0 | unnamed | the block's code word (3) and the unused substitute of 0x8015D8 |
+
+Three exact round numbers (225.15 K, 1000.0 °C, 1100.0 K) under one unit are
+the confirmation, and the map itself is the fourth: under 3/128 K − 273.15, 35
+of its 64 cells land within ±0.01 °C of a **whole degree Celsius** (a random table would give about one; 315.01,
+575.01, 623.01, 656.01, 601.00, 683.01, 722.01, 802.00, 839.01, 886.00 …) —
+the calibrator typed integer °C, which no other reading of the counts
+reproduces. **This is the exhaust-gas temperature model that F4's §10.2
+time-boxed as lead (b)** — not `FUN_00108950`, which is a different soak
+model — and its output turns back into a charge 0x8015CC and a torque
+0x8015C6 through `cand_KFMIOP`, which is the shape of a *component-protection
+charge limit*. The meaning ("exhaust", "component protection") is HYPOTHESIS;
+every unit in the table is VERIFIED-STATIC. §10.2's conclusion is untouched:
+none of these cells reaches `rk`.
+
+> **§10.6 bullet 3 — SETTLED (2026-09-23, G4, §11.2).** The value unit of
+> `cand_KFMIRLINV` is a relative charge at 100/4096 %/LSB; 0x8015AF is an
+> ignition efficiency at 1/200 (200 = 1.0).
+
+> **Refined later in this pass (§11.6):** the exhaust-gas temperature model
+> proper is `FUN_001043C8` (`%ATM`); the block above is a second user of its
+> manifold map, which is FR **`KFATMKRH`** (the row `temp_exh_nmot_rl_map` was
+> renamed). Its x input in `%ATM` is the fuel mass `rkg` 0x803034, so
+> `cand_KFMIRLINV` >> 1 plays the role of an `rkg` estimate here.
+
+Commands:
+
+```bash
+./.venv/bin/python3 tools/sda_xref.py data/passat_azx_ori.bin --var 0x8015AE 0x8015B0
+./.venv/bin/python ghidra_scripts/decompile.py --project-dir /tmp/ghidra_G4 --project-name med9 \
+    0x0E0D5C 0x104224 0x0E069C 0x0E06F8 0x0E0900 0x436B38 0x4362C8 0x436890 \
+    --asm 0x0E0D84 --count 70
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin 0x5C9938 --scale 100/4096
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin 0x5D1CBA --scale 3/128 --offset -273.15 --x-scale 100/2048
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin --raw 0x5D179A 6 u16
+```
+
+### 11.3 The intake-air-temperature process (11 objects, VERIFIED-STATIC)
+
+With 0x7FD3E5 settled, `tans_process` 0x0F8A44 and `tans_init` 0x11A898
+(§11.1) read as a textbook sensor chain, and every constant in them has a unit
+from the variable it is compared with:
+
+| object | value | what it does |
+|---|---|---|
+| `tans_ntc_curve` 0x5D728F | ADC 8 … 230 → 140.25 … −48 °C | the NTC linearisation (20 points) |
+| `tans_subst` 0x5D7276 | 91 = 20.25 °C | substitute on a sensor fault |
+| `tans_plaus_min` / `_max` 0x5D7277 / 0x5D7278 | −45.0 / 138.75 °C | range check, fault words 0x8201 / 0x8101 through `FUN_004067FC(0xDA)` |
+| `tans_debounce` 0x5D72A9 | 5 activations | reload of all five debounce counters |
+| `tans_filter_k` 0x5D72B8 | 2621/65536 = 0.040 | low-pass weight in `lowpass_u8q8` 0x4116A4 |
+| `tans_warm_tmot` 0x5D72AC / `tans_warm_count` 0x5D72B6 | 75 °C / 1200 activations | delay before the "sensor stuck" check arms |
+| `tans_min_spread` 0x5D7271 | 0 K | the "stuck" threshold — 0, so the check can never fail |
+| `CW_tans` 0x5D7270, `tans_thr_7FD3D1_b1` 0x5D7279 | 4, 143.25 °C | code word (bit 1, the stuck report, is clear) and a status threshold |
+
+`FUN_004116A4` is now `lowpass_u8q8`: `y += (x·256 − y)·k >> 16`, at least one
+LSB per call. For flex fuel the only row that matters is the NTC curve: the
+ethanol sensor's fuel temperature is *not* this input, and nothing here needs
+to change.
+
+### 11.4 The BDE mode word decides the `KFPRSOL*` labels — four of six were wrong
+
+`rail.md` §13 listed "which FR name belongs to which `KFPRSOL*` variant" as
+open, the addresses and the selection VERIFIED-STATIC and the names guessed.
+The selection tests the **u16** 0x7FB69A (`lhz −0x4956(r13)` at 0x4582A4).
+Its writers `FUN_00119640` (0x11965C) and `FUN_0044C970` (0x44C9FC, 0x44CBD0)
+copy it from 0x802AB2 and maintain three more bits exactly as the FR's
+`%BDEMUM` describes `bdemod_w` (bit 9 `B_berhom`, bit 10 → 12
+`B_easch` → `B_bersch`, bit 14 `B_bdemz` while target ≠ actual mode). The FR
+(`%BDEMKO` FB, the bit table; COMMUNITY for this software) codes the modes as
+
+| bit | 0 | 1 | 2 | 3 | 4 | 6 | 7 |
+|---|---|---|---|---|---|---|---|
+| mode | HOM | HMM | HOS | SCH | SKH | HSP | HKS |
+
+and `%HDRPSOL` p1722 draws the selection with **exactly six booleans** —
+`B_hmm`, `B_skh`, `B_hos`, `B_kh`, `B_sch`, `B_hks` — and says the offset
+(`CWPRSOLAP` bit 5) goes "auf `KFPRSOLHOM` und `KFPRSOLSCH`". The code tests
+bits 7, 4, 2 (+ 0x80156F bit 0), 3, 1 and adds the offset on exactly the bit-3
+and default branches. That fixes all six:
+
+| map | tested | B9's label | **now** |
+|---|---|---|---|
+| 0x5D5224 | bit 7 | `KFPRSOLKH` | **`KFPRSOLHKS`** (homogeneous knock protection) |
+| 0x5D53A4 | bit 4, bit 2, 0x80156F.0 | `KFPRSOLHMM` | **`KFPRSOLKH`** (catalyst heating: SKH, HOS or homogeneous) |
+| 0x5D54A4 | bit 3, + offset | `KFPRSOLHKS` | **`KFPRSOLSCH`** (stratified) |
+| 0x5D52A4 | bit 1 | `KFPRSOLSCH` | **`KFPRSOLHMM`** (homogeneous lean) |
+| 0x5D5324 | default, + offset | `KFPRSOLHOM` | `KFPRSOLHOM` (unchanged, now `static`) |
+| 0x5D5424 | — | `KFPRSOLOFF` | `KFPRSOLOFF` (unchanged, now `static`) |
+
+0x80156F bit 0 is written by `FUN_001032FC` (0x103430) as `bdemod_w` bit 0
+(HOM) AND 0x801571 bit 3, which needs the exhaust-temperature block of §11.2
+running inside a `tmst` / `tnst_w` after-start window: **homogeneous catalyst
+heating**, the FR's `B_kh` (HYPOTHESIS for the meaning). The same bit selects
+the ZWMIN map D3 called `cand_KFZWMNUM` 0x5D5C8B, whose −15 °CA plateau is a
+cat-heating angle; it is now **`cand_KFZWMNKH`** ("Min-Zündwinkel
+Katheizen", FR p3095), still a candidate.
+
+The same bit table names the two `KFZWOP` deltas of `ignition.md` §9:
+`zwopt_delta_maps` reads 0x5C9E25 on bit 7 and 0x5C9EF2 on bit 6, and FR
+`%MDZW` p768 defines the HKS and HSP optimum angles as deltas **`KFDZWOHKS` /
+`KFDZWOHSP`** on the 16 × 11 `KFZWOP` grid with default 0 — both are all zero
+here. The 1-D curve in the same function is **`KLFAKSP`**: `0x802620 =
+(0x10000 − KLFAKSP(nmot)·0x801D8A) >> 1` is FR's "efficiency depending on the
+split", and its axis 0x5C9FA3 is the FR default 520/1000/1520/2000/2520 rpm to
+the rpm.
+
+**For this engine**: the 3.2 FSI runs `bdemod` = HOM in normal driving
+(`fr_index.md` §0), so the live rail setpoint is **`KFPRSOLHOM` (+ `KFPRSOLOFF`)
+and `KFPRSOLKH` during catalyst heating after a cold start**. E5's rail hook (on `prsoll_raw`) and
+`docs/05` (the rail section) name only `KFPRSOLHOM` and `KFPRSOLOFF`, which are unchanged; nothing that was built
+depends on the four corrected labels. Two things outside this brief's files
+still carry the old labels and are listed for their owners: the draft's
+`name_or_blank` column (the sidecar wins, so the XDF is right) and the
+comments of `tests/test_ff_rail_patch.py` lines 124-129.
+
+### 11.5 `FUN_00455C60` is the purge-fuel block (`%TEB`), and 0x80315C is `rkte_w` (12 objects)
+
+`injection.md` §7 took `FUN_00455C60` for the EGAS level-2 fuel monitor and §9
+listed `− 0x80315C` as a "component/diagnostic subtraction". It is neither:
+the function limits the purge-valve opening, delays and mixes the purge gas,
+and writes **0x80315C, the canister fuel that `gk_rk` then subtracts from
+`rk`** — the FR's `rkte_w` (VCDS id 171 shows it as a percentage). The FR's
+`%TEB` names fit where the inputs and the mode split are unique:
+
+| object | FR label | evidence in the code |
+|---|---|---|
+| 0x5D479E | **`KFFTEVFX`** | 4 × 4 over (`nmot`, the pressure ratio 0x7FEFAE / 0x800EED) — FR "nmot, pspu" |
+| 0x5D46F0 | **`FTEVFXHM`** | curve over `nmot`, min()'d in when `bdemod_w` bit 1 (HMM) |
+| 0x5D46F9 | **`FTEVFXS`** | the same, bit 3 (SCH) |
+| 0x5D4888 / 0x5D488A | **`FRKTEMN` / `FRKTEMX`** | `rkte` clamped to [−0.08, +0.50] × `rk`, clamp flag = `B_rkteb` |
+| 0x5D4982, 0x5D4828, 0x5D4705, 0x5C732B | `cand_NVERZMN`, `cand_DSTEMIN`, `cand_FVERMN`, the 5-point `qmsdyn` axis | transport delay and mixing, HYPOTHESIS |
+| 0x5D4807, 0x5D46C3, 0x5D497E | descriptive | release debounce, code word, mass-flow floor |
+
+For flex fuel: the subtraction assumes gasoline vapour. It is a tuning-checklist
+item (log id 171 during purge on E85), not a patch item. `injection.md` has
+the dated correction (§12) and its §11 row is marked SETTLED.
+
+### 11.6 `FUN_001043C8` is the exhaust-gas temperature model `%ATM` (53 objects)
+
+The second consumer of the §11.2 map is the two-bank `%ATM` (0x1043C8-0x1081FF;
+every object has one load site per bank). Its temperatures are u16 K at
+3/128 K — the unit §11.1 found for `tans_kelvin` — and the calibration lands on
+whole °C under it everywhere: `KTMOTW` 95.0, `TAVHKEMN` 230.0, `TAVVKEMN`
+244.0, `TAVVKGEMN` 250.0, `TATMKRSA` 275.0, the default start temperature 20.0,
+the manifold maps on whole degrees, the main-catalyst exotherm on whole kelvin.
+`bdemod_w` bits 3|2|4 (the stratified family) select the S variants, which is
+what fixes the S/H labels.
+
+| group | objects | label status |
+|---|---|---|
+| manifold | **`KFATMKRH`** 0x5D1CBA (was `temp_exh_nmot_rl_map`, over `nmot_w` × `rkg` 0x803034), **`KFATMKRS`** 0x5D1D5E (stratified: 800-3600 rpm, half load, 216-625 °C), **`KFATLAMS`** 0x5D1C1E (λ 0.75-1.40 axis, 1.0 at λ = 1), **`KFATZWMS`** 0x5D1E4E (ignition-efficiency axis 0.30-1.00, 1.0 at η = 1, up to +53 %) + its HSP twin, `cand_FATMDKS`, **`TATMKRSA`** and the overrun rate curve | static except `FATMDKS` |
+| pre-catalyst (feeds the chain) | **`EAVKH`, `EAVKS`, `EBVKH`, `EBVKS`** + counts, **`MATMAVK`, `MATMBVK`**, **`TAVVKEMN`, `TOEXTVK`**, **`FEXOLAVK`** (λ axis 0.70-4.0) | static — and **all neutral**: zero exotherm, zero mass, zero λ factor, i.e. no pre-catalyst is modelled |
+| parallel reference section | `cand_EAVKG(H)`, `cand_EBVKG(H)`, `cand_MATMA/BVKG`, `cand_TAVVKGEMN`, `cand_TOEXTVKG` + counts | hypothesis: its outputs feed nothing downstream, which is what the FR's *Grenzkat* (the catalyst-diagnosis reference) is |
+| main catalyst | **`FEXOLAHK`** (0.70 at λ 0.70 … 1.00), **`TAVHKEMN`**, **`TOEXTHK`**, `cand_FATMEHK` (+76 … +135 K), `cand_FATMEBHK` (−35 … −14 K), two stratified twins, `cand_MATMA/BHK` | static / hypothesis as marked |
+| general | **`KTMOTW`**, the default start temperature, the HSP enable temperature, `cand_SOPOV` | static / hypothesis |
+
+For flex fuel the one object that matters is **`KFATZWMS`**: the model heats
+the exhaust as the ignition efficiency falls, so an E85 calibration that runs
+*more* advance (higher efficiency) lowers the modelled exhaust temperature by
+itself, and one that is knock-limited later raises it. Whether anything
+enriches on the modelled temperature is the open question of §11.8.
+
+### 11.7 0x80223B is the gear, not an operating mode (`%BBGANG`)
+
+§10.6 settled 0x80223B as "the operating-mode index, 0..7". Its one writer
+(0x45C064) is `FUN_0045BD00`, and that function is textbook FR `%BBGANG`
+(the FB text): `nvquot_w` 0x80223E = `nmot_w · 4096 / 0x802260` (engine speed
+over vehicle speed); keep the last gear while `nvquot_w` stays inside its
+window, else test gears 1 … 6 upwards against **`NVQUOT1O` … `NVQUOT6U`**
+(0x5D77F0 … 0x5D7806, twelve new rows), 0 when none fits, **7 from the
+reverse flag** 0x7FEBD7, and the CAN gear 0x7FD17C with an automatic. So:
+
+* **0x80223B is `gangi`** (VERIFIED-STATIC for the dataflow, the FR labels
+  `static`); `re/symbols.csv` renames `opmode_index` with a dated note, the
+  sidecar renames `axis_opmode_5C887B` → **`axis_gangi_5C887B`**, and the
+  four `rl_*_map` rows of §10.5 plus `cand_KFRLMXBTS` / `cand_KFFRLMXN` are
+  maps over **gear**, not mode (descriptions corrected in place);
+* `%MDFUE`'s "`== 7` → 0x5C94F2" is **reverse gear**, so the FR's `KFMIRLS`
+  (stratified) is no longer a candidate: the row is now the descriptive
+  **`rl_mdfue_gear7_map`**;
+* one VCDS log of id 130 while shifting confirms it outright.
+
+> **§10.6 bullet 2 — CORRECTED (2026-09-23, G4, §11.7).** The variable is the
+> gear `gangi`, not an operating-mode index; everything else in that bullet
+> (one writer, the 0..7 axis, id 130) stands.
+
+### 11.8 A lambda divisor in `gk_rk` that §10.2 missed (a lead, not a closed item)
+
+While naming `KFATLAMS` this pass read `gk_rk` again: after the base mass and
+before `fr`, it computes **`rk = (rk << 12) / 0x80304A` whenever 0x7FEA33 is
+set** (set at 0x41AE3C on the 0x7FE920 branch). `injection.md` §9 lists the
+step as "per-injection normalisation (mode-dependent)"; §10.2's statement
+"`gk_rk` multiplies exactly four things … there is no fifth factor" overlooked
+it. What is VERIFIED-STATIC:
+
+* `lamsbg_select` `FUN_0041AF2C` writes 0x80304A = 0x803046 in homogeneous
+  mode (`bdemod_w` bit 0), else 0x80340C clamped to [0x802AC0, 0x802ABE];
+* 0x803046 / 0x803044 are built per bank by B8's `eta_coordinator` 0x442C18
+  from a list of candidates — a base value (0x803050: 1.0, or
+  `lamsbg_mode_change` 0.970 during a BDE mode change), component-protection
+  style inputs (0x803058, 0x801CC6 / 0x801CC4 under 0x801CD4 bits 1 / 3 and
+  0x7FEA38), 0x80341E / 0x80341C, 0x7FED90 / 0x7FED8E, 0x801D2C / 0x801D2A,
+  0x803412 / 0x803410 — clamped to [0x802AC0, 0x802ABE], with fixed values on
+  `dwbho1smn_w` bits 0 / 1 (`lamsbg_subst_dwbho` 1.008) and 0x8033FA bit 13
+  (`lamsbg_fixed_b1` / `_b2` 1.000);
+* `%ATM` keys `KFATLAMS` (FR input `lamsbg_w`) with 0x80304A over a λ axis.
+
+So 0x80304A is, with high probability, **`lamsbg_w`, the lambda setpoint, and
+a value below 1.0 enriches**. B8's reading of 0x803046 / 0x803042 as
+*efficiency* setpoints (`start.md` §5.1) is therefore suspect too — the
+12-point x axis 0.65 … 1.20 of the 0x5C76D5 ignition map reads as a λ axis as
+naturally as an efficiency axis. **This reopens the part of §10.2 that says
+"there is no stock enrichment": the mechanism exists; whether any calibrated
+input ever asks for λ < 1 was not traced** (time-boxed; only the six constants
+above are named). The follow-up is to trace the candidate inputs listed above
+to their maps, starting with 0x803058 and 0x801CC6, which look like the
+component-protection (`%LAMBTS`) request. `symbols.csv` carries dated notes on
+`eta_coordinator`, `eta_mean_w` and `eta_mean`, and a `start.md` §5.1 note
+points here.
+
+> **§10.2 — CORRECTION (2026-09-23, G4, §11.8).** Point 1 is incomplete:
+> `gk_rk` also divides by the lambda setpoint 0x80304A. The rest of §10.2
+> (`KFMIXA` / `KFMIXB` neutral, `fgru_trim` a tester channel, the PI
+> controller tracking the request) stands; its conclusion "no full-load or
+> component-protection enrichment on the fuel path" does not, until
+> 0x803046's inputs are traced.
+
+### 11.9 Counts, verification, reproduction
+
+| | before (F4) | after (G4) |
+|---|---|---|
+| rows in `re/calibration_names.csv` (objects with a name) | 359 | **462** |
+| … tagged `static` (the label) | 148 | **242** |
+| … tagged `hypothesis` | 211 | 220 |
+| objects with a unit | 344 | **450** |
+| scaling tagged `static` | 268 | **348** |
+| tables/curves/axes without a sidecar row | 878 of 1,068 | **850 of 1,068** |
+
+(F4 quoted 876 of 1,066; the recount with the current draft gives 878 / 1,068
+before this pass, so the comparison uses that.) **103 new rows**, and 29
+earlier rows corrected in place (the six 0x7FD3E5 rows, `cand_KFMIRLINV`,
+`KFPSSRM` → `KFATMKRH`, `PSREF`, `TMSRMMN`, six `KFPRSOL*`, two `KFZWOP`
+deltas and their counts, `KFZWMNUM` → `cand_KFZWMNKH`, eight gear-keyed
+rows). The generator on a work copy:
+
+```bash
+./.venv/bin/python3 tools/draft_to_xdf.py re/calibration_draft.csv -o work/med9_draft.xdf \
+    --extra-rows patches/ff_fuel/ffcal001_rows.csv --min-confidence hypothesis
+./.venv/bin/python3 tools/draft_to_xdf.py --validate work/med9_draft.xdf
+# re/med9_draft.xdf is not touched on this branch
+```
+
+Reproduction (read-only Ghidra copy, as §10.7):
+
+```bash
+mkdir -p /tmp/ghidra_G4
+cp -R /Users/carlo/ecu_azx/ghidra_projects/med9.gpr /Users/carlo/ecu_azx/ghidra_projects/med9.rep /tmp/ghidra_G4/
+export GHIDRA_INSTALL_DIR=/usr/local/Cellar/ghidra/12.1.3/libexec
+./.venv/bin/python -m pyghidra.ghidra_launch --install-dir "$GHIDRA_INSTALL_DIR" \
+    ghidra.app.util.headless.AnalyzeHeadless /tmp/ghidra_G4 med9 \
+    -process passat_azx_ori.bin -noanalysis -scriptPath ghidra_scripts -postScript import_symbols.py "$PWD"
+./.venv/bin/python ghidra_scripts/decompile.py --project-dir /tmp/ghidra_G4 --project-name med9 \
+    0x0F8FD4 0x11A990 0x0F9F24 0x11ADD0 0x0BDD08 0x4116A4 \
+    0x0E0D5C 0x104224 0x0E069C 0x0E06F8 0x0E0900 0x436B38 0x4362C8 0x436890 \
+    0x44C9FC 0x11965C 0x4582C4 0x103430 0x455C60 0x1043C8 0x45C064 \
+    0x41AA48 0x41AF60 0x442C18 0x454698
+./.venv/bin/python ghidra_scripts/decompile.py --project-dir /tmp/ghidra_G4 --project-name med9 \
+    --asm 0x39BA4 --count 9 --asm 0x39C20 --count 9 --asm 0x0F8FA4 --count 20
+./.venv/bin/python3 tools/sda_xref.py data/passat_azx_ori.bin --var 0x7FD3E5
+./.venv/bin/python3 tools/store_xref.py data/passat_azx_ori.bin --window 0x7FD3E0 0x7FD3F8
+./.venv/bin/python3 tools/measuring_vars.py data/passat_azx_ori.bin --groups | grep -w 85
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin 0x5D728F --scale 0.75 --offset -48
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin 0x5D1CBA --scale 3/128 --offset -273.15
+./.venv/bin/python3 tools/cal_show.py data/passat_azx_ori.bin --raw 0x5D1E96 16 u16
+```
+
+FR pages read for this pass (`documents/MED9.1_TFSI_Funktionsrahmen.pdf`,
+`pdftotext -layout`): `%BDEMKO` FB (the mode bit table), `%BDEMUM` ABK/FB,
+`%HDRPSOL` p1722 (diagram, ABK, `CWPRSOLAP`), `%MDZW` p768 APP (`KFDZWOHKS`,
+`KFDZWOHSP`, `KLFAKSP`), `%ZWMIN` ABK p3095, `%TEB` ABK, `%ATM` ABK,
+`%BBGANG` ABK/FB. Every FR label this pass assigns is either `static` (the
+FR's inputs, mode split and count match the code) or `cand_` (one of those is
+missing).
