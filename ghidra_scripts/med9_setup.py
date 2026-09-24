@@ -136,7 +136,7 @@ TABLES = [
     (0x01FFC0, "tbl_checksum_const",         "checksum", 4),
     (0x0A0000, "tbl_checksum_code",          "checksum", 54),
     (0x5C3300, "tbl_checksum_cal",           "checksum", 6),
-    (0x02B870, "tbl_kwp_services",           "kwp",      24),
+    (0x02B820, "tbl_kwp_services",           "kwp",      28),
     (0x02BC38, "tbl_toucan_bases",           "u32",      3),
     (0x02BC50, "ptr_can_config",             "u32",      2),
     (0x02BC90, "tbl_can_rx",                 "can_rx",   22),
@@ -148,9 +148,16 @@ STRINGS = [
     (0x5CEE20, "ecu_ident_block", 0x50),
 ]
 
-KWP_TABLE = 0x02B870
-KWP_ENTRIES = 24
+# The dispatcher (kwp_service_dispatch, 0x13E98C) takes base and count from
+# the config struct at 0x2BA50: base 0x2B820, count 0x1C = 28.  A walk from
+# 0x2B870 / 24 misses SIDs 0x12, 0x3E, 0x1A, 0x83 (brief B3, issue #13,
+# re/findings/kwp.md section 1.1).
+KWP_TABLE = 0x02B820
+KWP_ENTRIES = 28
 KWP_ENTRY_SIZE = 20
+# Names this script seeds itself (SEED_FUNCTIONS) ahead of the table walk;
+# they are placeholders that the walk is allowed to replace.
+KWP_PLACEHOLDER_PREFIX = "kwp_handler_"
 
 # Acceptance checks reported at the end (brief A1 / issue #7).
 ACCEPT_DECOMPILE = 0x020004
@@ -286,11 +293,12 @@ class Setup(object):
         from ghidra.program.model.data import (
             ArrayDataType, ByteDataType, CategoryPath, DataTypeConflictHandler,
             PointerDataType, StructureDataType, UnsignedIntegerDataType,
-            VoidDataType)
+            UnsignedShortDataType, VoidDataType)
 
         dtm = self.program.getDataTypeManager()
         path = CategoryPath("/MED9")
         u32 = UnsignedIntegerDataType()
+        u16 = UnsignedShortDataType()
         u8 = ByteDataType()
         fptr = PointerDataType(VoidDataType(), 4)
 
@@ -307,13 +315,15 @@ class Setup(object):
             (u32, "sum", "32-bit sum of big-endian 16-bit words"),
             (u32, "not_sum", "bitwise complement of sum"),
         ])
+        # Layout per re/findings/kwp.md section 1.2 (brief B3).
         types["kwp"] = struct("med9_kwp_service", [
             (u8, "sid", "KWP2000 / OBD service id"),
-            (ArrayDataType(u8, 3, 1), "pad", "always FF FF FF"),
-            (u32, "flags", "session / access flags"),
-            (fptr, "handler", "primary service handler"),
-            (fptr, "handler2", "secondary handler, 0 if none"),
-            (u32, "reserved", "always 0"),
+            (u8, "sub", "sub-function to match, 0xFF = any"),
+            (u16, "mask_a", "capability mask, 0xFFFF on every entry"),
+            (u32, "session_mask", "diagnostic-session gate: bit 1 << session"),
+            (fptr, "handler", "primary service handler (h1)"),
+            (fptr, "handler2", "secondary handler (h2), 0 if none"),
+            (u32, "arg", "passed to the handler in r3; 0 except SID 0x83"),
         ])
         types["can_rx"] = struct("med9_can_rx_entry", [
             (u32, "index", "slot index"),
@@ -406,8 +416,17 @@ class Setup(object):
         return made
 
     def seed_kwp_handlers(self):
-        """Create a function at every handler in the KWP dispatch table."""
+        """Create a function at every handler in the KWP dispatch table.
+
+        Walks all KWP_ENTRIES rows from KWP_TABLE.  A handler that already
+        carries a user-defined name other than a ``kwp_handler_`` placeholder
+        (for example one that import_symbols.py applied from re/symbols.csv)
+        keeps that name; the ``kwp_sid_XX_hN`` name is added as a secondary
+        label instead, so re-running the setup on an annotated project does
+        not undo the knowledge base.
+        """
         made = 0
+        kept = 0
         seen = {}
         for i in range(KWP_ENTRIES):
             entry = KWP_TABLE + i * KWP_ENTRY_SIZE
@@ -427,19 +446,42 @@ class Setup(object):
                 while name in seen:
                     name += "_alt"
                 seen[name] = target
+                comment = ("KWP2000/OBD service %#04x handler (%s), tbl_kwp_services[%d]"
+                           "\n%s" % (sid, slot, i, EVIDENCE))
                 if func is None:
                     func = self.flat.createFunction(a, name)
-                    if func is not None:
-                        made += 1
-                else:
+                    if func is None:
+                        self.say("kwp: sid %02X %s -> %08X could not create a function"
+                                 % (sid, slot, target))
+                        continue
+                    made += 1
+                    self.flat.setPlateComment(a, comment)
+                elif str(func.getName()) == name:
+                    made += 1                 # re-run: already carries this name
+                    if self.flat.getPlateComment(a) is None:
+                        self.flat.setPlateComment(a, comment)
+                elif self._is_placeholder(func):
                     func.setName(name, _source_user())
                     made += 1
-                if func is not None:
-                    self.flat.setPlateComment(
-                        a, "KWP2000/OBD service %#04x handler (%s), tbl_kwp_services[%d]"
-                           "\n%s" % (sid, slot, i, EVIDENCE))
-        self.say("kwp dispatch table: %d handler functions created/named" % made)
+                    self.flat.setPlateComment(a, comment)
+                else:
+                    self.flat.createLabel(a, name, False, _source_user())
+                    kept += 1
+                    self.say("kwp: sid %02X %s -> %08X keeps its name %s, %s added as a label"
+                             % (sid, slot, target, func.getName(), name))
+        self.say("kwp dispatch table: %d handler functions created/named, "
+                 "%d kept an existing name" % (made, kept))
         return made
+
+    def _is_placeholder(self, func):
+        """A Ghidra default name or one of our kwp_handler_ seeds: safe to rename."""
+        from ghidra.program.model.symbol import SourceType
+
+        symbol = func.getSymbol()
+        if symbol is None or symbol.getSource() != SourceType.USER_DEFINED:
+            return True
+        name = str(func.getName())
+        return name.startswith(KWP_PLACEHOLDER_PREFIX) or name.startswith("FUN_")
 
     def _in_code(self, address):
         return any(start <= address <= end for start, end in CODE_RANGES)

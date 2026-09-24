@@ -104,12 +104,13 @@ has the command lines.
    either order) over 0x20000-0x14494F and 0x404000-0x47FFFF: 1,741 + 581
    candidates, 2,308 new functions; without it auto-analysis only reaches what
    the call graph from the seeds covers (`--no-prologue-scan` turns it off).
-   The KWP dispatch table is parsed and each non-zero handler becomes a named
-   function (`kwp_sid_XX_h1`/`_h2`, 33 in total). **Known gap:** the script
-   still reads 24 entries from 0x2B870; the table really starts at 0x2B820
-   with 28 entries (`02_memory_map.md` §7, brief B3), so the handlers of SIDs
-   0x12, 0x3E, 0x1A and 0x83 are named by `re/symbols.csv` import, not by the
-   setup script.
+   The KWP dispatch table (0x2B820, 28 entries, `02_memory_map.md` §7) is
+   parsed and each non-zero handler becomes a named function
+   (`kwp_sid_XX_h1`/`_h2`, 37 in total; 33 until 2026-09-24, when the script
+   still read 24 entries from 0x2B870 and missed SIDs 0x12, 0x3E, 0x1A, 0x83
+   -- brief B3, #13). A handler that already carries a user-defined name,
+   for example one applied from `re/symbols.csv`, keeps it and gets the
+   `kwp_sid_` name as a second label.
 7. Symbols and comments round-trip through `re/symbols.csv` with
    `ghidra_scripts/export_symbols.py` / `import_symbols.py`
    (`04_re_guidelines.md` §4).
@@ -118,14 +119,16 @@ EliasTuning/Med9GhidraScripts has a working `med9-install.py` for 2 MB ECUs
 (ROM at 0x400000, RAM at 0x600000, same r13/r2) and a `no_globals` cspec that
 stops the decompiler folding SDA globals; it was borrowed from, with our map.
 
-Results of a full run on `data/passat_azx_ori.bin` (reproduced twice with
-identical counts):
+Results of a full run on `data/passat_azx_ori.bin` (2026-09-24, with the
+28-entry KWP table; the 2026-09-15 runs, reproduced twice with identical
+counts, gave 2,928 / 1,123 / 4,060 functions -- the four extra KWP handlers
+are the whole difference):
 
 | Check | Result |
 |---|---|
-| functions in `EXT_FLASH` 0x0-0x1FFFFF | 2,928 |
-| functions in `INT_FLASH` 0x404000-0x47FFFF | 1,123 |
-| functions total | 4,060 |
+| functions in `EXT_FLASH` 0x0-0x1FFFFF | 2,929 |
+| functions in `INT_FLASH` 0x404000-0x47FFFF | 1,126 |
+| functions total | 4,064 |
 | references into `CAL_ALIAS` 0x5C0000-0x5FFFFF | 13,619 references to 7,917 distinct addresses |
 | `0x4386D8` | a function, 204 bytes, named `kwp_sid_20_h1` from the dispatch table |
 | `0x20004` decompiled | `romcheck_result_flags = 0; DAT_007f824b = 0xff; DAT_007f8248 = 0; DAT_007f8249 = 0xff;` i.e. the r13-relative stores resolve to 0x7F8248-0x7F824B |
