@@ -449,6 +449,12 @@ Clear DTCs (`docs/07` §3.4 item 1). Run `probe --bus gs_usb:0` again (step
 2b). Read the DTCs with VCDS. Log the step-3d scenario once more and compare it
 with the baselines (`docs/07` §7, chapter 5).
 
+> **2026-09-24 (H2, #47/#26):** run `logging/sessions/adaptation_channels.json`
+> before *and* after this flash and after the DTC clear — the block-8 channels
+> (incl. fuel trims 4/8/10 and the E% at +19), 0x7FA02B and 0x7FEB59 — so a
+> reset from the routine-0xC5 path (`re/findings/eeprom.md` §11) is visible;
+> Flash 0 is a bare download and should not trip it.
+
 **Pass = the #26 exit criterion:** the ECU runs the re-saved file, the
 read-back equals the written file (items 1 and 5), TesterPresent works, and
 there is no DTC beyond the expected bench faults (`hardware_prep.md` §3.5:
@@ -590,6 +596,12 @@ and `--uncovered report`. Exit 0 plus row A is the **#27 exit criterion**: the
 counter increments at the task rate, and the log comparison shows no other
 change. If anything is off, roll back (procedure §7). Row D's roll-back needs
 no on-chip write (§7, note).
+
+> **2026-09-24 (H2, #47/#27):** run `logging/sessions/adaptation_channels.json`
+> around this flash too. Flash 1 is still a bare download of ff_counter (no
+> `31 C5`), so the adaptation channels should be unchanged; a reset here would
+> mean the tool ran component-protection adaptation (`re/findings/eeprom.md`
+> §11) — record it against #28.
 
 **Why here:** Flash 1 is the first code of ours in the ECU. It needs S3
 (`ram_status` from step 4), Flash 0's proof of the route (step 5), and step

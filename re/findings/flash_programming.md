@@ -683,6 +683,25 @@ out of this brief's scope; the bench read-back after Flash 0 remains the proof
    configuration word and the censorship bits. Take the K-TAG/BDM read of the
    missing 16 KB **before** the first write, as `docs/02` §2 already says.
 
+> **2026-09-24 (H2, #47/#26/#28) — the reflash may reset the adaptation
+> channels; read them and the flag around every flash.** A stock, tester-free
+> path `fault_clear_then_adaptation_reset` 0x0D1068 (a 100 ms task process)
+> resets all 17 KWP adaptation channels — the fuel trims 4/8/10 among them
+> (`docs/05` §3.3) — on the first application boot when **0x7FEB59 ≠ 0 and bit
+> 0 of EEPROM 0x28B (block 11 +11)** are set. The download itself does **not**
+> set the bit; the tester's **routine 0xC5** (`31 C5` / `33 C5`, the
+> immobiliser / component-protection adaptation step) does, raw-writing EEPROM
+> 0x28B/0x2AB (`re/findings/eeprom.md` §11, setter 0x087494). So a flash that
+> includes component-protection adaptation resets the trims next boot; a bare
+> download does not. **Add to the checklist:** (a) note on the bus whether
+> `31 C5` / `33 C5` was sent; (b) **read EEPROM 0x28B/0x2AB and the block-8
+> adaptation record (eeprom 0x1C0-0x1FF, the 17 channels at +2..+18, the E%
+> store at +19) before and after the flash and after any DTC clear**
+> (`logging/sessions/adaptation_channels.json`); (c) the ff_fuel E% at block 8
+> +19 survives the reset — a changed +19 means something else. A plain
+> `14 FF 00` DTC clear does **not** reset the channels (0x038D64 has one
+> caller, 0x0D10D0, behind both gates).
+
 ### 7.3 If the read-back shows the on-chip flash was skipped
 
 Then the decision per hook is the one the brief asked for. Note first that an
