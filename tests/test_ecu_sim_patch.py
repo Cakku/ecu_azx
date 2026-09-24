@@ -56,13 +56,25 @@ def handlers(**kw) -> "Med9Handlers":
 
 def drive(runner: "PatchRunner", seconds: float, *, e_pct=85, status=0,
           frames=True, temp_c=25) -> None:
-    """Advance the simulated clock, feeding the node's frames at 10 Hz."""
+    """Advance the simulated clock, feeding the node's frames at 10 Hz.
+
+    Deterministic in SIMULATED time: `PatchRunner.advance` stops early when
+    its wall-clock budget (MAX_CATCHUP_WALL_S) runs out, which on a loaded
+    host used to leave the runner short of the target -- and a test that
+    counted segments over "6 s" then saw fewer than it asserted (the G5
+    flake).  Each 100 ms step is therefore driven until the runner's own
+    clock has reached it, so every test sees exactly `seconds` of ECU time
+    whatever the host is doing.
+    """
     step, n = 0.1, int(seconds / 0.1)
+    start = runner.sim_t
     for i in range(n):
         if frames:
             runner.on_frame(0x0EC, ff.frame(e_pct=e_pct, t_fuel_c=temp_c,
                                             counter=i & 0xFF, status=status))
-        runner.advance(runner.sim_t + step)
+        target = start + (i + 1) * step
+        while runner.sim_t + runner.tick_s <= target + 1e-9:
+            runner.advance(target + 1e-9)
 
 
 # ------------------------------------------------- the runner on its own ----
@@ -105,13 +117,25 @@ class TestPatchRunner(DumpUnchanged):
                 self.assertEqual(h.emu.read(PATCH_RAM, 0x40)[0x1E], want)
 
     def test_the_segment_hook_never_lets_rk_compound(self):
-        """The stub scales 0x803038 in place; the upstream value is re-made."""
+        """The stub scales 0x803038 in place; the upstream value is re-made.
+
+        Counted in activations, not seconds (brief G5): `drive` reaches the
+        simulated target whatever the host load, the runner has run exactly
+        600 activations, and the segment count is the one the animated rpm
+        ramp predicts for them -- so the check cannot flake under a loaded
+        suite and still proves the hook ran many times without compounding.
+        """
         h = handlers()
         drive(h.runner, 6.0)
+        self.assertEqual(h.runner.ticks, 600, "6 s of 10 ms activations")
         rk = struct.unpack(">H", h.emu.read(0x803038, 2))[0]
         base = h.ram.rk_base(h.runner.sim_t)
         f = struct.unpack_from(">H", h.emu.read(PATCH_RAM, 0x40), 0x0A)[0]
         self.assertLessEqual(rk, (base * f >> 10) + 2)
+        # rpm * cylinders / 120 per second, summed over the 600 activations
+        want = sum(h.ram.rpm(0.01 * k) * h.ram.cylinders / 120.0 * 0.01
+                   for k in range(1, 601))
+        self.assertLessEqual(abs(h.runner.segments - int(want)), 1)
         self.assertGreater(h.runner.segments, 100)
 
     def test_dwkrz_is_never_positive(self):
@@ -143,7 +167,9 @@ class TestTheRunnerDrivesFlash1Too(DumpUnchanged):
         h = Med9Handlers(str(DUMP), patch_dir=str(self.FF_COUNTER),
                          ram=AnimatedRam(live_task_set=task_set,
                                          statics=dict(DEFAULT_STATICS)))
-        h.runner.advance(seconds)
+        # simulated time, not wall time: advance() may stop on its budget
+        while h.runner.sim_t + h.runner.tick_s <= seconds + 1e-9:
+            h.runner.advance(seconds + 1e-9)
         return h
 
     def test_the_set_a_stub_counts_and_names_itself(self):
