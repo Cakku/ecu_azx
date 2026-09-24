@@ -683,3 +683,8 @@ The E axis is `ff_fst_e_axis[6]` = 0, 20, 40, 60, 85, 100 % — the one §7
 recommends, with 85 as a breakpoint because E85 is the calibration target.
 Both axes are calibration, not compiled constants, and both are checked
 strictly increasing by `ffcal001.py`.
+
+> **Note (2026-09-24, H5, #49, `calibration_names.md` §13.4).** The 0x5C76D5
+> map of §3.1 / §5.1 is now labelled **`KFDZWKG`** (FR %ZWGRU p3090, keyed by
+> `nmot_w` and `lambas_w`); B7's 0x5C753E, which carried that label, is the
+> descriptive `dzw_kg_weighted_map`. Nothing in this file's dataflow changes.
