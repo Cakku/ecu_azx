@@ -77,5 +77,43 @@ class TestThePersistOffsetIsReadNotRestated(DumpUnchanged):
         self.assertIsNone(br.persist_device_byte(str(tmp) + ".missing"))
 
 
+@requires_dump
+@requires_rehearsal
+class TestTheScriptedKwpSteps(DumpUnchanged):
+    """The two KWP-conversation steps, run into a temporary file and graded."""
+
+    def _run(self, name: str) -> list:
+        step = br.BY_NAME[name]
+        out = Path(tempfile.mkdtemp()) / f"{name}.csv"
+
+        class Here(type(step)):
+            path = out                            # not logging/samples/
+
+        here = Here(step.name, step.why, step.script)
+        here.script(here, None)
+        text = out.read_text(encoding="utf-8")
+        self.assertIn("# simulated: true", text.splitlines())
+        self.assertTrue(any(ln.startswith("# modelled:")
+                            for ln in text.splitlines()),
+                        "a modelled response is labelled as a model")
+        return br.checks_for(name, br.series(out))
+
+    def test_the_steps_are_in_the_rehearsal_in_order(self):
+        names = [s.name for s in br.STEPS]
+        self.assertEqual(names.index("dtc"), names.index("fault6") + 1,
+                         "the fault read-back follows the FAULT matrix")
+        self.assertIn("pid52", names)
+
+    def test_clear_then_read_dtcs(self):
+        results = self._run("dtc")
+        self.assertEqual(len(results), 6)
+        self.assertEqual([w for w, ok, _d in results if not ok], [])
+
+    def test_pid52_after_a_reconnect(self):
+        results = self._run("pid52")
+        self.assertEqual(len(results), 3)
+        self.assertEqual([w for w, ok, _d in results if not ok], [])
+
+
 if __name__ == "__main__":                                    # pragma: no cover
     unittest.main()

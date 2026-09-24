@@ -14,6 +14,15 @@ It writes `logging/samples/ff_fuel_sim_*.csv`, every one of them carrying
 measurement.** A simulated log never enters a bench comparison set (C3's
 rule); it proves the procedure, the plumbing and the arithmetic.
 
+Two steps are KWP conversations rather than `med9log log` runs (brief G5,
+2026-09-24): `dtc` reads the stored faults with `18 00 FF 00`, clears them with
+`14 FF 00` and reads them back -- the bench day's first step, `docs/07`
+section 3.4 step 1 -- and `pid52` turns G1's `ff_pid52_enable` on and shows
+that `01 40` advertises PID 0x52 only after a reconnect, because the support
+bitmaps are rebuilt once per connection.  Their transcripts are
+`ff_fuel_sim_dtc.csv` / `ff_fuel_sim_pid52.csv`, and what in them is modelled
+rather than the firmware says so in a `# modelled:` line.
+
 Usage::
 
     python3 logging/bench_rehearsal.py                 # everything, ~3 min
@@ -183,6 +192,27 @@ STEPS = [
          "procedure_d2.md B3: the same EEPROM after a simulated power cut",
          12, node=False, eeprom=True),
 ]
+
+
+class KwpStep(Step):
+    """A step that is a KWP conversation, not a `med9log log` run (brief G5).
+
+    `script(step, eeprom_file)` drives the simulator over the in-process
+    TP2.0 bus with the same `med9kwp` client the logger uses and writes a
+    transcript in the logger's CSV shape (`time_s,var,value,unit`, plus one
+    `# kwp:` comment per exchange), labelled `# simulated: true`.
+    """
+
+    def __init__(self, name, why, script, sim_seconds=0, **kw):
+        super().__init__(name, why, sim_seconds, node=False, **kw)
+        self.script = script
+
+
+def _insert_after(name: str, step: Step) -> None:
+    STEPS.insert(next(i for i, s in enumerate(STEPS) if s.name == name) + 1,
+                 step)
+
+
 BY_NAME = {s.name: s for s in STEPS}
 
 
@@ -252,6 +282,45 @@ def checks_for(name: str, s: dict, *, eeprom_file: str | None = None
     if name == "stock":
         chk("no ff_state on a stock image", last(s, "ff_magic") in (0.0, None),
             f"ff_magic={last(s, 'ff_magic')}")
+        return out
+    if name == "dtc":
+        seeded = int(last(s, "dtc_seeded", 0))
+        chk("D1 18 00 FF 00 answers a well-formed list",
+            last(s, "dtc_before_well_formed") == 1,
+            f"{last(s, 'dtc_before_count')} DTC(s)")
+        chk("D1 the stored faults are all reported",
+            last(s, "dtc_before_count") == seeded and seeded > 0,
+            ", ".join(f"{int(last(s, f'dtc_before_{i}_code', 0)):#06x}/"
+                      f"{int(last(s, f'dtc_before_{i}_status', 0)):#04x}"
+                      for i in range(seeded)))
+        chk("D2 17 <DTC> reads the status of one of them",
+            last(s, "dtc_status_query_ok") == 1)
+        chk("D3 14 FF 00 pends, commits and answers 54 FF 00",
+            last(s, "clear_positive") == 1,
+            f"{last(s, 'clear_seconds', 0):.2f} wall s")
+        chk("D4 read back after the clear: 58 00",
+            last(s, "dtc_after_well_formed") == 1
+            and last(s, "dtc_after_count") == 0)
+        chk("D5 still empty on a new connection",
+            last(s, "dtc_reconnect_count") == 0
+            and last(s, "connections") == 2,
+            f"connections={last(s, 'connections')}")
+        return out
+    if name == "pid52":
+        # stock answers 01 40 negatively (obd.md 7: [0x122C] bit 0 clear),
+        # which is "0x41-0x60 not supported" and so also "0x52 not advertised"
+        chk("P1 shipped (ff_pid52_enable = 0): 0x52 neither advertised nor answered",
+            last(s, "shipped_0140_bit52") == 0
+            and last(s, "shipped_0152_positive") == 0,
+            f"01 40 positive={last(s, 'shipped_0140_positive')}")
+        chk("P2 the bitmap is per connection: no change before a reconnect",
+            last(s, "same_connection_0140_bit52") == 0,
+            f"(01 52 itself answers at once: "
+            f"{last(s, 'same_connection_0152_positive')})")
+        chk("P3 after a reconnect 01 40 advertises 0x52 and 01 52 answers",
+            last(s, "reconnected_0140_bit52") == 1
+            and last(s, "reconnected_0152_positive") == 1,
+            f"A={last(s, 'reconnected_0152_a')}")
         return out
 
     magic = last(s, "ff_magic")
@@ -371,9 +440,247 @@ def _csum_always_ok(s) -> bool:
 def run_step(step: Step, eeprom_file: str | None) -> None:
     SAMPLES.mkdir(parents=True, exist_ok=True)
     print(f"\n=== {step.name}: {step.why}")
+    if isinstance(step, KwpStep):
+        step.script(step, eeprom_file)
+        return
     rc = med9log.main(step.argv(eeprom_file))
     if rc != 0:
         raise SystemExit(f"{step.name} failed with {rc}")
+
+
+# ---------------------------------------------------------------------------
+# KWP conversations: the fault read-back and the PID 0x52 reconnect (G5)
+# ---------------------------------------------------------------------------
+class Transcript:
+    """The logger's CSV shape for a scripted KWP conversation."""
+
+    def __init__(self, step: Step, notes: list[str]):
+        self.step = step
+        self.t0 = None
+        self.rows: list[tuple[float, str, float, str]] = []
+        self.lines = [f"# session: {step.name} (a scripted KWP conversation, "
+                      "logging/bench_rehearsal.py)",
+                      "# transport: KWP2000 over TP2.0 (in-process virtual bus)",
+                      "# simulated: true",
+                      "# simulated_by: logging/ecu_sim.py -- NOT a recording "
+                      "of an ECU"] + [f"# {n}" for n in notes]
+        import time as _time
+        self._clock = _time.monotonic
+
+    def now(self) -> float:
+        if self.t0 is None:
+            self.t0 = self._clock()
+        return round(self._clock() - self.t0, 4)
+
+    def value(self, name: str, value, unit: str = "-") -> None:
+        self.rows.append((self.now(), name, float(value), unit))
+
+    def exchange(self, kwp, request: bytes, *, expect_negative=False) -> bytes:
+        """Send one request with the logger's client; record both ends."""
+        from med9kwp import NegativeResponse
+        t = self.now()
+        try:
+            answer = kwp.raw(request)
+            text = answer.hex(" ")
+        except NegativeResponse as exc:
+            answer = bytes([0x7F, exc.sid, exc.nrc])
+            text = answer.hex(" ")
+            if not expect_negative:
+                text += "  (unexpected)"
+        self.lines.append(f"# kwp: t={t:.3f} -> {request.hex(' ')}  <- {text}")
+        return answer
+
+    def write(self) -> None:
+        with open(self.step.path, "w", newline="", encoding="utf-8") as fh:
+            for line in self.lines:
+                fh.write(line + "\n")
+            w = csv.writer(fh)
+            w.writerow(["time_s", "var", "value", "unit"])
+            for t, name, value, unit in self.rows:
+                w.writerow([f"{t:.4f}", name, f"{value:g}", unit])
+        print(f"{len(self.rows)} values, {len(self.lines)} header lines -> "
+              f"{self.step.path}")
+
+
+class _Bench:
+    """One simulator on its own in-process bus, and a tester that can reconnect."""
+
+    _n = 0
+
+    def __init__(self, handlers):
+        from ecu_sim import EcuSimulator
+        _Bench._n += 1
+        self.channel = f"rehearsal_{os.getpid()}_{_Bench._n}"
+        self.sim = EcuSimulator.on_virtual_bus(self.channel, handlers=handlers)
+        self.handlers = handlers
+        self._ctx = self.sim.background()
+        self.tp = self.link = None
+
+    def __enter__(self):
+        self._ctx.__enter__()
+        return self
+
+    def connect(self):
+        from med9kwp import KwpClient, Tp20Client, open_link, parse_bus_spec
+        self.disconnect()
+        self.link = open_link(parse_bus_spec(f"virtual:{self.channel}"))
+        self.tp = Tp20Client(self.link, dest=0x01, timeout=3.0)
+        self.tp.connect()
+        return KwpClient(self.tp, timeout=3.0, pending_timeout=10.0)
+
+    def disconnect(self):
+        if self.tp is not None:
+            try:
+                self.tp.disconnect()
+            except Exception:                               # pragma: no cover
+                pass
+            self.link.close()
+            self.tp = self.link = None
+
+    def __exit__(self, *exc):
+        self.disconnect()
+        self._ctx.__exit__(*exc)
+        self.sim.close()
+        if self.sim.error is not None:                      # pragma: no cover
+            raise self.sim.error
+
+
+#: the faults the "car" arrives with in the DTC step.  Codes out of the
+#: firmware's own table at 0x5D9F06 (fault path 1 kind 0 and path 11 kind 2);
+#: what they mean on the car does not matter here, only the round trip.
+REHEARSAL_DTCS = ("P0601", "P1429")
+
+
+def script_dtc(step: Step, eeprom_file: str | None) -> None:
+    """docs/07 section 3.4 step 1: read the stored faults, clear them, read back.
+
+    The patched image with its hooks running and an EEPROM (a copy of the
+    rehearsal's, so B2/B3 are not disturbed: `14` commits EEP_CONF block 24).
+    The two stored faults are SEEDED -- a model of the fault-path manager,
+    `ecu_sim.DtcStore.seed` -- and the erase after a positive `14` is
+    `DtcStore.after_clear`, also a model; every KWP answer is the firmware's
+    handler (`kwp_sid_18_h1` 0x35064, `kwp_sid_17_h1` 0x36024,
+    `kwp_sid_14_h1` 0x35410).
+    """
+    from ecu_sim import (AnimatedRam, DEFAULT_STATICS, Med9Handlers,
+                         parse_read_dtc)
+    tmp = Path(tempfile.mkdtemp(prefix="rehearsal_dtc_"))
+    eep = tmp / "eeprom.bin"
+    if eeprom_file and os.path.exists(eeprom_file):
+        shutil.copyfile(eeprom_file, eep)
+    handlers = Med9Handlers(
+        str(DUMP), patch_dir=str(PATCH), eeprom=str(eep), time_scale=step.scale,
+        seed=0x12345678, dtcs=REHEARSAL_DTCS,
+        ram=AnimatedRam(live_task_set="A", statics=dict(DEFAULT_STATICS)))
+    tr = Transcript(step, [
+        f"sim_patch: {PATCH}",
+        f"modelled: the stored faults {', '.join(REHEARSAL_DTCS)} "
+        "(DtcStore.seed) and the erase after a positive 14 "
+        "(DtcStore.after_clear); the 18/17/14 answers are the firmware's"])
+
+    def read(kwp, tag):
+        answer = tr.exchange(kwp, b"\x18\x00\xff\x00")
+        try:
+            dtcs = parse_read_dtc(answer)
+            tr.value(f"{tag}_well_formed", 1)
+        except ValueError:
+            dtcs = []
+            tr.value(f"{tag}_well_formed", 0)
+        tr.value(f"{tag}_count", len(dtcs))
+        for i, (code, status) in enumerate(dtcs):
+            tr.value(f"{tag}_{i}_code", code)
+            tr.value(f"{tag}_{i}_status", status)
+        return dtcs
+
+    with _Bench(handlers) as bench:
+        kwp = bench.connect()
+        tr.exchange(kwp, b"\x10\x89")
+        before = read(kwp, "dtc_before")
+        tr.value("dtc_seeded", len(REHEARSAL_DTCS))
+        if before:
+            code = before[0][0]
+            answer = tr.exchange(kwp, b"\x17" + code.to_bytes(2, "big"))
+            tr.value("dtc_status_query_ok", int(answer[:1] == b"\x57"
+                                                and answer[2:4] == code.to_bytes(2, "big")))
+        started = tr.now()
+        answer = tr.exchange(kwp, b"\x14\xff\x00")
+        tr.value("clear_positive", int(answer == b"\x54\xff\x00"))
+        tr.value("clear_seconds", tr.now() - started, "s")
+        read(kwp, "dtc_after")
+        # a new connection: the firmware's h2 walk runs, the clear must hold
+        kwp = bench.connect()
+        tr.exchange(kwp, b"\x10\x89")
+        read(kwp, "dtc_reconnect")
+        tr.value("connections", handlers.connections)
+    tr.lines.append(f"# block_24_writes: EEPROM device writes {handlers.eeprom.writes}")
+    tr.write()
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+def script_pid52(step: Step, eeprom_file: str | None) -> None:
+    """G1's OBD PID 0x52: enable it, reconnect, and `01 40` advertises it.
+
+    The support bitmaps are rebuilt by `kwp_service_h2_walk` once per new
+    diagnostic connection (obd.md 10.1, G3), so turning `ff_pid52_enable` on
+    shows only after a reconnect.  Session 4 (`10 86`, after `27 03/04`)
+    reaches the OBD services (obd.md 8 item 4).  The calibration change is
+    written straight into the emulated FFCAL001 -- a stand-in for flashing
+    a calibration with the byte set, labelled in the transcript.
+    """
+    sys.path.insert(0, str(PATCH))
+    import ffcal001                                            # noqa: E402
+    from ecu_sim import (AnimatedRam, DEFAULT_STATICS, FFCAL001_BASE,
+                         Med9Handlers)
+    from med9kwp.kwp import key_level2
+    handlers = Med9Handlers(
+        str(DUMP), patch_dir=str(PATCH), time_scale=step.scale,
+        seed=0x12345678,
+        ram=AnimatedRam(live_task_set="A", statics=dict(DEFAULT_STATICS)))
+    tr = Transcript(step, [
+        f"sim_patch: {PATCH}",
+        "modelled: ff_pid52_enable = 1 written into the emulated FFCAL001 "
+        "(stands in for a calibration flash); the 01 40 / 01 52 answers and "
+        "the bitmap rebuild on reconnect are the firmware's"])
+
+    def obd_session(kwp):
+        tr.exchange(kwp, b"\x10\x89")
+        seed = int.from_bytes(tr.exchange(kwp, b"\x27\x03")[2:6], "big")
+        tr.exchange(kwp, b"\x27\x04" + key_level2(seed).to_bytes(4, "big"))
+        tr.exchange(kwp, b"\x10\x86")
+
+    def probe(kwp, tag):
+        bitmap = tr.exchange(kwp, b"\x01\x40", expect_negative=True)
+        tr.value(f"{tag}_0140_positive", int(bitmap[:2] == b"\x41\x40"))
+        tr.value(f"{tag}_0140_bit52",
+                 int(len(bitmap) >= 5 and bool(bitmap[4] & (0x80 >> ((0x52 - 1) & 7)))))
+        pid = tr.exchange(kwp, b"\x01\x52", expect_negative=True)
+        tr.value(f"{tag}_0152_positive", int(pid[:2] == b"\x41\x52"))
+        if pid[:2] == b"\x41\x52" and len(pid) >= 3:
+            tr.value(f"{tag}_0152_a", pid[2])
+
+    with _Bench(handlers) as bench:
+        kwp = bench.connect()
+        obd_session(kwp)
+        probe(kwp, "shipped")
+        params = ffcal001.load_params(FFCAL_JSON)
+        params["ff_pid52_enable"] = 1
+        handlers.emu.write(FFCAL001_BASE, ffcal001.build(params))
+        tr.lines.append("# step: ff_pid52_enable := 1 in the emulated FFCAL001")
+        probe(kwp, "same_connection")
+        kwp = bench.connect()
+        obd_session(kwp)
+        probe(kwp, "reconnected")
+        tr.value("connections", handlers.connections)
+    tr.write()
+
+
+_insert_after("fault6", KwpStep(
+    "dtc", "docs/07 3.4 step 1: read stored DTCs, clear them, read them back",
+    script_dtc))
+_insert_after("d2_restart", KwpStep(
+    "pid52", "G1/#39: ff_pid52_enable on, reconnect, 01 40 advertises PID 0x52",
+    script_pid52))
+BY_NAME = {s.name: s for s in STEPS}
 
 
 #: the live 10 ms raster activation counter -- the ECU's own clock, 100 per
