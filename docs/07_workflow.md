@@ -483,6 +483,13 @@ prediction rather than an observation. The first write is called **Flash 0**
 issue #27) — Flash 1 first, because it changes **two flash words** (one of them
 on-chip since brief F1, 2026-09-22 — see the note in §3.4) and nothing else.
 
+> **Corrected 2026-09-24 (H4):** the naming in the sentence above predates
+> #26 and is superseded. Now **Flash 0** = the *unmodified* dump re-saved
+> through our tools (#26; item 2 of the list below, §6.4), **Flash 1** =
+> `patches/ff_counter` (#27), and `patches/ff_fuel` is the E0-equivalence
+> flash after both (#32; `docs/08` step 7). The first write of all is Flash 0,
+> then Flash 1 — no patch is "Flash 0".
+
 > **2026-09-24 (G6):** the day-one order across this chapter, `logging/README.md` §8, the #44 reads, the #23 RAM snapshots and the Flash 1 decision table, with the stop list, is [`08_bench_playbook.md`](08_bench_playbook.md) — follow it on the bench day; this chapter stays the procedure it points at.
 
 What the dump *does* now tell us comes from brief **E6**,

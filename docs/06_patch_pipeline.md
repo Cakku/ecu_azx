@@ -393,6 +393,13 @@ a check we do not know about). Roll back by writing the original read.
 >
 > 1. **Read back 0x404000-0x47FFFF** and `bindiff` it. This is the single
 >    measurement that settles #32. Stock bytes there = KESS skipped the array.
+>
+>    *Corrected 2026-09-24 (H4): "Flash 0" in this checklist is the old name
+>    for the first `patches/ff_fuel` write. Flash 0 is now the unmodified dump
+>    (#26), whose on-chip read-back cannot tell "written" from "stock"; the
+>    on-chip question is settled by Flash 1's read-back of 0x432940 (#27) and
+>    then the `ff_fuel` flash (#32) — `docs/08` open question 1, `docs/07`
+>    §3.4. Items 2-3 apply to every write, Flash 0 included.*
 > 2. **Check the halfword at file 0x1E2500 is `5A 5A`.** It is the one
 >    integrity marker the firmware acts on: without it the ECU reboots into
 >    its flash loader instead of starting the application (recoverable, but it

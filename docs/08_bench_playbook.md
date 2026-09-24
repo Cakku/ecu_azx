@@ -27,6 +27,8 @@ definition in `docs/01` §4 Phase 3, `docs/07` §3.4 item 2 and issue #26.
 first `patches/ff_fuel` write: the intro of `docs/07` §3, and item 6 of
 `logging/sessions/flash_crc.json`'s comment. Read those as "ff_fuel's first
 flash".
+*Both corrected in place, dated, 2026-09-24 (H4); `docs/06` §6's read-back
+checklist carried the same old naming and has the same note.*
 
 ## 0. Which ECU, and the stop list
 
