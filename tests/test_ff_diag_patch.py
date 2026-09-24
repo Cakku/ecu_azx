@@ -23,6 +23,7 @@ import sys
 import unittest
 
 from tests import test_ff_fuel_patch as tff
+from tests import test_qspi_eeprom as tq  # E4's #38 end-to-end, re-run at +19
 from tests.common import DUMP, REPO, DumpUnchanged, requires_dump
 
 import measuring_vars as mv  # noqa: E402  (tests.common put tools/ on sys.path)
@@ -594,6 +595,304 @@ class TestPersistence(DiagEmuBase):
                 raw[BLK8_LEN - 2:] = before[BLK8_LEN - 2:]   # the checksum moved
                 self.assertEqual(bytes(raw), bytes(before),
                                  "a stage touched a byte it was not given")
+
+
+# --------------- 6. G7: the E% store off the adaptation channels (#38) -----
+#: `adaptation_restore_all` (F4, re/symbols.csv 0x12E3F8).  Called at the
+#: `mr r11,r1` one word earlier, as every `_savegpr` function here must be
+#: (re/findings/eeprom.md section 10.1).
+ADAP_RESTORE_ALL = 0x12E3F4
+#: the KWP adaptation service (F4, 0x038708; entry `mr r11,r1` at 0x038704).
+#: Request record: +0 sub-function 0x81/0x82/0x83, +1 channel (0x81) or high
+#: byte (0x82), +2 value (0x82), +4 status out (2 = done, 1 = commit queued).
+ADAP_SERVICE = 0x038704
+#: "restore every channel to its default and commit block 8"; its caller is
+#: 0x0D10D0, after the fault-clear state machine 0x035300 (eeprom.md 5, note
+#: of 2026-09-24).  No access check at all, unlike the tester path.
+ADAP_RESET_ALL = 0x038D64
+ADAP_DESCRIPTOR = 0x0A3AD8            # 08 02 | 17 RAM pointers from +4
+ADAP_RAM = (0x7FD062, 12)             # the twelve implemented channel cells
+ADAP_CH1_RAM = 0x7FD06B               # channel 1 = payload +2, clamped 0/0
+#: three access words the service tests channel bit (ch - 1) against; all
+#: 0x00000040 on this dataset, which admits channel 7 only
+ADAP_ACCESS = (0x5CF004, 0x5CF008, 0x5CF00C)
+ADAP_HANDLE = 0x8001D8                # r13 + 0x1E8: the service's 9-byte record
+SVC_REC = 0x807600                    # scratch for the request record
+BLK8_DEV = (0x1C0, 0x1E0)
+BLK8_FLASH_DEFAULT = 0x0B32DC         # file offset: 0xB3238 + table[8].dflt
+NVM_PAGE_BUF = 0x8043C8               # the manager's page buffer (word at file 0xB3190)
+NVM_CSUM_CELLS = 0x7FCC62             # 2 x u16 the device state machines keep
+STACK_LO = 0x7FE000                   # the emulator's stack page (r1 reset below 0x7FEFFC)
+
+
+def _emu_imports():
+    from emu import Med9Emu
+    import emu.qspi_eeprom as q
+    return Med9Emu, q
+
+
+@requires_dump
+@tff.requires_emu
+class TestPersistOffsetOffTheChannels(DumpUnchanged):
+    """G7 (#38): block 8 payload +2..+18 are the 17 adaptation channels.
+
+    Three emulator proofs on the stock dump with the QSPI device model of
+    `emu/qspi_eeprom.py` (re/findings/eeprom.md section 10): the real
+    `adaptation_restore_all` ignores an E% at +19; the real channel reset
+    paths overwrite +2 and never +19; and the whole-SRAM (and whole-device)
+    difference between an E% of 85 and the default 0 at +19 is that byte and
+    the block checksum, nothing else.
+    """
+
+    def boot(self, payload: dict, *, restore: bool = True):
+        Med9Emu, q = _emu_imports()
+        emu = Med9Emu(str(DUMP), r2="app")
+        dev = q.M95160(q.factory_image(str(DUMP), payloads={8: payload}))
+        q.install_eeprom(emu, device=dev)
+        self.assertTrue(q.cold_start(emu), "the queue never reached idle")
+        if restore:
+            res = emu.call(ADAP_RESTORE_ALL, reset=False, max_insns=4_000_000)
+            self.assertTrue(res.ok, res.summary())
+        return emu, dev
+
+    def service(self, emu, sub: int, ch: int = 0, val: int = 0) -> bytes:
+        emu.write(SVC_REC, bytes([sub, ch, val, 0, 0xEE, 0, 0, 0]))
+        res = emu.call(ADAP_SERVICE, args=[SVC_REC], reset=False,
+                       max_insns=4_000_000)
+        self.assertTrue(res.ok, res.summary())
+        return emu.read(SVC_REC, 5)
+
+    def pump_until_done(self, emu) -> None:
+        _M, q = _emu_imports()
+        for _ in range(60):
+            res = emu.call(q.NVM_PUMP_WRAPPER, reset=False, max_insns=4_000_000)
+            self.assertTrue(res.ok, res.summary())
+            if emu.read(ADAP_HANDLE + 8, 1)[0] != 1:
+                break
+        self.assertEqual(emu.read(ADAP_HANDLE + 4, 4), bytes([8, 2, 0x11, 8]),
+                         "block 8, offset 2, 17 bytes: the channel range")
+        self.assertEqual(emu.read(ADAP_HANDLE + 8, 1), b"\x02",
+                         "the stock commit completed")
+
+    def defaults(self) -> bytes:
+        data = m.load_dump(str(DUMP))
+        return bytes(data[BLK8_FLASH_DEFAULT:BLK8_FLASH_DEFAULT + BLK8_LEN - 2])
+
+    # -- the static facts the move rests on --------------------------------
+    def test_the_shipped_offset_is_past_the_channels_and_before_replv(self):
+        import ffcal001
+        cal = ffcal001.load_params(tff.FF_FUEL / "ffcal001.json")
+        self.assertEqual(cal["ff_persist_offset"], PERSIST_OFF)
+        self.assertEqual(cal["ff_persist_block"], 8)
+        self.assertNotIn(PERSIST_OFF, ADAP_CHANNELS)
+        self.assertTrue(2 <= PERSIST_OFF < BLK8_LEN - 3,
+                        "never the stamp, never the manager's ReplV byte +29")
+        self.assertEqual(ffcal001.VERSION, 5, "a default change, no bump")
+
+        data = m.load_dump(str(DUMP))
+        off = m.cpu_to_file(ADAP_DESCRIPTOR)
+        self.assertEqual(bytes(data[off:off + 2]), b"\x08\x02",
+                         "block 8, channel k at index k + 1")
+        self.assertEqual(struct.unpack_from(">I", data, off + 4)[0],
+                         ADAP_CH1_RAM, "PTR[0] is channel 1")
+        loop = m.cpu_to_file(0x12E4B0)
+        self.assertEqual(bytes(data[loop:loop + 4]), bytes.fromhex("2c1f0011"),
+                         "cmpwi r31,0x11: the restore loop stops at channel 17")
+        self.assertEqual(self.defaults()[19:29], bytes(10),
+                         "the flash default record holds 0x00 at +19..+28")
+
+    # -- (b) the restore loop ------------------------------------------------
+    def test_the_restore_loop_ignores_an_e_pct_at_19(self):
+        emu, _ = self.boot({PERSIST_OFF: bytes([85])})
+        self.assertEqual(emu.read(BLK8_MIRROR + PERSIST_OFF, 1), b"\x55",
+                         "the start-up read kept the byte")
+        self.assertEqual(emu.read(ADAP_CH1_RAM, 1), b"\x00",
+                         "channel 1 stays at its default 0")
+        ref, _ = self.boot({})
+        self.assertEqual(emu.read(*ADAP_RAM), ref.read(*ADAP_RAM),
+                         "no channel byte 0x7FD062-0x7FD06D moved")
+        dflt = self.defaults()
+        chan = [2 + i for i in range(17)]
+        ptrs = [struct.unpack_from(">I", m.load_dump(str(DUMP)),
+                                   m.cpu_to_file(ADAP_DESCRIPTOR) + 4 + 4 * i)[0]
+                for i in range(17)]
+        for idx, ptr in zip(chan, ptrs):
+            if ADAP_RAM[0] <= ptr < ADAP_RAM[0] + ADAP_RAM[1]:
+                with self.subTest(payload=idx, ram=hex(ptr)):
+                    self.assertEqual(emu.read(ptr, 1)[0], dflt[idx])
+
+    def test_whole_sram_the_e_pct_at_19_reaches_nothing_but_its_byte(self):
+        """E% 85 vs the default 0 at +19, after the start-up read and the
+        restore loop: the whole SRAM differs in the mirror byte and in the
+        block checksum only."""
+        a, _ = self.boot({PERSIST_OFF: bytes([85])})
+        b, _ = self.boot({})
+        sa = a.read(tff.SRAM_START, tff.SRAM_LEN)
+        sb = b.read(tff.SRAM_START, tff.SRAM_LEN)
+        changed = {tff.SRAM_START + i for i in range(tff.SRAM_LEN) if sa[i] != sb[i]}
+        csum = {BLK8_MIRROR + BLK8_LEN - 2, BLK8_MIRROR + BLK8_LEN - 1}
+        self.assertTrue(changed - csum <= {BLK8_MIRROR + PERSIST_OFF},
+                        sorted(hex(x) for x in changed))
+        self.assertIn(BLK8_MIRROR + PERSIST_OFF, changed)
+
+    def test_the_old_offset_2_is_copied_into_channel_1(self):
+        """Why the default moved: at +2 the restore loop hands the E% to
+        0x7FD06B (harmless here only because its reader clamps to 0/0)."""
+        emu, _ = self.boot({PERSIST_OFF_E4: bytes([85])})
+        self.assertEqual(emu.read(ADAP_CH1_RAM, 1), b"\x55")
+
+    # -- (c) the channel resets ----------------------------------------------
+    def _reset_all(self, off: int):
+        emu, dev = self.boot({off: bytes([85])})
+        res = emu.call(ADAP_RESET_ALL, reset=False, max_insns=4_000_000)
+        self.assertTrue(res.ok, res.summary())
+        self.pump_until_done(emu)
+        return emu, dev
+
+    def _check_device(self, dev, off: int, want: int):
+        dflt = self.defaults()
+        for base in BLK8_DEV:
+            with self.subTest(copy=hex(base), offset=off):
+                raw = bytes(dev.mem[base:base + BLK8_LEN])
+                self.assertTrue(blk8_csum_ok(raw))
+                self.assertEqual(raw[:2], BLK8_STAMP)
+                self.assertEqual(raw[off], want)
+                for i in ADAP_CHANNELS:
+                    if i != off:
+                        self.assertEqual(raw[i], dflt[i], f"channel byte +{i}")
+
+    def test_the_stock_reset_all_zeroes_offset_2_and_spares_19(self):
+        """0x038D64 (no access check): defaults over +2..+18, then commit."""
+        _emu, dev = self._reset_all(PERSIST_OFF)
+        self._check_device(dev, PERSIST_OFF, 85)
+        _emu, dev = self._reset_all(PERSIST_OFF_E4)
+        self._check_device(dev, PERSIST_OFF_E4, 0)       # E85 became E0
+
+    def test_after_the_reset_all_a_power_cut_still_restores_19(self):
+        _emu, dev = self._reset_all(PERSIST_OFF)
+        cold, _ = self.boot_image(bytes(dev.mem))
+        self.assertEqual(cold.read(BLK8_MIRROR + PERSIST_OFF, 1), b"\x55")
+
+    def boot_image(self, image: bytes):
+        Med9Emu, q = _emu_imports()
+        emu = Med9Emu(str(DUMP), r2="app")
+        dev = q.M95160(image)
+        q.install_eeprom(emu, device=dev)
+        self.assertTrue(q.cold_start(emu))
+        return emu, dev
+
+    def test_whole_device_and_sram_after_the_reset_all(self):
+        """E% 85 vs 0 at +19 through the reset-all + commit: the device and
+        the SRAM differ in the E% byte and the checksum of each copy only."""
+        a, da = self._reset_all(PERSIST_OFF)
+        emu_b, db = self.boot({})
+        res = emu_b.call(ADAP_RESET_ALL, reset=False, max_insns=4_000_000)
+        self.assertTrue(res.ok, res.summary())
+        self.pump_until_done(emu_b)
+        dev_changed = {i for i in range(len(da.mem)) if da.mem[i] != db.mem[i]}
+        allowed = set()
+        for base in BLK8_DEV:
+            allowed |= {base + PERSIST_OFF, base + BLK8_LEN - 2, base + BLK8_LEN - 1}
+        self.assertTrue(dev_changed <= allowed, sorted(hex(x) for x in dev_changed))
+        self.assertIn(BLK8_DEV[0] + PERSIST_OFF, dev_changed)
+        sa = a.read(tff.SRAM_START, tff.SRAM_LEN)
+        sb = emu_b.read(tff.SRAM_START, tff.SRAM_LEN)
+        changed = {tff.SRAM_START + i for i in range(tff.SRAM_LEN) if sa[i] != sb[i]}
+        # The device write leaves copies of the block behind: the manager's
+        # page buffer (pointer at file 0xB3190), the per-copy checksum cells
+        # of its device state machines, and the stack of the QSPI transfer.
+        # Each may differ only where the block itself differs.
+        allowed = set()
+        for base in (BLK8_MIRROR, NVM_PAGE_BUF):
+            allowed |= {base + PERSIST_OFF, base + BLK8_LEN - 2, base + BLK8_LEN - 1}
+        allowed |= set(range(NVM_CSUM_CELLS, NVM_CSUM_CELLS + 4))
+        stack = {x for x in changed if STACK_LO <= x < tff.STACK_TOP + 4}
+        self.assertTrue(changed - stack <= allowed,
+                        sorted(hex(x) for x in changed - stack))
+        ra = a.read(BLK8_MIRROR, BLK8_LEN)
+        rb = emu_b.read(BLK8_MIRROR, BLK8_LEN)
+        for x in stack:
+            with self.subTest(stack=hex(x)):
+                i = x - tff.SRAM_START
+                self.assertIn(sa[i], (ra[PERSIST_OFF], ra[-2], ra[-1]))
+                self.assertIn(sb[i], (rb[PERSIST_OFF], rb[-2], rb[-1]))
+
+    def test_a_tester_channel_0_reset_and_commit(self):
+        """KWP service 0x038708: 0x81 channel 0, 0x82, 0x83, pump.
+
+        With this dataset's access words (0x40 = channel 7 only) the reset
+        changes no channel at all, at either offset - the commit still writes
+        the block.  With the words opened in the emulator (a dataset whose
+        tester may reset every channel) +2 is zeroed and +19 survives."""
+        for opened in (False, True):
+            for off, want_opened in ((PERSIST_OFF, 85), (PERSIST_OFF_E4, 0)):
+                with self.subTest(access_open=opened, offset=off):
+                    emu, dev = self.boot({off: bytes([85])})
+                    if opened:
+                        for a in ADAP_ACCESS:
+                            emu.write(a, 0xFFFFFFFF, 4)
+                    self.assertEqual(self.service(emu, 0x81, 0)[4], 2)
+                    self.assertEqual(self.service(emu, 0x82, 0)[4], 2)
+                    self.assertEqual(self.service(emu, 0x83)[4], 1, "queued")
+                    self.pump_until_done(emu)
+                    self.assertEqual(self.service(emu, 0x83)[4], 2, "done")
+                    self._check_device(dev, off, want_opened if opened else 85)
+
+
+class TestPersistenceThroughTheDeviceAt19(tq.TestPersistenceThroughTheDevice):
+    """E4's #38 end-to-end path (tests/test_qspi_eeprom.py) at the shipped
+    G7 offset: stage -> commit -> pump -> status 2 -> both device copies ->
+    power cut -> the patch reads the E% back.  Plus the regression that is
+    the reason for the move: the stock reset-all between the commit and the
+    power cut does not take the E% with it."""
+
+    OFFSET = PERSIST_OFF
+
+    def _commit(self):
+        from emu.models import flexfuel as ffm
+        _M, q = _emu_imports()
+        raw = q.factory_image(str(DUMP), payloads={8: {self.OFFSET: b"\xFF"}})
+        emu, dev = self.boot(raw)
+        for i in range(600):
+            self.tick(emu, ffm.frame(e_pct=85, counter=(i // 10) & 0xFF)
+                      if i % 10 == 0 else None)
+        emu.write(PATCH_RAM + 0x3A, 0, 2)
+        self.tick(emu)
+        for _ in range(40):
+            self.tick(emu)
+            if emu.read(self.syms["ff_nvm_req"] + 8, 1)[0] != 1:
+                break
+        self.tick(emu)
+        st = emu.read(PATCH_RAM, 0x40)
+        self.assertEqual(st[0x32], 3, "persist_state = DONE")
+        return emu, dev, struct.unpack_from(">H", st, 0x30)[0], raw
+
+    def test_the_commit_leaves_every_channel_byte_alone(self):
+        _emu, dev, stored, raw = self._commit()
+        for base in BLK8_DEV:
+            got = bytes(dev.mem[base:base + BLK8_LEN])
+            self.assertEqual(got[self.OFFSET], stored)
+            self.assertEqual(got[2:19], raw[base + 2:base + 19],
+                             "+2..+18 are the adaptation channels")
+
+    def test_a_reset_all_after_the_commit_does_not_lose_the_e_pct(self):
+        emu, dev, stored, _raw = self._commit()
+        res = emu.call(ADAP_RESET_ALL, reset=False, max_insns=4_000_000)
+        self.assertTrue(res.ok, res.summary())
+        _M, q = _emu_imports()
+        for _ in range(60):
+            emu.call(q.NVM_PUMP_WRAPPER, reset=False, max_insns=4_000_000)
+            if emu.read(ADAP_HANDLE + 8, 1)[0] != 1:
+                break
+        self.assertEqual(emu.read(ADAP_HANDLE + 8, 1), b"\x02")
+        self.assertEqual(dev.mem[BLK8_DEV[0] + self.OFFSET], stored)
+
+        cold, _dev2 = self.boot(bytes(dev.mem))
+        self.tick(cold, pump=False)
+        st = cold.read(PATCH_RAM, 0x40)
+        self.assertEqual(struct.unpack_from(">H", st, 0x24)[0], stored * 16,
+                         "e_key: the E% survived the channel reset")
+        self.assertEqual(struct.unpack_from(">H", st, 0x30)[0], stored)
 
 
 if __name__ == "__main__":                                    # pragma: no cover
