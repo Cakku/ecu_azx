@@ -597,7 +597,7 @@ Brief **H3**, issue **#48** (#39 bench prerequisite). Everything below is
 **VERIFIED-STATIC** (disassembly, `tools/blobdis.py`) unless tagged; the
 emulated runs are **VERIFIED-DYNAMIC (emulated)** — the firmware's own code
 under the `emu/` Unicorn harness with the start-up and harness pieces listed in
-§11.6 — and say nothing about a car. The short answer:
+§11.5 — and say nothing about a car. The short answer:
 
 * **A 0x7DF single frame reaches `kwp_service_dispatch` and is answered on
   0x7E8 in internal session 6.** The ISO 15765-2 layer is a complete,
@@ -685,7 +685,69 @@ at 0x15BB8/0x15C0C (`-0x7FA8(r13)` = 0x7F8048) sit in the boot block's own
 time-base seed loop (0x15BEC-0x15C08) and were not executed on this path
 (HYPOTHESIS that they run only under the boot software).
 
-### 11.5 Reproduction
+### 11.5 The simulator route and what in it is the harness
+
+`emu/obd_can.py` (`ObdCanRoute`) runs §11.1-11.2 under Unicorn;
+`logging/ecu_sim.py --obd-can` (`Med9Handlers(obd_can=True)`) puts it on a
+python-can bus and `logging/obd_client.py` is the tester. **The firmware's
+code** does: the ISR body, the range-object dispatch, the ISO 15765-2 parser
+and transmitter, the connection layer (open, 0x7F804B, the 5 s timeout), the
+h2 walk (session 6, the bitmap rebuild), the dispatcher and the handlers, and
+its own start-up — init entry **44** (`can_rx_arm_all` 0x12E570: owner map,
+range objects, `[0x7FB994]`/`[0x7FB998]`) and init entry **281** (0x1344C0:
+transport config 0x2C5F8 → `[0x803E0C]`, connection tables, address config
+0x14493C, …), both return in the emulator (6,844 and 2,171 instructions).
+**The harness** does, and says so in the module docstring:
+
+1. the TouCAN buffers: MB15 is written (CODE 0010, DLC, `id << 5`, data) and
+   IFLAG bit 15 raised only if RX15MSK passes the id; an MB13 CODE 1100 is
+   taken off as a transmitted frame, CODE set to 1000, IFLAG bit 13 raised
+   (an immediate acknowledge). During init entry 44 CANMCR reads return
+   FRZACK = HALT so the freeze handshake of `can_module_start` (0x13B714)
+   does not spin;
+2. the time base: the 44 `mftb` (TBL) words in 0x134000-0x144FFF are
+   rewritten in the emulator's flash copy into `lwz` of the virtual time
+   base's low word (`emu/time_base.py`); nothing on disk changes;
+3. the raster: 0x1427BC + 0x13A5B4 every 2 ms (the body of the set-A 2 ms
+   epilogue 0x424884) and 0x1447C0 + 0x13E650 every 10 ms (the body of
+   `task_10ms_int_epilogue` 0x4328B4), without their OS tails; idle stretches
+   longer than 80 ms are one jump of the time base.
+
+`seed_pid_records` (a MODEL, labelled) makes the 41 stock PID records valid
+for tests that want a realistic bitmap; a cold emulator has them all 0 and
+answers `01 00` with `41 00 00 00 00 00`.
+
+### 11.6 What the bench will see (the rehearsal, VERIFIED-DYNAMIC emulated)
+
+`bench_rehearsal.py --only pid52_obd` (`logging/samples/ff_fuel_sim_pid52_obd.csv`,
+`# simulated: true`), all 41 stock records valid (model):
+
+```
+7DF 02 01 00                 <- 7E8 06 41 00 bf 9f a8 93 00
+7DF 02 01 40                 <- 7E8 06 41 40 fe d0 05 00 00     (switch off = stock)
+7DF 02 01 52                 <- (no answer)
+7DF 04 01 00 20 40           <- 7E8 10 10 41 00 bf 9f a8 93 | 7DF->7E0 FC 30 00 00
+                                7E8 21 20 a0 05 b1 19 40 fe | 7E8 22 d0 05 00 00 00 00 00
+ff_pid52_enable := 1, same connection: 01 40 unchanged
+6 s of silence, new connection:  7E8 06 41 40 fe d0 45 00 00   (bit 0x40 of byte 2 = PID 0x52)
+7DF 02 01 52 at E0 / E85     <- 7E8 03 41 52 00 ... / 7E8 03 41 52 d9 00 00 00 00
+```
+
+The multi-PID request exercises the firmware's first-frame / flow-control /
+consecutive-frame transmit path (§11.1 step 10, §11.2 step 2) end to end.
+
+**Bench check for §8 item 4 (and the precondition of #39's scan-tool check):**
+with a generic scan tool or `logging/obd_client.py --bus <adapter> --pids` on
+the OBD connector, `01 00` on 0x7DF must be answered on 0x7E8 by a single
+frame `06 41 00 …` padded with 0x00, and `3E` on 0x7DF must draw **no** frame
+(session 6 gates it out; in session 4 it would answer). No answer to `01 00`
+at all means the route is not what §11 says (gate byte 0x5CEE6E, the
+gateway, or a different dataset). A read of 0x7F804B (= 0x33) and 0x803D3E
+(= 6) over TP2.0 within 5 s of the scan tool's request would confirm it
+directly, but the TP2.0 connect itself ends the OBD one (§11.1 step 5), so the
+scan-tool behaviour is the check.
+
+### 11.7 Reproduction
 
 ```bash
 ./.venv/bin/python3 tools/blobdis.py data/passat_azx_ori.bin --file-off 0x2000C4 --addr 0x4040C4 --len 0x140
