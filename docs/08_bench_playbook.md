@@ -64,7 +64,7 @@ them has an override.
 | S9 | Flash 1 lands on row **B** or **E** of `patches/ff_counter/test/procedure.md` §4 | no further flash until it is explained | same, §4 |
 | S10 | an image has not run on the software-matching bench spare | it does not go to the car | `docs/01` §3 principle 2; `docs/07` §6.4 row 6 |
 | S11 | more than one `ff_*_enable` would change in one flash | one feature at a time | `docs/01` §3 principle 5; `docs/07` §3.4 item 3 |
-| S12 | **`ff_persist_enable` = 1 in a bench `ff_fuel` image before brief G7 is merged.** It **ships as 1** (`patches/ff_fuel/README.md` FFCAL001 table, +1B). Today the E% store shares block 8 payload +2 with adaptation channel 1 | build the bench image with `ff_persist_enable=0` (`procedure_d2.md` §B4). Read block 8 before any flash (step 3f) | `docs/05` §3.8, note of 2026-09-23; `docs/agent_briefs/README.md` wave-G G2 notes |
+| S12 | **`ff_persist_enable` = 1 in a bench `ff_fuel` image before brief G7 is merged.** It **ships as 1** (`patches/ff_fuel/README.md` FFCAL001 table, +1B). Today the E% store shares block 8 payload +2 with adaptation channel 1 | build the bench image with `ff_persist_enable=0` (`procedure_d2.md` §B4). Read block 8 before any flash (step 3f) | `docs/05` §3.8, notes of 2026-09-23 and the integrator note of 2026-09-24 ("until G7 is merged, `ff_persist_enable` stays 0 on any bench image"; on `integration/wave-G` since e8970e6); brief `docs/agent_briefs/G7_persist_offset_off_channels.md` |
 | S13 | anything is unexplained after a write | roll back with `data/passat_azx_ori.bin`. Never "fix forward" on the car | `docs/07` §6.1; `docs/04` §6 item 8 |
 | S14 | a fix seems to need the ROM check, immobiliser pairing or component protection turned off | find the actual cause instead | `docs/04` §6, closing line |
 
@@ -314,7 +314,7 @@ session ff_fuel: 95 variables, 37 chunks on 0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 
 The full EEPROM image also belongs in the BDM backup before the first write
 (`docs/07` §6.2, S4). This non-destructive read shows what a used car's block 8
 holds. Per `docs/05` §3.8 (note of 2026-09-23), **+2 … +18 are the 17
-adaptation-channel slots**. Record them. G7 picks the new offset from this read.
+adaptation-channel slots**. Record them, and +19 as well: G7 moves the store to that byte (its brief, default 2 → 19).
 
 **Why step 3 comes before any flash:** every row above is a read of the
 **stock** image. After a flash it would no longer be a stock read. Flash 1's
