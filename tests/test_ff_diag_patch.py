@@ -817,6 +817,19 @@ class TestPersistOffsetOffTheChannels(DumpUnchanged):
                 self.assertIn(sa[i], (ra[PERSIST_OFF], ra[-2], ra[-1]))
                 self.assertIn(sb[i], (rb[PERSIST_OFF], rb[-2], rb[-1]))
 
+    def test_a_tester_cannot_read_or_write_channel_1_on_this_dataset(self):
+        """The service refuses 0x81 on every channel whose bit (ch - 1) is
+        clear in all three access words - here all but channel 7 - with 0x33,
+        so the state machine at 0x439780 never reaches 0x82/0x83 for it."""
+        emu, _ = self.boot({PERSIST_OFF_E4: bytes([85])})
+        for ch, want in ((1, 0x33), (10, 0x33), (13, 0x33), (17, 0x31), (18, 0x31)):
+            with self.subTest(channel=ch):
+                rec = self.service(emu, 0x81, ch)
+                self.assertEqual(rec[1], want)
+                self.assertEqual(rec[4], 0, "not done")
+        rec = self.service(emu, 0x81, 7)
+        self.assertEqual((rec[1], rec[4]), (0x80, 2), "channel 7 = 0, signed")
+
     def test_a_tester_channel_0_reset_and_commit(self):
         """KWP service 0x038708: 0x81 channel 0, 0x82, 0x83, pump.
 
